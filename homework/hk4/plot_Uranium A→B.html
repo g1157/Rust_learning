@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+</head>
+
+<body>
+    <div>
+        <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.0/es5/tex-mml-chtml.js"></script>
+        
+
+        <div id="plotly-html-element" class="plotly-graph-div" style="height:100%; width:100%;"></div>
+
+        <script type="module">
+            const graph_div = document.getElementById("plotly-html-element");
+            await Plotly.newPlot(graph_div, {"data":[{"type":"scatter","name":"A nucleus","mode":"lines+markers","x":[0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0,16.0,17.0,18.0,19.0,20.0],"y":[1000.0,950.0,902.5,857.375,814.50625,773.7809375,735.091890625,698.3372960937501,663.4204312890625,630.2494097246094,598.736939238379,568.8000922764601,540.360087662637,513.3420832795052,487.67497911553,463.29123015975347,440.1266686517658,418.1203352191775,397.2143184582186,377.3536025353077,358.4859224085423]},{"type":"scatter","name":"B nucleus","mode":"lines+markers","x":[0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0,16.0,17.0,18.0,19.0,20.0],"y":[0.0,50.0,87.5,115.125,134.96875,148.7003125,157.649296875,162.87403203125,165.2160904296875,165.34389390820314,163.78758561279298,160.96691545215333,157.21353697554568,152.7888339635684,147.89817133482998,142.70228602364048,137.32639032690005,131.86744569410834,126.39997331624555,120.98069457590736,115.65223578749128]}],"layout":{"xaxis":{"title":{"text":"t"},"range":[0.0,20.0],"showline":true,"showgrid":true,"zeroline":true}},"config":{}});
+        </script>
+    </div>
+</body>
+
+</html>
