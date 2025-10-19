@@ -1,0 +1,98 @@
+{
+    "cannon_theta_30" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 30,
+        "v0" : 700,
+        "resistance_type" : "Isothermal",
+        "style" : "r-"
+    },
+    "cannon_theta_35" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 35,
+        "v0" : 700,
+        "resistance_type" : "Isothermal",
+        "style" : "r-"
+    },
+    "cannon_theta_40" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 40,
+        "v0" : 700,
+        "resistance_type" : "Isothermal",
+        "style" : "r-"
+    },
+    "cannon_theta_45" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 45,
+        "v0" : 700,
+        "resistance_type" : "Isothermal",
+        "style" : "r-"
+    },
+    "cannon_theta_50" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 50,
+        "v0" : 700,
+        "resistance_type" : "Isothermal",
+        "style" : "r-"
+    },
+    "cannon_theta_55" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 55,
+        "v0" : 700,
+        "resistance_type" : "Isothermal",
+        "style" : "r-"
+    },
+    "cannon_theta_30_d" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 30,
+        "v0" : 700,
+        "resistance_type" : "Adiabatic",
+        "style" : "b-"
+    },
+    "cannon_theta_35_d" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 35,
+        "v0" : 700,
+        "resistance_type" : "Adiabatic",
+        "style" : "b-"
+    },
+    "cannon_theta_40_d" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 40,
+        "v0" : 700,
+        "resistance_type" : "Adiabatic",
+        "style" : "b-"
+    },
+    "cannon_theta_45_d" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 45,
+        "v0" : 700,
+        "resistance_type" : "Adiabatic",
+        "style" : "b-"
+    },
+    "cannon_theta_50_d" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 50,
+        "v0" : 700,
+        "resistance_type" : "Adiabatic",
+        "style" : "b-"
+    },
+    "cannon_theta_55_d" : {
+        "x0" : 0,
+        "y0" : 0,
+        "theta" : 55,
+        "v0" : 700,
+        "resistance_type" : "Adiabatic",
+        "style" : "b-"
+    }
+}
