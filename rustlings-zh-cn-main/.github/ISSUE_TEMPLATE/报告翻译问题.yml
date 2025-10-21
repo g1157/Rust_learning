@@ -1,0 +1,51 @@
+name: 报告翻译问题
+description: 如果你觉得练习题有错翻、漏翻、翻译不准确等任何问题，欢迎使用此模板提出议题。
+labels: 
+  - tr_problem
+assignees:
+  - SandmeyerX
+body:
+  - type: markdown
+    attributes:
+      value: |
+        * 在提交问题之前请先阅读 [贡献指南](TODO)。
+        * 请检查是否有人已经提交过类似的 [问题](https://github.com/SandmeyerX/rustlings-zh-cn/issues)。
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: 贡献者行为准则
+      description: 该项目有一个行为准则，所有参与者都应理解并遵守。
+      options:
+        - label: 我已阅读并同意 Rustlings-zh-CN 的 [行为准则](https://github.com/SandmeyerX/rustlings-zh-cn/blob/main/.github/CODE_OF_CONDUCT.md)
+          required: true
+
+  - type: textarea
+    attributes:
+      label: 您所指的练习文件/目录在哪?
+      description: |
+        - 这将帮助我们快速定位问题发生的位置
+        - 以下的描述都是合理有用的:
+        - `exercises/foo/` 或 `solutions/foo/` , 例如: `exercises/00_intro/`, 这表示问题发生在文件夹根部或是整个文件夹。
+        - `exercises/foo/bar.rs` 或 `solutions/foo/bar.rs` 内的`rs`文件名，例如: `exercises/00_intro/intro1.rs`, 这表示问题发生在某个文件内。
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 您想更改练习文件/目录的什么部分?
+      description: |
+        - 尽可能多地提供细节, 以帮助我们了解您希望看到的变化。
+        - 为什么要更改它? 这么做的好处是?
+        - 预期的结果或行为是什么?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 附加信息
+      description: |
+        - 有些额外的备注信息?
+        - 在此处添加有关该议题的任何其他信息或屏幕截图等。
+    validations:
+      required: false
