@@ -1,6 +1,6 @@
 // TODO: 修改这个函数中的编译器错误。
 fn fill_vec(vec: Vec<i32>) -> Vec<i32> {
-    let vec = vec;
+    let mut vec = vec;
 
     vec.push(88);
 

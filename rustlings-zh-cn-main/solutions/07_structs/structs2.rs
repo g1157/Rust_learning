@@ -37,7 +37,7 @@ mod tests {
             name: String::from("Hacker in Rust"),
             count: 1,
             // 结构体更新语法(Struct update syntax)
-            ..order_template
+            ..order_template  
         };
 
         assert_eq!(your_order.name, "Hacker in Rust");

@@ -46,6 +46,13 @@ impl State {
     fn process(&mut self, message: Message) {
         // TODO: 创建一个match表达式，
         // 使用上面定义的方法处理不同的消息变体(message variants)。
+        match  message {
+            Message::Resize { width, height } => self.resize(width, height), //传递enum下类顺便写上要传递的参数
+            Message::Move(point) => self.move_position(point),
+            Message::Echo(string) => self.echo(string),
+            Message::ChangeColor(red, green, blue) => self.change_color(red, green, blue),
+            Message::Quit => self.quit(),
+        }
     }
 }
 
