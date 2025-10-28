@@ -27,6 +27,22 @@ fn build_scores_table(results: &str) -> HashMap<&str, TeamScores> {
 
         // TODO: 使用提取出的详细信息来填充比分表。
         // 切记，球队1的进球数将是球队2的失球数。同样，球队2的进球数将是球队1的失球数。
+
+        // scores.insert(team_1_name, {                 //insert 的值需要是 TeamScores 结构体，你用了无效的块表达式。
+        //     scores.get(&team_1_name).goals_scored + team_1_score,  //scores.get(...) 返回 Option<&TeamScores>，不能直接取字段；
+        //     scores.get(&team_1_name).goals_conceded + team_2_score,
+        // });
+        // scores.insert(team_2_name, {
+        //     scores.get(&team_2_name).goals_scored + team_2_score,
+        //     scores.get(&team_2_name).goals_conceded + team_1_score,
+        // });
+        let t1 = scores.entry(team_1_name).or_default(); //若键不存在则插入该值类型的默认值（Default::default()），并返回对值的可变引用；若已存在则直接返回现有值的可变引用
+        t1.goals_scored += team_1_score;
+        t1.goals_conceded += team_2_score;
+
+        let t2 = scores.entry(team_2_name).or_default();
+        t2.goals_scored += team_2_score;      //不能直接拿t1的因为t1等式赋值使用过了
+        t2.goals_conceded += team_1_score;
     }
 
     scores

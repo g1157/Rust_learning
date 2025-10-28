@@ -1,5 +1,5 @@
 // TODO: 在不修改此函数的情况下，修复 `main` 函数中的编译器错误。
-fn is_a_color_word(attempt: &str) -> bool {
+fn is_a_color_word(attempt: String) -> bool {
     attempt == "green" || attempt == "blue" || attempt == "red"
 }
 

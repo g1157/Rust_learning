@@ -3,6 +3,8 @@ mod delicious_snacks {
     // TODO: 在修复以下两条 `use` 语句后将它们添加到作用域。
     // use self::fruits::PEAR as ???;
     // use self::veggies::CUCUMBER as ???;
+    pub use self::fruits::PEAR as fruit;
+    pub use self::veggies::CUCUMBER as veggie; //重导出veggies里面的CUCUBER，隐藏veggies内部结构
 
     mod fruits {
         pub const PEAR: &str = "Pear";

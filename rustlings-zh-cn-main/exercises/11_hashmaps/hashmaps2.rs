@@ -29,7 +29,16 @@ fn fruit_basket(basket: &mut HashMap<Fruit, u32>) {
     for fruit in fruit_kinds {
         // TODO: 如果新水果不在篮子中，则插入它们。
         // 注意，不允许放入任何已经存在的水果类型！
+    //     for (key, _value) in &mut *basket {
+    //         if *key == fruit {
+    //             break;        // 是错误的，只退出了内层循环，依旧覆盖了原有的水果
+    //         }
+    //     }
+    //     basket.insert(fruit, 1); 
+    // 
+        basket.entry(fruit).or_insert(1);    //entry这个太妙了!
     }
+
 }
 
 fn main() {

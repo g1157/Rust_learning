@@ -8,9 +8,14 @@ use std::collections::HashMap;
 fn fruit_basket() -> HashMap<String, u32> {
     // TODO: 声明哈希表。
     // let mut basket =
-
+    let mut basket = HashMap::new();
     // 已经给你准备好了两根香蕉 :)
     basket.insert(String::from("banana"), 2);
+    basket.insert(String::from("apple"), 3);
+    basket.insert(String::from("orange"), 4);
+    basket.insert(String::from("pear"), 5);
+    basket.insert(String::from("watermelon"), 6);
+
 
     // TODO: 在你的水果篮中添加更多的水果。
 
