@@ -1,1 +1,1 @@
-/home/blue/Rust_learning/homework/hk6/target/debug/hk6: /home/blue/Rust_learning/homework/hk6/src/main.rs
+/home/blue/Rust_learning/homework/hk6/target/debug/hk6: /home/blue/Rust_learning/homework/hk6/src/attractor.rs /home/blue/Rust_learning/homework/hk6/src/bifurcation.rs /home/blue/Rust_learning/homework/hk6/src/delta_theta.rs /home/blue/Rust_learning/homework/hk6/src/main.rs /home/blue/Rust_learning/homework/hk6/src/pendulum.rs
