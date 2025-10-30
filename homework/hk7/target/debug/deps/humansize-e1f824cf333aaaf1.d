@@ -1,0 +1,12 @@
+/home/blue/Rust_learning/homework/hk7/target/debug/deps/humansize-e1f824cf333aaaf1.d: /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/lib.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/options/mod.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/options/defaults.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/numeric_traits.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/scales.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/utils.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/allocating.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/formatters.rs
+
+/home/blue/Rust_learning/homework/hk7/target/debug/deps/libhumansize-e1f824cf333aaaf1.rmeta: /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/lib.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/options/mod.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/options/defaults.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/numeric_traits.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/scales.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/utils.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/allocating.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/formatters.rs
+
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/lib.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/options/mod.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/options/defaults.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/numeric_traits.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/scales.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/utils.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/allocating.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/humansize-2.1.3/src/formatters.rs:

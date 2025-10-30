@@ -1,0 +1,8 @@
+[package]
+name = "hk7"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+plotly = "0.8.0"  # 检查最新版本
