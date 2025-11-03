@@ -1,6 +1,7 @@
 
 pub struct DecayData {
     sequence: Vec<DecayItem>,
+    #[allow(dead_code)]
     decay_config: DecayConfig,
     sequence_length: usize,
 }
@@ -55,6 +56,7 @@ impl DecayItem {
         v.iter().map(|item| item.get_t()).collect()
     }
 
+    #[allow(dead_code)]
     pub fn extract_na_nb_t(v: &Vec<DecayItem>) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         (Self::extract_na(v), Self::extract_nb(v), Self::extract_t(v))
     }
@@ -70,12 +72,14 @@ impl DecayData {
             //sequence_length: _length,
         }
     }
+    #[allow(dead_code)]
     pub fn get_decay_config(&self) -> &DecayConfig {
         &self.decay_config
     }
     pub fn get_sequence(&self) -> &Vec<DecayItem> {
         &self.sequence
     }
+    #[allow(dead_code)]
     pub fn get_name(&self) -> &str {
         self.decay_config.get_atom_name()
     }

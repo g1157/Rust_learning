@@ -39,8 +39,8 @@ struct CannonState {
 
 const G: f64 = 9.8;
 const DT: f64 = 0.5;
-const alpha: f64 = 0.5; // 经验值，可调整
-const T: f64 = 300.0; // 当前温度，单位K
+const ALPHA: f64 = 0.5; // 经验值，可调整
+const TEMP_K: f64 = 300.0; // 参考温度，单位K
 
 impl CannonState {
     fn new(cannon: &Cannon) -> Self {
@@ -73,7 +73,7 @@ impl CannonState {
                 (-self.y / h).exp()
             }
         };
-        let B2M = 4e-5 * (T / 300.0).powf(alpha); //参考温度300K
+        let B2M = 4e-5 * (TEMP_K / 300.0).powf(ALPHA); //参考温度300K
         let next_x = self.x + self.vx * DT;
         // let next_vx = self.vx - B2M * v * self.vx * DT;
         let next_vx = self.vx - B2M * v * self.vx * DT * density_factor;
