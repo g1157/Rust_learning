@@ -1,0 +1,11 @@
+/home/blue/Rust_learning/homework/hk7-1/target/debug/deps/rinja_parser-dd13332f5c68fca1.d: /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/lib.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/expr.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/memchr_splitter.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/node.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/target.rs
+
+/home/blue/Rust_learning/homework/hk7-1/target/debug/deps/librinja_parser-dd13332f5c68fca1.rlib: /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/lib.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/expr.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/memchr_splitter.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/node.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/target.rs
+
+/home/blue/Rust_learning/homework/hk7-1/target/debug/deps/librinja_parser-dd13332f5c68fca1.rmeta: /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/lib.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/expr.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/memchr_splitter.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/node.rs /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/target.rs
+
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/lib.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/expr.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/memchr_splitter.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/node.rs:
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rinja_parser-0.3.5/src/target.rs:

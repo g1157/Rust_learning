@@ -1,0 +1,5 @@
+/home/blue/Rust_learning/homework/hk7-1/target/debug/build/serde-3e594e0a3b175442/build_script_build-3e594e0a3b175442.d: /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/build.rs
+
+/home/blue/Rust_learning/homework/hk7-1/target/debug/build/serde-3e594e0a3b175442/build_script_build-3e594e0a3b175442: /home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/build.rs
+
+/home/blue/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/build.rs:

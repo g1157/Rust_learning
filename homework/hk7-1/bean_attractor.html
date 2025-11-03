@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+</head>
+
+<body>
+    <div>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+        <div id="plotly-html-element" class="plotly-graph-div" style="height:100%; width:100%;"></div>
+
+        <script type="module">
+            const graph_div = document.getElementById("plotly-html-element");
+            await Plotly.newPlot(graph_div, {
+  "data": [
+    {
+      "type": "scatter",
+      "name": "Poincaré Section",
+      "mode": "markers",
+      "x": [
+        3.9430703257235473,
+        2.082103479272222,
+        0.4698055878162331,
+        4.345840144378252,
+        2.541946929161985,
+        1.1544937115527327,
+        5.922713093508361,
+        3.247727003723994,
+        1.7096133664245545,
+        0.21773537202273602,
+        4.100351879245769
+      ],
+      "y": [
+        -0.4805514792884466,
+        -0.532344143336934,
+        -0.5141816019952191,
+        -0.6415633734420502,
+        -0.6312493213950708,
+        -0.6427397897390184,
+        -0.6011441570499994,
+        -0.5680598356416705,
+        -0.6090005866926925,
+        -0.580351827393754,
+        -0.7000794728613478
+      ],
+      "marker": {
+        "size": 4,
+        "color": "#ff7f0e"
+      }
+    }
+  ],
+  "layout": {
+    "title": {
+      "text": "Billiard Attractor (Poincaré Section)"
+    },
+    "xaxis": {
+      "title": {
+        "text": "Boundary angle θ (rad)"
+      },
+      "range": [
+        0.0,
+        6.283185307179586
+      ]
+    },
+    "yaxis": {
+      "title": {
+        "text": "sin(χ)"
+      }
+    }
+  },
+  "config": {}
+});
+        </script>
+    </div>
+</body>
+
+</html>

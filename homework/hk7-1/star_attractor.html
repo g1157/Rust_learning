@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+</head>
+
+<body>
+    <div>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+        <div id="plotly-html-element" class="plotly-graph-div" style="height:100%; width:100%;"></div>
+
+        <script type="module">
+            const graph_div = document.getElementById("plotly-html-element");
+            await Plotly.newPlot(graph_div, {
+  "data": [
+    {
+      "type": "scatter",
+      "name": "Poincaré Section",
+      "mode": "markers",
+      "x": [
+        3.8875326050214225,
+        3.5933445350830326,
+        0.5634754049202093,
+        5.8684203589305985,
+        0.4551002525880205,
+        4.797834559468733,
+        5.276837807754395,
+        3.2583252694029277,
+        4.337912908485511,
+        1.2647491813584086,
+        4.684233564229903,
+        5.151602179580877,
+        3.1454651726385117,
+        1.04789527601835,
+        1.4830164705837254,
+        5.51760027426254
+      ],
+      "y": [
+        -0.6242183073926996,
+        -0.7269340531389246,
+        -0.6119555594349306,
+        0.07764427369997101,
+        0.24110783168456654,
+        0.38379051774237544,
+        0.45391413699908517,
+        0.1550075891416585,
+        0.4916668795949116,
+        -0.07095159001891552,
+        0.7431976094383733,
+        0.22170163901995107,
+        -0.6462652427576073,
+        0.4457216133386711,
+        0.49851893700592487,
+        -0.9898698705772248
+      ],
+      "marker": {
+        "size": 4,
+        "color": "#ff7f0e"
+      }
+    }
+  ],
+  "layout": {
+    "title": {
+      "text": "Billiard Attractor (Poincaré Section)"
+    },
+    "xaxis": {
+      "title": {
+        "text": "Boundary angle θ (rad)"
+      },
+      "range": [
+        0.0,
+        6.283185307179586
+      ]
+    },
+    "yaxis": {
+      "title": {
+        "text": "sin(χ)"
+      }
+    }
+  },
+  "config": {}
+});
+        </script>
+    </div>
+</body>
+
+</html>
