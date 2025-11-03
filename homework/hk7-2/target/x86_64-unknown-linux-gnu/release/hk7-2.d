@@ -1,1 +1,0 @@
-/home/blue/Rust_learning/homework/hk7-2/target/x86_64-unknown-linux-gnu/release/hk7-2: /home/blue/Rust_learning/homework/hk7-2/src/main.rs /home/blue/Rust_learning/homework/hk7-2/src/starfield-shader.glsl

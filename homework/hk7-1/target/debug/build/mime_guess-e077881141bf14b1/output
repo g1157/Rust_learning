@@ -1,1 +1,0 @@
-cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/home/blue/Rust_learning/homework/hk7-1/target/debug/build/mime_guess-e077881141bf14b1/out/mime_types_generated.rs

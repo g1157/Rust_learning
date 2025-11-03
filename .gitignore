@@ -1,1 +1,4 @@
 */.git/
+# Rust build artifacts
+target/
+**/target/
