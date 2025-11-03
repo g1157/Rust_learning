@@ -1,1 +1,0 @@
-/home/blue/Rust_learning/homework/hk7/target/debug/hk7: /home/blue/Rust_learning/homework/hk7/src/main.rs /home/blue/Rust_learning/homework/hk7/src/plotting.rs /home/blue/Rust_learning/homework/hk7/src/simulation.rs
