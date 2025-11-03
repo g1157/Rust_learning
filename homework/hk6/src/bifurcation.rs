@@ -183,7 +183,7 @@ fn plot_bifurcation(
         .x_desc("F_D")
         .y_desc("theta (rad)")
         .label_style(("sans-serif", 22).into_font())
-        .axis_style(&BLACK.mix(0.7))
+        .axis_style(BLACK.mix(0.7))
         .draw()?;
 
     chart.draw_series(points.iter().map(|(f_drive, theta)| {

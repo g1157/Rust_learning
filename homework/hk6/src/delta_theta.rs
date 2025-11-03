@@ -71,12 +71,12 @@ fn plot_delta_theta(data: &[(f64, f64)], total_time: f64) -> Result<(), Box<dyn 
             &RED,
         ))?
         .label("|Δθ|")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RED));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED));
 
     chart
         .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .border_style(&BLACK)
+        .background_style(WHITE.mix(0.8))
+        .border_style(BLACK)
         .label_font(("sans-serif", 20).into_font())
         .draw()?;
 

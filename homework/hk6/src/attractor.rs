@@ -87,7 +87,7 @@ fn plot_attractor(
         .configure_mesh()
         .x_desc("theta (rad)")
         .y_desc("omega (rad/s)")
-        .axis_style(&BLACK.mix(0.7))
+        .axis_style(BLACK.mix(0.7))
         .label_style(("sans-serif", 22).into_font())
         .draw()?;
 

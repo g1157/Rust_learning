@@ -180,10 +180,9 @@ fn simulate(params: &SimulationParams) -> SimulationResult {
                 pos = next_pos;
                 time += remaining;
                 remaining = 0.0;
-            } else {
-                if let Some((collision_point, time_fraction)) =
-                    find_collision(pos, vel, remaining, &params.boundary)
-                {
+            } else if let Some((collision_point, time_fraction)) =
+                find_collision(pos, vel, remaining, &params.boundary)
+            {
                     let normal = boundary_normal(&params.boundary, collision_point);
                     let incoming_speed = (vel.0.powi(2) + vel.1.powi(2)).sqrt();
 
@@ -209,11 +208,10 @@ fn simulate(params: &SimulationParams) -> SimulationResult {
                     if step_collisions >= MAX_STEP_COLLISIONS {
                         break;
                     }
-                } else {
-                    pos = next_pos;
-                    time += remaining;
-                    remaining = 0.0;
-                }
+            } else {
+                pos = next_pos;
+                time += remaining;
+                remaining = 0.0;
             }
         }
 
