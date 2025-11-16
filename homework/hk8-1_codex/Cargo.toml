@@ -1,0 +1,9 @@
+[package]
+name = "hk8-1_codex"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+plotly = "0.9"

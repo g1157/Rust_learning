@@ -1,0 +1,1373 @@
+//! UI 模块
+//!
+//! 所有用户界面和渲染组件。
+//!
+//! ## 功能
+//! - 玩家 HUD（生命、分数、护盾、生存时间）
+//! - 模式选择界面
+//! - 等待/游戏结束画面
+//! - 暂停菜单
+//! - 对战模式：回合结束、连击显示
+//! - 渐变背景和阴影面板
+//! - 文本居中辅助函数
+
+use macroquad::prelude::*;
+use macroquad::text::Font;
+
+use crate::bullet::WeaponType;
+use crate::duel::DuelState;
+use crate::player::Player;
+use crate::{GameMode, GameSettings, PauseSelection, SettingOption};
+
+pub enum HudMode {
+    Waiting,
+    Active { time: f64 },
+}
+
+pub fn draw_players_hud(players: &[Player], mode: HudMode) {
+    for (idx, player) in players.iter().enumerate() {
+        let (status, timer, hud_time) = match mode {
+            HudMode::Waiting => ("READY".to_string(), 0.0, None),
+            HudMode::Active { time } => {
+                let timer = player.survival_time(time);
+                let status = if player.is_invulnerable(time) {
+                    format!("SAFE {:.1}s", player.invulnerability_remaining(time))
+                } else if player.alive {
+                    "ALIVE".to_string()
+                } else {
+                    "DOWN".to_string()
+                };
+                (status, timer, Some(time))
+            }
+        };
+
+        let shield_text = if let Some(time) = hud_time {
+            if player.shield_active(time) {
+                format!("Shield {:.1}s", player.shield_remaining(time))
+            } else {
+                "Shield --".to_string()
+            }
+        } else {
+            "Shield --".to_string()
+        };
+
+        let weapon_text = match player.weapon_type {
+            WeaponType::Normal => "Normal",
+            WeaponType::Spread => "Spread",
+            WeaponType::Penetrating => "Penetrating",
+        };
+
+        let text = format!(
+            "{} | Lives: {} | {} | Weapon: {} | Score: {} | Survival: {:.1}s | Status: {}",
+            player.label,
+            player.lives,
+            shield_text,
+            weapon_text,
+            player.score.value(),
+            timer,
+            status
+        );
+        let y = 32. + idx as f32 * 36.;
+        let panel_width = screen_width() * 0.55;
+        let panel_color = Color::new(1.0, 1.0, 1.0, 0.35);
+        draw_rectangle(12., y - 26., panel_width, 34., panel_color);
+        draw_rectangle_lines(
+            12.,
+            y - 26.,
+            panel_width,
+            34.,
+            1.5,
+            Color::new(1.0, 1.0, 1.0, 0.45),
+        );
+        draw_text_ex(
+            &text,
+            20.,
+            y,
+            TextParams {
+                font_size: 24,
+                color: player.color,
+                ..Default::default()
+            },
+        );
+    }
+}
+
+pub fn draw_waiting_screen(message: &str) {
+    draw_gradient_background(
+        Color::new(0.9, 0.92, 0.97, 1.0),
+        Color::new(0.84, 0.86, 0.93, 1.0),
+    );
+    let panel_width = screen_width() * 0.6;
+    let panel_height = 160.;
+    let panel_x = screen_width() / 2. - panel_width / 2.;
+    let panel_y = screen_height() / 2. - panel_height / 2.;
+    draw_shadow_panel(
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        Color::new(1.0, 1.0, 1.0, 0.9),
+    );
+
+    let font_size = 32.;
+    draw_text_centered(
+        message,
+        screen_height() / 2. + font_size / 4.,
+        font_size as u16,
+        Color::new(0.25, 0.3, 0.35, 1.0),
+    );
+}
+
+pub fn draw_game_over_message(message: &str) {
+    draw_gradient_background(
+        Color::new(0.91, 0.93, 0.99, 1.0),
+        Color::new(0.82, 0.86, 0.94, 1.0),
+    );
+    let banner_width = screen_width() * 0.6;
+    let banner_height = 130.;
+    let banner_x = screen_width() / 2. - banner_width / 2.;
+    let banner_y = 280.;
+
+    // 使用渐变色背景面板
+    draw_shadow_panel(
+        banner_x,
+        banner_y,
+        banner_width,
+        banner_height,
+        Color::new(0.95, 0.97, 1.0, 0.98),
+    );
+
+    // 添加彩色边框
+    draw_rectangle_lines(
+        banner_x,
+        banner_y,
+        banner_width,
+        banner_height,
+        3.0,
+        Color::new(0.2, 0.5, 0.9, 0.8),
+    );
+
+    let font_size = 36.;
+    // 使用醒目的蓝色
+    draw_text_centered(
+        message,
+        banner_y + banner_height / 2. + font_size / 4.,
+        font_size as u16,
+        Color::new(0.1, 0.3, 0.7, 1.0),
+    );
+}
+
+pub fn draw_survival_record(record: u32) {
+    let text = format!("Survival record: {}", record);
+    let width = measure_text(&text, None, 22, 1.0).width;
+    draw_rectangle(
+        screen_width() - width - 80.,
+        24.,
+        width + 48.,
+        34.,
+        Color::new(1.0, 1.0, 1.0, 0.4),
+    );
+    draw_text(
+        &text,
+        screen_width() - width - 60.,
+        48.,
+        22.,
+        Color::new(0.3, 0.35, 0.45, 1.0),
+    );
+}
+
+pub fn draw_center_scores(players: &[Player], time: f64, survival_record: u32) {
+    let mut combined_scores: Vec<_> = players
+        .iter()
+        .map(|player| (player.label, player.score.value(), player.color))
+        .collect();
+    combined_scores.sort_by(|a, b| b.1.cmp(&a.1));
+    let best_score = combined_scores.first().map(|entry| entry.1).unwrap_or(0);
+
+    let line_height = 38.;
+    let panel_padding = 50.;
+    let panel_width = screen_width() * 0.75;
+    let panel_height = panel_padding * 2. + line_height * combined_scores.len() as f32 + 60.;
+    let panel_x = screen_width() / 2. - panel_width / 2.;
+    let panel_y = screen_height() / 2. - panel_height / 2. + 60.;
+
+    // 使用更亮的面板
+    draw_shadow_panel(
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        Color::new(0.98, 0.99, 1.0, 0.95),
+    );
+
+    // 添加渐变边框
+    draw_rectangle_lines(
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        4.0,
+        Color::new(0.3, 0.6, 0.95, 0.9),
+    );
+
+    // 标题使用醒目的颜色
+    let header = format!(
+        "Highest score this run: {}   |   Survival record: {}",
+        best_score, survival_record
+    );
+    let header_width = measure_text(&header, None, 32, 1.0).width;
+
+    // 标题阴影效果
+    draw_text(
+        &header,
+        screen_width() / 2. - header_width / 2. + 2.,
+        panel_y + 52.,
+        32.,
+        Color::new(0.0, 0.0, 0.0, 0.15),
+    );
+    draw_text(
+        &header,
+        screen_width() / 2. - header_width / 2.,
+        panel_y + 50.,
+        32.,
+        Color::new(0.15, 0.35, 0.65, 1.0),
+    );
+
+    let base_y = panel_y + 100.;
+    for (idx, player) in combined_scores.iter().enumerate() {
+        let text = format!(
+            "{}  |  Score: {}  |  Survival: {:.1}s",
+            player.0,
+            player.1,
+            players
+                .iter()
+                .find(|p| p.label == player.0)
+                .map(|p| p.survival_time(time))
+                .unwrap_or(0.0)
+        );
+        let text_width = measure_text(&text, None, 32, 1.0).width;
+        let y = base_y + idx as f32 * line_height;
+
+        // 添加文字阴影
+        draw_text_ex(
+            &text,
+            screen_width() / 2. - text_width / 2. + 2.,
+            y + 2.,
+            TextParams {
+                font_size: 32,
+                color: Color::new(0.0, 0.0, 0.0, 0.2),
+                ..Default::default()
+            },
+        );
+
+        // 使用更鲜艳的玩家颜色
+        let bright_color = Color::new(player.2.r * 0.8, player.2.g * 0.8, player.2.b * 0.8, 1.0);
+
+        draw_text_ex(
+            &text,
+            screen_width() / 2. - text_width / 2.,
+            y,
+            TextParams {
+                font_size: 32,
+                color: bright_color,
+                ..Default::default()
+            },
+        );
+    }
+}
+
+pub fn draw_mode_selection(selection: GameMode, settings: &GameSettings, font: Option<&Font>) {
+    draw_gradient_background(
+        Color::new(0.91, 0.93, 0.99, 1.0),
+        Color::new(0.8, 0.86, 0.95, 1.0),
+    );
+
+    let title = "Choose Your Adventure";
+    let subtitle = "Press [M] later to revisit this screen";
+    let title_size = 48;
+    let subtitle_size = 24;
+
+    // 使用自定义字体绘制标题
+    if let Some(f) = font {
+        let title_dims = measure_text(title, Some(f), title_size, 1.0);
+        draw_text_ex(
+            title,
+            screen_width() / 2. - title_dims.width / 2.,
+            70.,
+            TextParams {
+                font: Some(f),
+                font_size: title_size,
+                color: BLACK,
+                ..Default::default()
+            },
+        );
+        let subtitle_dims = measure_text(subtitle, Some(f), subtitle_size, 1.0);
+        draw_text_ex(
+            subtitle,
+            screen_width() / 2. - subtitle_dims.width / 2.,
+            115.,
+            TextParams {
+                font: Some(f),
+                font_size: subtitle_size,
+                color: DARKGRAY,
+                ..Default::default()
+            },
+        );
+    } else {
+        let title_width = measure_text(title, None, title_size, 1.0).width;
+        draw_text(
+            title,
+            screen_width() / 2. - title_width / 2.,
+            70.,
+            title_size as f32,
+            BLACK,
+        );
+        let subtitle_width = measure_text(subtitle, None, subtitle_size, 1.0).width;
+        draw_text(
+            subtitle,
+            screen_width() / 2. - subtitle_width / 2.,
+            115.,
+            subtitle_size as f32,
+            DARKGRAY,
+        );
+    }
+
+    // 3个卡片纵向排列
+    let card_width = screen_width() * 0.65;
+    let card_height = 160.;
+    let spacing = 24.;
+    let total_height = card_height * 3. + spacing * 2.;
+    let start_y = (screen_height() - total_height) / 2. + 20.;
+    let card_x = screen_width() / 2. - card_width / 2.;
+
+    // Survival 卡片（上）
+    draw_mode_card(ModeCardParams {
+        x: card_x,
+        y: start_y,
+        width: card_width,
+        height: card_height,
+        title: "Survival",
+        desc: "Team up to clear every asteroid and push your score higher.",
+        detail: "Best for co-op pilots. Supports two players on one keyboard.",
+        active: matches!(selection, GameMode::Survival),
+        accent: BLUE,
+        footer: "[Enter] Start",
+        font,
+    });
+
+    // Duel 卡片（中）
+    draw_mode_card(ModeCardParams {
+        x: card_x,
+        y: start_y + card_height + spacing,
+        width: card_width,
+        height: card_height,
+        title: "Duel",
+        desc: "Face each other in timed shoot-outs with streak bonuses (coming soon).",
+        detail: "Planned: custom arenas, dramatic cameras, and online matchmaking.",
+        active: matches!(selection, GameMode::Duel),
+        accent: RED,
+        footer: "In progress",
+        font,
+    });
+
+    // Settings 卡片（下）
+    let settings_summary = format!(
+        "Lives: {} | Ship: {:.1}x | Asteroids: {:.1}x",
+        settings.starting_lives, settings.ship_speed_multiplier, settings.asteroid_speed_multiplier,
+    );
+    draw_mode_card(ModeCardParams {
+        x: card_x,
+        y: start_y + (card_height + spacing) * 2.,
+        width: card_width,
+        height: card_height,
+        title: "Settings",
+        desc: &settings_summary,
+        detail: "Configure game difficulty, effects, and features.",
+        active: matches!(selection, GameMode::Settings),
+        accent: Color::new(0.3, 0.7, 0.3, 1.0), // 绿色
+        footer: "[Enter] Configure",
+        font,
+    });
+
+    // 底部提示使用自定义字体
+    let hint = "[Up/Down W/S] Select  |  [Enter Space] Confirm";
+    if let Some(f) = font {
+        let hint_dims = measure_text(hint, Some(f), 26, 1.0);
+        draw_text_ex(
+            hint,
+            screen_width() / 2. - hint_dims.width / 2.,
+            screen_height() - 50.,
+            TextParams {
+                font: Some(f),
+                font_size: 26,
+                color: DARKGRAY,
+                ..Default::default()
+            },
+        );
+    } else {
+        let hint_width = measure_text(hint, None, 26, 1.0).width;
+        draw_text(
+            hint,
+            screen_width() / 2. - hint_width / 2.,
+            screen_height() - 50.,
+            26.,
+            DARKGRAY,
+        );
+    }
+}
+
+struct ModeCardParams<'a> {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    title: &'a str,
+    desc: &'a str,
+    detail: &'a str,
+    active: bool,
+    accent: Color,
+    footer: &'a str,
+    font: Option<&'a Font>,
+}
+
+fn draw_mode_card(params: ModeCardParams) {
+    let base = if params.active {
+        Color::new(1.0, 1.0, 1.0, 0.98)
+    } else {
+        Color::new(0.94, 0.94, 0.94, 0.95)
+    };
+    let border = if params.active { 4.0 } else { 2.0 };
+
+    draw_shadow_panel(params.x, params.y, params.width, params.height, base);
+    draw_rectangle_lines(
+        params.x,
+        params.y,
+        params.width,
+        params.height,
+        border,
+        params.accent,
+    );
+
+    let icon_x = params.x + params.width * 0.2;
+    let icon_y = params.y + 70.;
+    draw_circle(
+        icon_x,
+        icon_y,
+        28.,
+        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.15),
+    );
+    draw_circle(icon_x, icon_y, 20., params.accent);
+    draw_line(
+        icon_x - 32.,
+        icon_y,
+        icon_x + 32.,
+        icon_y,
+        5.,
+        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.5),
+    );
+    draw_circle(
+        icon_x + 60.,
+        icon_y - 12.,
+        12.,
+        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.3),
+    );
+
+    draw_text_ex(
+        params.title,
+        params.x + 24.,
+        params.y + 40.,
+        TextParams {
+            font: params.font,
+            font_size: 32, // 增大从 28 到 32
+            color: params.accent,
+            ..Default::default()
+        },
+    );
+
+    let tag_width = if let Some(f) = params.font {
+        measure_text(params.footer, Some(f), 20, 1.0).width + 24.
+    } else {
+        measure_text(params.footer, None, 20, 1.0).width + 24.
+    };
+
+    draw_rectangle(
+        params.x + params.width - tag_width - 24.,
+        params.y + 18.,
+        tag_width,
+        30.,
+        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.15),
+    );
+    draw_text_ex(
+        params.footer,
+        params.x + params.width - tag_width - 12.,
+        params.y + 39.,
+        TextParams {
+            font: params.font,
+            font_size: 20, // 增大从 18 到 20
+            color: params.accent,
+            ..Default::default()
+        },
+    );
+
+    // 绘制描述（支持自动换行）
+    draw_wrapped_text(
+        params.desc,
+        params.x + 24.,
+        params.y + 85.,
+        params.width - 48.,
+        22, // 增大从 18 到 22
+        DARKGRAY,
+        params.font,
+    );
+
+    // Detail 也支持换行
+    draw_wrapped_text(
+        params.detail,
+        params.x + 24.,
+        params.y + params.height - 42.,
+        params.width - 48.,
+        19, // 增大从 16 到 19
+        GRAY,
+        params.font,
+    );
+}
+
+/// 绘制自动换行文本
+fn draw_wrapped_text(
+    text: &str,
+    x: f32,
+    y: f32,
+    max_width: f32,
+    font_size: u16,
+    color: Color,
+    font: Option<&Font>,
+) {
+    let words: Vec<&str> = text.split(' ').collect();
+    let mut lines: Vec<String> = Vec::new();
+    let mut current_line = String::new();
+
+    for word in words {
+        let test_line = if current_line.is_empty() {
+            word.to_string()
+        } else {
+            format!("{} {}", current_line, word)
+        };
+
+        let width = if let Some(f) = font {
+            measure_text(&test_line, Some(f), font_size, 1.0).width
+        } else {
+            measure_text(&test_line, None, font_size, 1.0).width
+        };
+
+        if width <= max_width {
+            current_line = test_line;
+        } else {
+            if !current_line.is_empty() {
+                lines.push(current_line);
+            }
+            current_line = word.to_string();
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    let line_height = font_size as f32 + 4.0; // 减小行距从 6.0 到 4.0
+    for (i, line) in lines.iter().enumerate() {
+        draw_text_ex(
+            line,
+            x,
+            y + i as f32 * line_height,
+            TextParams {
+                font,
+                font_size,
+                color,
+                ..Default::default()
+            },
+        );
+    }
+}
+
+pub fn draw_pause_menu(selection: PauseSelection) {
+    draw_rectangle(
+        0.,
+        0.,
+        screen_width(),
+        screen_height(),
+        Color::new(0.0, 0.0, 0.0, 0.55),
+    );
+
+    let panel_width = screen_width() * 0.55;
+    let panel_height = 480.;
+    let x = screen_width() / 2. - panel_width / 2.;
+    let y = screen_height() / 2. - panel_height / 2.;
+    draw_shadow_panel(
+        x,
+        y,
+        panel_width,
+        panel_height,
+        Color::new(0.12, 0.14, 0.2, 0.95),
+    );
+
+    let title = "Paused";
+    draw_text_ex(
+        title,
+        screen_width() / 2. - measure_text(title, None, 60, 1.0).width / 2.,
+        y + 88.,
+        TextParams {
+            font_size: 60,
+            color: WHITE,
+            ..Default::default()
+        },
+    );
+
+    draw_pause_option(
+        screen_height() / 2. - 50.,
+        "Resume game",
+        "Return to the current run.",
+        matches!(selection, PauseSelection::Resume),
+    );
+    draw_pause_option(
+        screen_height() / 2. + 60.,
+        "Back to mode select",
+        "Abandon this run and choose another mode.",
+        matches!(selection, PauseSelection::ModeSelect),
+    );
+
+    let hint = "[Enter] confirm  ·  [Esc] resume";
+    let hint_width = measure_text(hint, None, 24, 1.0).width;
+    draw_text(
+        hint,
+        screen_width() / 2. - hint_width / 2.,
+        y + panel_height - 24.,
+        24.,
+        LIGHTGRAY,
+    );
+}
+
+fn draw_pause_option(y: f32, title: &str, desc: &str, active: bool) {
+    let width = 420.;
+    let x = screen_width() / 2. - width / 2.;
+    let color = if active {
+        Color::new(0.4, 0.7, 1.0, 1.0)
+    } else {
+        LIGHTGRAY
+    };
+    draw_rectangle(
+        x,
+        y,
+        width,
+        60.,
+        if active {
+            Color::new(1.0, 1.0, 1.0, 0.15)
+        } else {
+            Color::new(1.0, 1.0, 1.0, 0.08)
+        },
+    );
+    draw_rectangle_lines(x, y, width, 60., if active { 3.0 } else { 1.5 }, color);
+    draw_text_ex(
+        title,
+        x + 16.,
+        y + 28.,
+        TextParams {
+            font_size: 28,
+            color,
+            ..Default::default()
+        },
+    );
+    draw_text_ex(
+        desc,
+        x + 16.,
+        y + 48.,
+        TextParams {
+            font_size: 20,
+            color: Color::new(0.8, 0.85, 0.95, 1.0),
+            ..Default::default()
+        },
+    );
+}
+
+pub fn draw_pause_hint() {
+    let text = "Press [Esc] to pause";
+    let padding = 14.;
+    let width = measure_text(text, None, 22, 1.0).width + padding * 2.;
+    let x = screen_width() - width - 20.;
+    let y = screen_height() - 60.;
+    draw_rectangle(x, y, width, 36., Color::new(1.0, 1.0, 1.0, 0.5));
+    draw_text(
+        text,
+        x + padding,
+        y + 24.,
+        22.,
+        Color::new(0.2, 0.25, 0.35, 1.0),
+    );
+}
+
+pub fn draw_victory_pause_overlay(remaining: f64) {
+    draw_rectangle(
+        0.,
+        0.,
+        screen_width(),
+        screen_height(),
+        Color::new(0.0, 0.0, 0.0, 0.35),
+    );
+    let panel_width = screen_width() * 0.4;
+    let panel_height = 150.;
+    let x = screen_width() / 2. - panel_width / 2.;
+    let y = screen_height() / 2. - panel_height / 2.;
+    draw_shadow_panel(
+        x,
+        y,
+        panel_width,
+        panel_height,
+        Color::new(1.0, 1.0, 1.0, 0.92),
+    );
+
+    let title = "Wave cleared!";
+    let title_width = measure_text(title, None, 36, 1.0).width;
+    draw_text(
+        title,
+        screen_width() / 2. - title_width / 2.,
+        y + 60.,
+        36.,
+        Color::new(0.2, 0.35, 0.4, 1.0),
+    );
+    let subtitle = format!("Next screen in {:.1}s", remaining);
+    let subtitle_width = measure_text(&subtitle, None, 22, 1.0).width;
+    draw_text(
+        &subtitle,
+        screen_width() / 2. - subtitle_width / 2.,
+        y + 100.,
+        22.,
+        Color::new(0.3, 0.4, 0.5, 1.0),
+    );
+}
+
+pub fn draw_gradient_background(top: Color, bottom: Color) {
+    let steps = 32;
+    let slice = screen_height() / steps as f32;
+    for i in 0..steps {
+        let t = i as f32 / steps as f32;
+        let color = Color::new(
+            lerp(top.r, bottom.r, t),
+            lerp(top.g, bottom.g, t),
+            lerp(top.b, bottom.b, t),
+            1.0,
+        );
+        draw_rectangle(0., i as f32 * slice, screen_width(), slice + 1., color);
+    }
+}
+
+pub fn draw_shadow_panel(x: f32, y: f32, width: f32, height: f32, color: Color) {
+    draw_rectangle(
+        x + 6.,
+        y + 8.,
+        width,
+        height,
+        Color::new(0.0, 0.0, 0.0, 0.08),
+    );
+    draw_rectangle(x, y, width, height, color);
+}
+
+/// 在屏幕水平居中绘制文本
+fn draw_text_centered(text: &str, y: f32, font_size: u16, color: Color) {
+    let width = measure_text(text, None, font_size, 1.0).width;
+    draw_text(
+        text,
+        screen_width() / 2. - width / 2.,
+        y,
+        font_size as f32,
+        color,
+    );
+}
+
+/// 绘制 Duel 回合结束界面
+pub fn draw_round_end(winner_idx: usize, duel_state: &DuelState) {
+    // 半透明黑色背景
+    draw_rectangle(
+        0.,
+        0.,
+        screen_width(),
+        screen_height(),
+        Color::new(0.0, 0.0, 0.0, 0.5),
+    );
+
+    // 主面板
+    let panel_width = screen_width() * 0.5;
+    let panel_height = 280.;
+    let x = screen_width() / 2. - panel_width / 2.;
+    let y = screen_height() / 2. - panel_height / 2.;
+    draw_shadow_panel(
+        x,
+        y,
+        panel_width,
+        panel_height,
+        Color::new(1.0, 1.0, 1.0, 0.95),
+    );
+
+    // 标题
+    let title = format!(
+        "Player {} wins Round {}!",
+        winner_idx + 1,
+        duel_state.current_round
+    );
+    draw_text_centered(&title, y + 60., 36, Color::new(0.2, 0.35, 0.4, 1.0));
+
+    // 回合比分
+    let score_text = format!(
+        "Score: {} - {}",
+        duel_state.round_wins[0], duel_state.round_wins[1]
+    );
+    draw_text_centered(&score_text, y + 110., 28, Color::new(0.3, 0.4, 0.5, 1.0));
+
+    // 赛制信息
+    let rounds_to_win = duel_state.round_mode.rounds_to_win();
+    let mode_text = format!("First to {} rounds", rounds_to_win);
+    draw_text_centered(&mode_text, y + 150., 20, Color::new(0.4, 0.5, 0.6, 1.0));
+
+    // 提示
+    let hint = "Press [Space] or [Enter] to continue";
+    draw_text_centered(hint, y + 200., 18, Color::new(0.5, 0.6, 0.7, 1.0));
+}
+
+/// 绘制连击状态（仅在 Duel 模式下显示）
+pub fn draw_killstreak(players: &[Player]) {
+    for (idx, player) in players.iter().enumerate() {
+        if player.killstreak < 2 {
+            continue; // 只显示 2 连击以上
+        }
+
+        // 根据玩家索引决定显示位置（左右两侧）
+        let x = if idx == 0 {
+            screen_width() * 0.15
+        } else {
+            screen_width() * 0.85
+        };
+        let y = screen_height() * 0.3;
+
+        // 连击文本和颜色
+        let (text, color) = if let Some(level) = player.killstreak_level() {
+            (level, Color::new(1.0, 0.6, 0.1, 1.0))
+        } else {
+            continue;
+        };
+
+        // 绘制连击提示
+        let streak_count = format!("{}x", player.killstreak);
+        let streak_width = measure_text(&streak_count, None, 48, 1.0).width;
+        let text_width = measure_text(text, None, 28, 1.0).width;
+
+        // 阴影效果
+        draw_text(
+            &streak_count,
+            x - streak_width / 2. + 2.,
+            y + 2.,
+            48.,
+            Color::new(0.0, 0.0, 0.0, 0.3),
+        );
+        draw_text(&streak_count, x - streak_width / 2., y, 48., color);
+
+        draw_text(
+            text,
+            x - text_width / 2. + 2.,
+            y + 40. + 2.,
+            28.,
+            Color::new(0.0, 0.0, 0.0, 0.3),
+        );
+        draw_text(text, x - text_width / 2., y + 40., 28., player.color);
+    }
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// 性能监控统计数据
+pub struct DebugStats {
+    pub fps: f32,
+    pub entity_count: usize,
+    pub quadtree_depth: usize,
+    pub particle_count: usize,
+}
+
+/// 绘制性能监控面板（左上角）
+pub fn draw_debug_panel(stats: &DebugStats) {
+    let panel_x = 12.0;
+    let panel_y = screen_height() - 130.0;
+    let panel_width = 280.0;
+    let panel_height = 115.0;
+
+    // 半透明背景面板
+    draw_rectangle(
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        Color::new(0.0, 0.0, 0.0, 0.7),
+    );
+    draw_rectangle_lines(
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        2.0,
+        Color::new(0.0, 1.0, 0.5, 0.8),
+    );
+
+    let text_x = panel_x + 10.0;
+    let mut text_y = panel_y + 25.0;
+    let line_height = 22.0;
+    let font_size = 18;
+
+    // FPS（绿色表示性能良好）
+    let fps_color = if stats.fps >= 55.0 {
+        Color::new(0.0, 1.0, 0.3, 1.0)
+    } else if stats.fps >= 30.0 {
+        Color::new(1.0, 1.0, 0.0, 1.0)
+    } else {
+        Color::new(1.0, 0.2, 0.2, 1.0)
+    };
+    draw_text(
+        &format!("FPS: {:.1}", stats.fps),
+        text_x,
+        text_y,
+        font_size as f32,
+        fps_color,
+    );
+
+    text_y += line_height;
+    draw_text(
+        &format!("Entities: {}", stats.entity_count),
+        text_x,
+        text_y,
+        font_size as f32,
+        WHITE,
+    );
+
+    text_y += line_height;
+    draw_text(
+        &format!("Particles: {}", stats.particle_count),
+        text_x,
+        text_y,
+        font_size as f32,
+        WHITE,
+    );
+
+    text_y += line_height;
+    draw_text(
+        &format!("QuadTree Depth: {}", stats.quadtree_depth),
+        text_x,
+        text_y,
+        font_size as f32,
+        Color::new(0.5, 0.8, 1.0, 1.0),
+    );
+
+    // 提示文本
+    let hint = "[F3] Close Debug";
+    let hint_width = measure_text(hint, None, 14, 1.0).width;
+    draw_text(
+        hint,
+        panel_x + panel_width - hint_width - 10.0,
+        panel_y + panel_height - 8.0,
+        14.0,
+        Color::new(0.7, 0.7, 0.7, 0.8),
+    );
+}
+
+/// 绘制慢动作指示器
+pub fn draw_slow_motion_indicator(time_scale: f32) {
+    if time_scale >= 0.99 {
+        return; // 正常速度，不显示
+    }
+
+    let center_x = screen_width() / 2.0;
+    let center_y = screen_height() - 80.0;
+
+    // 半透明背景
+    draw_rectangle(
+        center_x - 150.0,
+        center_y - 30.0,
+        300.0,
+        50.0,
+        Color::new(0.0, 0.0, 0.0, 0.6),
+    );
+
+    // 边框
+    draw_rectangle_lines(
+        center_x - 150.0,
+        center_y - 30.0,
+        300.0,
+        50.0,
+        2.0,
+        Color::new(0.0, 0.8, 1.0, 0.9),
+    );
+
+    // 文字
+    let text = format!("SLOW MOTION [{:.0}%]", time_scale * 100.0);
+    let text_width = measure_text(&text, None, 28, 1.0).width;
+
+    // 阴影
+    draw_text(
+        &text,
+        center_x - text_width / 2.0 + 2.0,
+        center_y + 7.0,
+        28.0,
+        Color::new(0.0, 0.0, 0.0, 0.5),
+    );
+
+    // 主文字（青色）
+    draw_text(
+        &text,
+        center_x - text_width / 2.0,
+        center_y + 5.0,
+        28.0,
+        Color::new(0.0, 0.9, 1.0, 1.0),
+    );
+}
+
+/// 绘制设置界面
+pub fn draw_settings_screen(settings: &GameSettings, selected: SettingOption, font: Option<&Font>) {
+    // 渐变背景
+    draw_gradient_background(
+        Color::new(0.90, 0.92, 0.98, 1.0),
+        Color::new(0.82, 0.86, 0.94, 1.0),
+    );
+
+    // 标题（使用自定义字体）
+    let title = "Game Settings";
+    let title_size = 42;
+    let title_color = Color::new(0.15, 0.3, 0.6, 1.0);
+
+    if let Some(f) = font {
+        let title_dims = measure_text(title, Some(f), title_size, 1.0);
+        draw_text_ex(
+            title,
+            screen_width() / 2. - title_dims.width / 2.,
+            80.,
+            TextParams {
+                font: Some(f),
+                font_size: title_size,
+                color: title_color,
+                ..Default::default()
+            },
+        );
+    } else {
+        let title_width = measure_text(title, None, title_size, 1.0).width;
+        draw_text(
+            title,
+            screen_width() / 2. - title_width / 2.,
+            80.,
+            title_size as f32,
+            title_color,
+        );
+    }
+
+    // 设置面板（增加高度以容纳10个选项）
+    let panel_width = screen_width() * 0.65;
+    let panel_height = 756.; // 从 688 增加到 756（新增1个选项 68px）
+    let panel_x = screen_width() / 2. - panel_width / 2.;
+    let panel_y = 140.;
+
+    draw_shadow_panel(
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        Color::new(1.0, 1.0, 1.0, 0.95),
+    );
+    draw_rectangle_lines(
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        3.0,
+        Color::new(0.3, 0.5, 0.9, 0.8),
+    );
+
+    // 设置选项
+    let option_y_start = panel_y + 40.;
+    let option_spacing = 68.;
+
+    // Lives
+    draw_setting_option(
+        panel_x,
+        option_y_start,
+        panel_width,
+        "Starting Lives",
+        &format!("< {} >", settings.starting_lives),
+        selected == SettingOption::Lives,
+    );
+
+    // Ship Speed
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing,
+        panel_width,
+        "Ship Speed (Thrust & Rotation)",
+        &format!("< {:.1}x >", settings.ship_speed_multiplier),
+        selected == SettingOption::ShipSpeed,
+    );
+
+    // Asteroid Speed
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 2.,
+        panel_width,
+        "Asteroid Speed",
+        &format!("< {:.1}x >", settings.asteroid_speed_multiplier),
+        selected == SettingOption::AsteroidSpeed,
+    );
+
+    // Sound Volume
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 3.,
+        panel_width,
+        "Sound Volume",
+        &format!("< {:.0}% >", settings.sound_volume * 100.0),
+        selected == SettingOption::SoundVolume,
+    );
+
+    // Font Choice
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 4.,
+        panel_width,
+        "UI Font",
+        &format!("< {} >", settings.font_choice.name()),
+        selected == SettingOption::FontChoice,
+    );
+
+    // Weapon Switch
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 5.,
+        panel_width,
+        "Weapon Switch (Q key)",
+        if settings.enable_weapon_switch {
+            "ON"
+        } else {
+            "OFF"
+        },
+        selected == SettingOption::WeaponSwitch,
+    );
+
+    // Screen Shake
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 6.,
+        panel_width,
+        "Screen Shake Effects",
+        if settings.enable_screen_shake {
+            "ON"
+        } else {
+            "OFF"
+        },
+        selected == SettingOption::ScreenShake,
+    );
+
+    // Slow Motion
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 7.,
+        panel_width,
+        "Slow Motion (Killstreak)",
+        if settings.enable_slow_motion {
+            "ON"
+        } else {
+            "OFF"
+        },
+        selected == SettingOption::SlowMotion,
+    );
+
+    // Debug Panel
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 8.,
+        panel_width,
+        "Debug Panel (F3 toggle)",
+        if settings.enable_debug_panel {
+            "ON"
+        } else {
+            "OFF"
+        },
+        selected == SettingOption::DebugPanel,
+    );
+
+    // Reset Defaults (特殊样式)
+    draw_reset_option(
+        panel_x,
+        option_y_start + option_spacing * 9.,
+        panel_width,
+        selected == SettingOption::ResetDefaults,
+    );
+
+    // 底部提示（使用自定义字体）
+    let hint_y = panel_y + panel_height + 40.;
+    let hint = "[Up/Down W/S] Select  |  [Left/Right A/D] Change  |  [ESC] Back";
+    let hint_color = Color::new(0.4, 0.5, 0.6, 1.0);
+
+    if let Some(f) = font {
+        let hint_dims = measure_text(hint, Some(f), 22, 1.0);
+        draw_text_ex(
+            hint,
+            screen_width() / 2. - hint_dims.width / 2.,
+            hint_y,
+            TextParams {
+                font: Some(f),
+                font_size: 22,
+                color: hint_color,
+                ..Default::default()
+            },
+        );
+    } else {
+        let hint_width = measure_text(hint, None, 22, 1.0).width;
+        draw_text(
+            hint,
+            screen_width() / 2. - hint_width / 2.,
+            hint_y,
+            22.,
+            hint_color,
+        );
+    }
+}
+
+/// 绘制单个设置选项
+fn draw_setting_option(
+    panel_x: f32,
+    y: f32,
+    panel_width: f32,
+    label: &str,
+    value: &str,
+    selected: bool,
+) {
+    let option_height = 60.;
+    let padding = 30.;
+
+    // 选中时的高亮背景
+    if selected {
+        draw_rectangle(
+            panel_x + padding - 10.,
+            y - 10.,
+            panel_width - padding * 2. + 20.,
+            option_height,
+            Color::new(0.3, 0.6, 0.95, 0.15),
+        );
+        draw_rectangle_lines(
+            panel_x + padding - 10.,
+            y - 10.,
+            panel_width - padding * 2. + 20.,
+            option_height,
+            2.5,
+            Color::new(0.3, 0.6, 0.95, 0.6),
+        );
+    }
+
+    // 标签
+    let label_color = if selected {
+        Color::new(0.1, 0.3, 0.7, 1.0)
+    } else {
+        Color::new(0.3, 0.4, 0.5, 1.0)
+    };
+
+    draw_text_ex(
+        label,
+        panel_x + padding,
+        y + 18.,
+        TextParams {
+            font_size: 26,
+            color: label_color,
+            ..Default::default()
+        },
+    );
+
+    // 值
+    let value_color = if selected {
+        Color::new(0.2, 0.5, 0.9, 1.0)
+    } else {
+        Color::new(0.5, 0.6, 0.7, 1.0)
+    };
+
+    let value_width = measure_text(value, None, 28, 1.0).width;
+    draw_text_ex(
+        value,
+        panel_x + panel_width - padding - value_width,
+        y + 18.,
+        TextParams {
+            font_size: 28,
+            color: value_color,
+            ..Default::default()
+        },
+    );
+}
+
+/// 绘制恢复默认选项（特殊样式）
+fn draw_reset_option(panel_x: f32, y: f32, panel_width: f32, selected: bool) {
+    let option_height = 60.;
+    let padding = 30.;
+
+    // 按钮背景颜色
+    let bg_color = if selected {
+        Color::new(0.9, 0.3, 0.2, 0.2)
+    } else {
+        Color::new(0.8, 0.8, 0.8, 0.1)
+    };
+
+    let border_color = if selected {
+        Color::new(0.9, 0.3, 0.2, 0.8)
+    } else {
+        Color::new(0.6, 0.6, 0.6, 0.5)
+    };
+
+    draw_rectangle(
+        panel_x + padding - 10.,
+        y - 10.,
+        panel_width - padding * 2. + 20.,
+        option_height,
+        bg_color,
+    );
+    draw_rectangle_lines(
+        panel_x + padding - 10.,
+        y - 10.,
+        panel_width - padding * 2. + 20.,
+        option_height,
+        2.5,
+        border_color,
+    );
+
+    // 居中文字
+    let text = "Reset to Defaults";
+    let text_width = measure_text(text, None, 26, 1.0).width;
+    let text_color = if selected {
+        Color::new(0.9, 0.3, 0.2, 1.0)
+    } else {
+        Color::new(0.5, 0.5, 0.5, 1.0)
+    };
+
+    draw_text_ex(
+        text,
+        panel_x + panel_width / 2. - text_width / 2.,
+        y + 18.,
+        TextParams {
+            font_size: 26,
+            color: text_color,
+            ..Default::default()
+        },
+    );
+
+    if selected {
+        let hint = "Press [Left/Right A/D] or [Enter] to reset all";
+        let hint_width = measure_text(hint, None, 17, 1.0).width;
+        draw_text_ex(
+            hint,
+            panel_x + panel_width / 2. - hint_width / 2.,
+            y + 42.,
+            TextParams {
+                font_size: 17,
+                color: Color::new(0.7, 0.3, 0.2, 0.8),
+                ..Default::default()
+            },
+        );
+    }
+}
