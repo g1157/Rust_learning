@@ -112,12 +112,13 @@ impl Player {
         now - self.last_shot > self.shoot_cooldown()
     }
 
-    pub fn record_shot(&mut self, position: Vec2, direction: Vec2, now: f64) {
+    pub fn record_shot(&mut self, position: Vec2, direction: Vec2, now: f64) -> u32 {
         self.last_shot = now;
 
         match self.weapon_type {
             WeaponType::Normal => {
                 self.bullets.push(Bullet::new(position, direction, now));
+                1
             }
             WeaponType::Spread => {
                 // 散弹：3 发，扇形 30 度
@@ -142,6 +143,7 @@ impl Player {
                         WeaponType::Spread,
                     ));
                 }
+                3
             }
             WeaponType::Penetrating => {
                 self.bullets.push(Bullet::with_weapon_type(
@@ -150,6 +152,7 @@ impl Player {
                     now,
                     WeaponType::Penetrating,
                 ));
+                1
             }
         }
     }

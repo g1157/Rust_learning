@@ -55,23 +55,23 @@ impl SoundSystem {
         println!("音效加载状态:");
         println!(
             "  射击 (shoot.wav):      {}",
-            if shoot.is_some() { "✓" } else { "✗" }
+            if shoot.is_some() { "OK" } else { "FAIL" }
         );
         println!(
             "  爆炸 (explosion.wav):  {}",
-            if explosion.is_some() { "✓" } else { "✗" }
+            if explosion.is_some() { "OK" } else { "FAIL" }
         );
         println!(
             "  推进 (thrust.wav):     {}",
-            if thruster.is_some() { "✓" } else { "✗" }
+            if thruster.is_some() { "OK" } else { "FAIL" }
         );
         println!(
             "  道具 (powerup.wav):    {}",
-            if powerup.is_some() { "✓" } else { "✗" }
+            if powerup.is_some() { "OK" } else { "FAIL" }
         );
         println!(
             "  碰撞 (hit.wav):        {}",
-            if hit.is_some() { "✓" } else { "✗" }
+            if hit.is_some() { "OK" } else { "FAIL" }
         );
 
         let enabled = shoot.is_some()
@@ -81,9 +81,9 @@ impl SoundSystem {
             || hit.is_some();
 
         if enabled {
-            println!("✅ 音效系统已启用（带淡出效果）");
+            println!("[OK] 音效系统已启用（带淡出效果）");
         } else {
-            println!("❌ 未找到音效文件，游戏将静音运行");
+            println!("[X] 未找到音效文件，游戏将静音运行");
         }
 
         Self {

@@ -18,6 +18,7 @@
 //! - 粒子和音效
 //! - UI 渲染
 
+mod achievement;
 mod asteroid;
 mod bullet;
 mod duel;
@@ -32,6 +33,7 @@ mod sound;
 mod ui;
 mod utils;
 
+use achievement::AchievementManager;
 use asteroid::{Asteroid, spawn_initial_wave};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
 use duel::{DUEL_BULLET_RADIUS, DuelState};
@@ -136,6 +138,7 @@ pub enum SettingOption {
     SlowMotion,
     DebugPanel,
     ResetDefaults,
+    ResetAchievements,
 }
 
 impl SettingOption {
@@ -150,13 +153,14 @@ impl SettingOption {
             Self::ScreenShake => Self::SlowMotion,
             Self::SlowMotion => Self::DebugPanel,
             Self::DebugPanel => Self::ResetDefaults,
-            Self::ResetDefaults => Self::Lives,
+            Self::ResetDefaults => Self::ResetAchievements,
+            Self::ResetAchievements => Self::Lives,
         }
     }
 
     fn prev(self) -> Self {
         match self {
-            Self::Lives => Self::ResetDefaults,
+            Self::Lives => Self::ResetAchievements,
             Self::ShipSpeed => Self::Lives,
             Self::AsteroidSpeed => Self::ShipSpeed,
             Self::SoundVolume => Self::AsteroidSpeed,
@@ -166,6 +170,7 @@ impl SettingOption {
             Self::SlowMotion => Self::ScreenShake,
             Self::DebugPanel => Self::SlowMotion,
             Self::ResetDefaults => Self::DebugPanel,
+            Self::ResetAchievements => Self::ResetDefaults,
         }
     }
 }
@@ -266,10 +271,11 @@ impl ScreenShake {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameMode {
     Survival,
     Duel,
+    Achievements,
     Settings,
 }
 
@@ -277,6 +283,7 @@ pub enum GameMode {
 enum GameState {
     ModeSelection { selection: GameMode },
     SettingsDetail { selection: SettingOption }, // 设置详细界面
+    AchievementsView, // 成就查看界面
     WaitingStart,
     Playing,
     Paused { selection: PauseSelection },
@@ -301,11 +308,14 @@ async fn main() {
     let mut particles = ParticleSystem::new();
     let sounds = SoundSystem::new().await;
     let fonts = FontSystem::new().await; // 加载字体
+    let mut achievements = AchievementManager::new(); // 成就系统
     let mut next_shield_spawn = powerup::schedule_next_spawn(start_time);
     let mut current_mode = GameMode::Survival;
     let mut duel_state = DuelState::new(start_time);
     let mut highest_survival_score: u32 = 0;
     let mut survival_wave: u32 = 0;
+    let mut game_start_time: f64 = 0.0; // 当前局游戏开始时间
+    let mut session_bullets_fired: u32 = 0; // 当前会话发射的子弹数
     let mut state = GameState::ModeSelection {
         selection: GameMode::Survival,
     };
@@ -331,7 +341,7 @@ async fn main() {
 
         match state {
             GameState::SettingsDetail { selection } => {
-                ui::draw_settings_screen(&settings, selection, fonts.get(settings.font_choice));
+                ui::draw_settings_screen(&settings, selection, fonts.get_best(settings.font_choice));
 
                 let mut next_selection = selection;
 
@@ -343,43 +353,57 @@ async fn main() {
                 }
 
                 // 左右键调整数值
+                let mut setting_changed = false;
                 if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
                     match selection {
                         SettingOption::Lives => {
                             if settings.starting_lives > 1 {
                                 settings.starting_lives -= 1;
+                                setting_changed = true;
                             }
                         }
                         SettingOption::ShipSpeed => {
                             settings.ship_speed_multiplier =
                                 (settings.ship_speed_multiplier - 0.1).max(0.5);
+                            setting_changed = true;
                         }
                         SettingOption::AsteroidSpeed => {
                             settings.asteroid_speed_multiplier =
                                 (settings.asteroid_speed_multiplier - 0.1).max(0.5);
+                            setting_changed = true;
                         }
                         SettingOption::SoundVolume => {
                             settings.sound_volume = (settings.sound_volume - 0.01).max(0.0);
+                            setting_changed = true;
                         }
                         SettingOption::FontChoice => {
                             settings.font_choice = settings.font_choice.prev();
+                            setting_changed = true;
                         }
                         SettingOption::WeaponSwitch => {
-                            settings.enable_weapon_switch = !settings.enable_weapon_switch
+                            settings.enable_weapon_switch = !settings.enable_weapon_switch;
+                            setting_changed = true;
                         }
                         SettingOption::ScreenShake => {
-                            settings.enable_screen_shake = !settings.enable_screen_shake
+                            settings.enable_screen_shake = !settings.enable_screen_shake;
+                            setting_changed = true;
                         }
                         SettingOption::SlowMotion => {
-                            settings.enable_slow_motion = !settings.enable_slow_motion
+                            settings.enable_slow_motion = !settings.enable_slow_motion;
+                            setting_changed = true;
                         }
                         SettingOption::DebugPanel => {
                             settings.enable_debug_panel = !settings.enable_debug_panel;
                             show_debug = settings.enable_debug_panel;
+                            setting_changed = true;
                         }
                         SettingOption::ResetDefaults => {
                             settings.reset_to_default();
                             show_debug = settings.enable_debug_panel;
+                            setting_changed = true;
+                        }
+                        SettingOption::ResetAchievements => {
+                            achievements.reset();
                         }
                     }
                 } else if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
@@ -387,47 +411,69 @@ async fn main() {
                         SettingOption::Lives => {
                             if settings.starting_lives < 9 {
                                 settings.starting_lives += 1;
+                                setting_changed = true;
                             }
                         }
                         SettingOption::ShipSpeed => {
                             settings.ship_speed_multiplier =
                                 (settings.ship_speed_multiplier + 0.1).min(2.0);
+                            setting_changed = true;
                         }
                         SettingOption::AsteroidSpeed => {
                             settings.asteroid_speed_multiplier =
                                 (settings.asteroid_speed_multiplier + 0.1).min(2.0);
+                            setting_changed = true;
                         }
                         SettingOption::SoundVolume => {
                             settings.sound_volume = (settings.sound_volume + 0.01).min(1.0);
+                            setting_changed = true;
                         }
                         SettingOption::FontChoice => {
                             settings.font_choice = settings.font_choice.next();
+                            setting_changed = true;
                         }
                         SettingOption::WeaponSwitch => {
-                            settings.enable_weapon_switch = !settings.enable_weapon_switch
+                            settings.enable_weapon_switch = !settings.enable_weapon_switch;
+                            setting_changed = true;
                         }
                         SettingOption::ScreenShake => {
-                            settings.enable_screen_shake = !settings.enable_screen_shake
+                            settings.enable_screen_shake = !settings.enable_screen_shake;
+                            setting_changed = true;
                         }
                         SettingOption::SlowMotion => {
-                            settings.enable_slow_motion = !settings.enable_slow_motion
+                            settings.enable_slow_motion = !settings.enable_slow_motion;
+                            setting_changed = true;
                         }
                         SettingOption::DebugPanel => {
                             settings.enable_debug_panel = !settings.enable_debug_panel;
                             show_debug = settings.enable_debug_panel;
+                            setting_changed = true;
                         }
                         SettingOption::ResetDefaults => {
                             settings.reset_to_default();
                             show_debug = settings.enable_debug_panel;
+                            setting_changed = true;
+                        }
+                        SettingOption::ResetAchievements => {
+                            achievements.reset();
                         }
                     }
                 }
 
-                // Enter 触发恢复默认
-                if is_key_pressed(KeyCode::Enter)
-                    && matches!(selection, SettingOption::ResetDefaults)
-                {
-                    settings.reset_to_default();
+                // 追踪设置更改统计
+                if setting_changed {
+                    achievements.stats.settings_changed += 1;
+                }
+
+                // Enter 触发恢复默认或重置成就
+                if is_key_pressed(KeyCode::Enter) {
+                    if matches!(selection, SettingOption::ResetDefaults) {
+                        settings.reset_to_default();
+                        show_debug = settings.enable_debug_panel;
+                        achievements.stats.settings_changed += 1;
+                    } else if matches!(selection, SettingOption::ResetAchievements) {
+                        achievements.reset();
+                    }
                 }
 
                 if next_selection != selection {
@@ -446,6 +492,20 @@ async fn main() {
                 next_frame().await;
                 continue;
             }
+            GameState::AchievementsView => {
+                // 绘制成就界面
+                ui::draw_achievements_screen(&achievements, fonts.get_best(settings.font_choice), frame_t);
+
+                // ESC 返回模式选择
+                if is_key_pressed(KeyCode::Escape) {
+                    state = GameState::ModeSelection {
+                        selection: GameMode::Achievements,
+                    };
+                }
+
+                next_frame().await;
+                continue;
+            }
             GameState::ModeSelection { selection } => {
                 let mut next_selection = selection;
                 // 上下键切换（纵向布局）
@@ -453,12 +513,14 @@ async fn main() {
                     next_selection = match selection {
                         GameMode::Survival => GameMode::Settings,
                         GameMode::Duel => GameMode::Survival,
-                        GameMode::Settings => GameMode::Duel,
+                        GameMode::Achievements => GameMode::Duel,
+                        GameMode::Settings => GameMode::Achievements,
                     };
                 } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
                     next_selection = match selection {
                         GameMode::Survival => GameMode::Duel,
-                        GameMode::Duel => GameMode::Settings,
+                        GameMode::Duel => GameMode::Achievements,
+                        GameMode::Achievements => GameMode::Settings,
                         GameMode::Settings => GameMode::Survival,
                     };
                 }
@@ -477,15 +539,22 @@ async fn main() {
                                 selection: SettingOption::Lives,
                             };
                         }
+                        GameMode::Achievements => {
+                            // 进入成就查看界面
+                            state = GameState::AchievementsView;
+                        }
                         _ => {
                             // 进入游戏
                             current_mode = next_selection;
+                            // 追踪模式切换统计
+                            let mode_name = format!("{:?}", next_selection);
+                            achievements.stats.modes_played.insert(mode_name);
                             state = GameState::WaitingStart;
                         }
                     }
                 }
 
-                ui::draw_mode_selection(next_selection, &settings, fonts.get(settings.font_choice));
+                ui::draw_mode_selection(next_selection, &settings, &achievements, fonts.get_best(settings.font_choice));
                 next_frame().await;
                 continue;
             }
@@ -501,6 +570,7 @@ async fn main() {
                     GameMode::Survival => "Survival: press [Enter] to start",
                     GameMode::Duel => "Duel: capture the flag!",
                     GameMode::Settings => unreachable!("Settings is not a playable mode"),
+                    GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
                 });
                 ui::draw_players_hud(&players, HudMode::Waiting);
                 if matches!(current_mode, GameMode::Survival) {
@@ -534,6 +604,10 @@ async fn main() {
                         current_mode,
                         settings.starting_lives,
                     );
+                    
+                    // 触发 FirstFlight 成就（完成第一次游戏）
+                    achievements.unlock(achievement::AchievementId::FirstFlight, frame_t);
+                    
                     state = GameState::Playing;
                 }
 
@@ -570,6 +644,7 @@ async fn main() {
                         }
                     }
                     GameMode::Settings => unreachable!("Settings is not a playable mode"),
+                    GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
                 };
                 ui::draw_game_over_message(&text);
                 ui::draw_center_scores(&players, end_time, highest_survival_score);
@@ -611,7 +686,7 @@ async fn main() {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
                 render_scene(
                     &players, &asteroids, &powerups, &particles, duel_view, frame_t, false, None,
-                    None, 1.0,
+                    None, 1.0, &achievements, fonts.get_best(settings.font_choice),
                 );
                 if matches!(current_mode, GameMode::Survival) {
                     ui::draw_survival_record(highest_survival_score);
@@ -668,7 +743,7 @@ async fn main() {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
                 render_scene(
                     &players, &asteroids, &powerups, &particles, duel_view, frame_t, false, None,
-                    None, 1.0,
+                    None, 1.0, &achievements, fonts.get_best(settings.font_choice),
                 );
                 ui::draw_victory_pause_overlay(
                     (started_at + VICTORY_PAUSE_DURATION - frame_t).max(0.0),
@@ -690,7 +765,7 @@ async fn main() {
                 let duel_view = Some(&duel_state);
                 render_scene(
                     &players, &asteroids, &powerups, &particles, duel_view, frame_t, false, None,
-                    None, 1.0,
+                    None, 1.0, &achievements, fonts.get_best(settings.font_choice),
                 );
                 ui::draw_round_end(winner_idx, &duel_state);
 
@@ -706,7 +781,7 @@ async fn main() {
             }
         }
 
-        update_players(
+        let bullets_fired = update_players(
             &mut players,
             &mut particles,
             &sounds,
@@ -717,14 +792,23 @@ async fn main() {
         );
         update_asteroids(&mut asteroids, dt, settings.asteroid_speed_multiplier);
 
+        // 累积游戏时间和子弹发射统计
+        achievements.stats.total_playtime += dt as f64;
+        achievements.stats.bullets_fired += bullets_fired;
+        session_bullets_fired += bullets_fired;
+
         // 武器切换（Q键）- 仅当设置允许时
         if settings.enable_weapon_switch && is_key_pressed(KeyCode::Q) {
             for player in players.iter_mut() {
+                let old_weapon = player.weapon_type;
                 player.weapon_type = match player.weapon_type {
                     WeaponType::Normal => WeaponType::Spread,
                     WeaponType::Spread => WeaponType::Penetrating,
                     WeaponType::Penetrating => WeaponType::Normal,
                 };
+                // 追踪武器使用统计
+                let weapon_name = format!("{:?}", player.weapon_type);
+                achievements.stats.weapons_used.insert(weapon_name);
             }
         }
 
@@ -843,6 +927,8 @@ async fn main() {
         for (player_idx, kills) in player_kills.iter().enumerate() {
             for _ in 0..*kills {
                 players[player_idx].record_kill(frame_t);
+                // 更新总击杀统计
+                achievements.stats.total_kills += 1;
             }
 
             // 高连击触发震动和慢动作（根据设置）
@@ -881,7 +967,9 @@ async fn main() {
         match current_mode {
             GameMode::Survival => {
                 powerup::spawn(frame_t, &mut powerups, &mut next_shield_spawn);
-                if powerup::handle_pickups(&mut players, &mut powerups, frame_t) {
+                let shields_collected = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                if shields_collected > 0 {
+                    achievements.stats.shields_collected += shields_collected;
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                 }
                 highest_survival_score = highest_survival_score.max(total_survival_score(&players));
@@ -889,6 +977,8 @@ async fn main() {
                 let all_dead = players.iter().all(|player| !player.alive);
                 if all_dead {
                     finalize_survival(&mut players, frame_t);
+                    // 保存成就和统计数据
+                    achievements.save();
                     state = GameState::GameOver {
                         victory: false,
                         end_time: frame_t,
@@ -911,6 +1001,8 @@ async fn main() {
 
                     // 检查是否赢得整场比赛
                     if duel_state.check_match_winner().is_some() {
+                        // 保存成就和统计数据
+                        achievements.save();
                         state = GameState::GameOver {
                             victory: true,
                             end_time: frame_t,
@@ -932,6 +1024,8 @@ async fn main() {
 
                     // 检查是否赢得整场比赛
                     if duel_state.check_match_winner().is_some() {
+                        // 保存成就和统计数据
+                        achievements.save();
                         state = GameState::GameOver {
                             victory: true,
                             end_time: frame_t,
@@ -944,7 +1038,11 @@ async fn main() {
                 }
             }
             GameMode::Settings => unreachable!("Settings is not a playable mode"),
+            GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
         }
+
+        // 更新成就进度
+        update_achievements(&mut achievements, &players, current_mode, frame_t, 0);
 
         let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
 
@@ -968,6 +1066,7 @@ async fn main() {
             screen_shake,
             show_debug.then_some(&debug_stats),
             time_scale,
+            &achievements, fonts.get_best(settings.font_choice),
         );
         if matches!(current_mode, GameMode::Survival) {
             ui::draw_survival_record(highest_survival_score);
@@ -1007,7 +1106,8 @@ fn update_players(
     dt: f32,
     ship_speed_multiplier: f32,
     sound_volume: f32,
-) {
+) -> u32 {
+    let mut total_bullets_fired = 0;
     for player in players.iter_mut() {
         if !player.alive {
             continue;
@@ -1036,7 +1136,8 @@ fn update_players(
             let bullet_pos = player.ship.pos + rot_vec * SHIP_HEIGHT / 2.;
             let bullet_vel = rot_vec * BULLET_SPEED;
 
-            player.record_shot(bullet_pos, bullet_vel, frame_t);
+            let bullets_fired = player.record_shot(bullet_pos, bullet_vel, frame_t);
+            total_bullets_fired += bullets_fired;
             // 播放射击音效
             sounds.play(SoundEffect::Shoot, sound_volume);
         }
@@ -1054,6 +1155,7 @@ fn update_players(
             bullet.update(dt);
         }
     }
+    total_bullets_fired
 }
 
 fn update_asteroids(asteroids: &mut [Asteroid], dt: f32, speed_multiplier: f32) {
@@ -1106,6 +1208,8 @@ fn render_scene(
     screen_shake: Option<ScreenShake>,
     debug_stats: Option<&DebugStats>,
     time_scale: f32,
+    achievements: &AchievementManager,
+    font: Option<&Font>,
 ) {
     // 应用屏幕震动偏移
     let shake_offset = screen_shake
@@ -1212,6 +1316,19 @@ fn render_scene(
     if show_pause_hint {
         ui::draw_pause_hint();
     }
+
+    // 显示成就解锁提示
+    let recent_unlocks = achievements.get_recent_unlocks(6.0, frame_t);
+    for (i, id) in recent_unlocks.iter().enumerate() {
+        if let Some(progress) = achievements.get_progress(*id) {
+            if let Some(unlock_time) = progress.unlock_time {
+                let time_since = (frame_t - unlock_time) as f32;
+                // 每个提示稍微偏移一点，避免重叠
+                let offset_y = i as f32 * 110.0;
+                ui::draw_achievement_unlock_toast_offset(*id, time_since, offset_y, font);
+            }
+        }
+    }
 }
 
 fn finalize_survival(players: &mut [Player], time: f64) {
@@ -1283,6 +1400,140 @@ fn player_start_positions() -> [Vec2; 2] {
 
 fn total_survival_score(players: &[Player]) -> u32 {
     players.iter().map(|player| player.score.value()).sum()
+}
+
+/// 更新成就进度（在主循环中调用）
+fn update_achievements(
+    achievements: &mut AchievementManager,
+    players: &[Player],
+    current_mode: GameMode,
+    frame_t: f64,
+    survival_wave: u32,
+) {
+    use achievement::AchievementId;
+
+    // 检查连击成就
+    for player in players {
+        let streak = player.killstreak;
+        
+        if streak >= 2 {
+            achievements.update_progress(AchievementId::DoubleTrouble, streak.max(2), frame_t);
+        }
+        if streak >= 3 {
+            achievements.update_progress(AchievementId::TripleThreat, streak.max(3), frame_t);
+        }
+        if streak >= 5 {
+            achievements.update_progress(AchievementId::MegaKiller, streak.max(5), frame_t);
+            // 追踪5连击次数
+            if streak == 5 {
+                achievements.stats.five_streaks = achievements.stats.five_streaks.saturating_add(1);
+            }
+        }
+        if streak >= 10 {
+            achievements.update_progress(AchievementId::Unstoppable, streak.max(10), frame_t);
+        }
+        if streak >= 15 {
+            achievements.update_progress(AchievementId::Godlike, streak.max(15), frame_t);
+        }
+        
+        // 更新最高连击记录
+        achievements.stats.max_killstreak = achievements.stats.max_killstreak.max(streak);
+
+        // 检查击杀数成就（基于本局分数）
+        let session_kills = player.score.value() / 10;
+        if session_kills >= 1 {
+            achievements.update_progress(AchievementId::FirstBlood, 1, frame_t);
+        }
+        if session_kills >= 10 {
+            achievements.update_progress(AchievementId::Marksman, achievements.stats.total_kills, frame_t);
+        }
+    }
+
+    // 检查累计击杀数
+    if achievements.stats.total_kills >= 500 {
+        achievements.update_progress(AchievementId::Deadeye, achievements.stats.total_kills, frame_t);
+    }
+
+    // 检查子弹发射数
+    if achievements.stats.bullets_fired >= 100 {
+        achievements.update_progress(AchievementId::Armed, achievements.stats.bullets_fired, frame_t);
+    }
+
+    // 检查护盾拾取数
+    if achievements.stats.shields_collected >= 1 {
+        achievements.update_progress(AchievementId::Protected, 1, frame_t);
+    }
+    if achievements.stats.shields_collected >= 20 {
+        achievements.update_progress(AchievementId::ShieldMaster, achievements.stats.shields_collected, frame_t);
+    }
+
+    // 检查生存模式相关成就
+    if matches!(current_mode, GameMode::Survival) {
+        let survival_score = total_survival_score(players);
+        
+        // 分数成就
+        if survival_score >= 1000 {
+            achievements.update_progress(AchievementId::Century, survival_score, frame_t);
+        }
+        if survival_score >= 5000 {
+            achievements.update_progress(AchievementId::Champion, survival_score, frame_t);
+        }
+
+        // 波次成就
+        if survival_wave >= 3 {
+            achievements.update_progress(AchievementId::WaveRider, survival_wave, frame_t);
+        }
+        if survival_wave >= 5 {
+            achievements.update_progress(AchievementId::WaveMaster, survival_wave, frame_t);
+        }
+        if survival_wave >= 10 {
+            achievements.update_progress(AchievementId::WaveGod, survival_wave, frame_t);
+        }
+        
+        // 更新最高波次
+        achievements.stats.max_wave = achievements.stats.max_wave.max(survival_wave);
+    }
+
+    // 检查累计时间成就
+    if achievements.stats.total_playtime >= 1800.0 { // 30分钟
+        achievements.update_progress(AchievementId::Veteran, achievements.stats.total_playtime as u32, frame_t);
+    }
+    if achievements.stats.total_playtime >= 7200.0 { // 2小时
+        achievements.update_progress(AchievementId::Legend, achievements.stats.total_playtime as u32, frame_t);
+    }
+
+    // 检查模式探索成就
+    if achievements.stats.modes_played.len() >= 2 {
+        achievements.update_progress(AchievementId::Adventurer, achievements.stats.modes_played.len() as u32, frame_t);
+    }
+
+    // 检查武器使用成就
+    if achievements.stats.weapons_used.len() >= 3 {
+        achievements.update_progress(AchievementId::Arsenal, achievements.stats.weapons_used.len() as u32, frame_t);
+    }
+
+    // 检查设置修改成就
+    if achievements.stats.settings_changed >= 5 {
+        achievements.update_progress(AchievementId::Tinkerer, achievements.stats.settings_changed, frame_t);
+    }
+
+    // 检查对战模式成就
+    if matches!(current_mode, GameMode::Duel) {
+        if achievements.stats.duel_games >= 1 {
+            achievements.update_progress(AchievementId::Warrior, 1, frame_t);
+        }
+        if achievements.stats.duel_wins >= 5 {
+            achievements.update_progress(AchievementId::Duelist, achievements.stats.duel_wins, frame_t);
+        }
+    }
+
+    // 检查连击大师成就（一局内3次以上5连击）
+    if achievements.stats.five_streaks >= 3 {
+        achievements.unlock(AchievementId::ComboMaster, frame_t);
+    }
+
+    // 清理过期的解锁提示
+    achievements.cleanup_recent_unlocks(6.0, frame_t);
 }
 
 #[cfg(test)]

@@ -43,9 +43,9 @@ pub fn spawn(now: f64, powerups: &mut Vec<PowerUp>, next_spawn: &mut f64) {
     powerups.retain(|powerup| powerup.expires_at > now && !powerup.collected);
 }
 
-/// 处理道具拾取，返回是否有道具被拾取
-pub fn handle_pickups(players: &mut [Player], powerups: &mut Vec<PowerUp>, now: f64) -> bool {
-    let mut collected = false;
+/// 处理道具拾取，返回拾取的道具数量
+pub fn handle_pickups(players: &mut [Player], powerups: &mut Vec<PowerUp>, now: f64) -> u32 {
+    let mut collected_count = 0;
     for player in players.iter_mut() {
         if !player.alive {
             continue;
@@ -57,12 +57,12 @@ pub fn handle_pickups(players: &mut [Player], powerups: &mut Vec<PowerUp>, now: 
             if (player.ship.pos - powerup.pos).length() <= POWERUP_PICKUP_RADIUS {
                 player.grant_shield(now);
                 powerup.collected = true;
-                collected = true;
+                collected_count += 1;
             }
         }
     }
     powerups.retain(|powerup| powerup.expires_at > now && !powerup.collected);
-    collected
+    collected_count
 }
 
 pub fn draw(powerups: &[PowerUp], frame_t: f64) {

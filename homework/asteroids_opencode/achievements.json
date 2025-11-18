@@ -1,0 +1,212 @@
+{
+  "progress": {
+    "Protected": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "ThePacifist": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "LuckySeven": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "FlawlessVictory": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "WaveGod": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "FirstBlood": {
+      "unlocked": true,
+      "unlock_time": 24.651976108551025,
+      "current": 1
+    },
+    "Assassin": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Unstoppable": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Lucky": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "ComboMaster": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Deadeye": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Endurance": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Arsenal": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Sharpshooter": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Marksman": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Champion": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "MegaKiller": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Dominator": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "WaveRider": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "MidnightWarrior": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Duelist": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Armed": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "FlagHunter": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Godlike": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "DoubleTrouble": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "TripleThreat": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Survivor": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "QuickStart": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Century": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Tinkerer": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Veteran": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Adventurer": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "FirstFlight": {
+      "unlocked": true,
+      "unlock_time": 23.748146533966064,
+      "current": 0
+    },
+    "TimeWarrior": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Warrior": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "ShieldMaster": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "WaveMaster": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Legend": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    }
+  },
+  "stats": {
+    "total_playtime": 7.731381416320801,
+    "total_kills": 0,
+    "bullets_fired": 11,
+    "shields_collected": 0,
+    "games_played": 0,
+    "survival_games": 0,
+    "duel_games": 0,
+    "duel_wins": 0,
+    "modes_played": [
+      "Survival"
+    ],
+    "weapons_used": [],
+    "settings_changed": 0,
+    "max_wave": 0,
+    "max_killstreak": 0,
+    "five_streaks": 0
+  }
+}
