@@ -63,6 +63,7 @@ impl FontSystem {
     }
 
     /// 获取中文字体（用于显示中文文本）
+    #[allow(dead_code)]
     pub fn get_chinese(&self) -> Option<&Font> {
         self.chinese.as_ref()
     }

@@ -79,16 +79,28 @@ cargo clippy -- -D warnings
 Access the settings menu from the main menu to customize your experience:
 
 - **Starting Lives**: 1-9 lives per round (default: 3)
-- **Ship Speed**: 0.5x - 2.0x multiplier (default: 1.0x)
+- **Ship Speed**: 0.5x - 2.0x multiplier for thrust and rotation (default: 1.0x)
+- **Ship Size**: 0.5x - 2.0x multiplier for ship rendering and collision (default: 1.0x)
+  - Adjusts visual size, collision detection, shield radius, bullet spawn position
+  - Useful for accessibility and player preference
 - **Asteroid Speed**: 0.5x - 2.0x multiplier (default: 1.0x)
 - **Sound Volume**: 0% - 100% (default: 1%)
   - Adjust with ←/→ or A/D keys in 1% increments
   - Volume uses relative multiplier (0.0 - 1.0)
-- **Font Choice**: Default / DejaVu Sans / Ubuntu / Custom
+- **UI Font**: Choose between Default, Chinese (WQY Micro Hei), or system fonts
+  - Full settings screen font support with real-time preview
 - **Weapon Switch**: Enable/disable Q key weapon switching
 - **Screen Shake**: Toggle screen shake effects
 - **Slow Motion**: Toggle slow motion on high killstreaks
 - **Debug Panel**: Toggle F3 debug overlay by default
+- **Flag Radius** (Duel mode): 50-150px capture radius (default: 90px)
+- **Reset to Defaults**: Restore all settings to default values
+- **Reset Achievements**: Clear all achievement progress and statistics
+
+**New in v0.2:**
+- ✅ Settings screen fully supports font switching
+- ✅ Reset operations show success notifications
+- ✅ Achievement reset properly clears all statistics
 
 ## Audio System
 
@@ -174,10 +186,12 @@ Scripts:
 ├── add_fadeout.py        # Generic fadeout processor (50ms)
 
 Documentation:
-├── README.md              # This file
-├── AUDIO_FADEOUT.md       # Audio fadeout guide
-├── SHOOT_FADEOUT_FIX.md   # Shooting sound fix details
-└── AGENTS.md              # Development guidelines
+├── README.md                      # This file
+├── FONT_AND_UI_IMPROVEMENTS.md    # Font system and UI improvements (v0.2)
+├── ACHIEVEMENT_FIX.md             # Achievement system fixes
+├── AUDIO_FADEOUT.md               # Audio fadeout guide
+├── SHOOT_FADEOUT_FIX.md           # Shooting sound fix details
+└── AGENTS.md                      # Development guidelines
 ```
 
 ## Contributing
@@ -198,6 +212,10 @@ Educational project - feel free to learn from and adapt the code.
 - [x] ~~Adjustable game settings~~
 - [x] ~~Volume control system~~
 - [x] ~~Killstreak and slow motion~~
+- [x] ~~Font system with Chinese support~~
+- [x] ~~Achievement system (38 achievements)~~
+- [x] ~~Settings screen font support~~
+- [x] ~~Reset success notifications~~
 - [ ] Complete Duel mode features
 - [ ] Background music
 - [ ] Implement online multiplayer
@@ -208,6 +226,8 @@ Educational project - feel free to learn from and adapt the code.
 ## Documentation
 
 - **README.md** - This file (overview and quick start)
+- **FONT_AND_UI_IMPROVEMENTS.md** - Font system and UI improvements (v0.2)
+- **ACHIEVEMENT_FIX.md** - Achievement system complete fix
 - **AUDIO_FADEOUT.md** - Audio fadeout processing guide
 - **SHOOT_FADEOUT_FIX.md** - Shooting sound fix technical details
 - **AGENTS.md** - Development guidelines and code style

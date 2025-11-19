@@ -13,7 +13,7 @@ use macroquad::prelude::*;
 
 use crate::player::Player;
 
-const FLAG_RADIUS: f32 = 90.0; // 像素
+// FLAG_RADIUS 现在从设置中获取
 const CAPTURE_TIME: f32 = 5.0; // 秒
 const FLAG_RESPAWN_DELAY: f64 = 1.5; // 秒
 pub const DUEL_BULLET_RADIUS: f32 = 6.0; // 像素（用于击中检测）
@@ -25,11 +25,11 @@ pub struct FlagObjective {
 }
 
 impl FlagObjective {
-    fn new() -> Self {
+    pub fn new(flag_radius: f32) -> Self {
         Self {
             pos: Vec2::new(
-                rand::gen_range(FLAG_RADIUS, screen_width() - FLAG_RADIUS),
-                rand::gen_range(FLAG_RADIUS, screen_height() - FLAG_RADIUS),
+                rand::gen_range(flag_radius, screen_width() - flag_radius),
+                rand::gen_range(flag_radius, screen_height() - flag_radius),
             ),
             progress: 0.0,
             capturing: None,
@@ -122,9 +122,9 @@ impl DuelState {
 /// 返回值：
 /// - Some(player_idx): 该玩家赢得了当前回合（达到 target_score）
 /// - None: 回合继续进行
-pub fn update(duel: &mut DuelState, players: &mut [Player], now: f64, dt: f32) -> Option<usize> {
+pub fn update(duel: &mut DuelState, players: &mut [Player], now: f64, dt: f32, flag_radius: f32) -> Option<usize> {
     if duel.flag.is_none() && now >= duel.next_flag_spawn {
-        duel.flag = Some(FlagObjective::new());
+        duel.flag = Some(FlagObjective::new(flag_radius));
     }
 
     if let Some(flag) = duel.flag.as_mut() {
@@ -133,7 +133,7 @@ pub fn update(duel: &mut DuelState, players: &mut [Player], now: f64, dt: f32) -
             if !player.alive {
                 continue;
             }
-            if (player.ship.pos - flag.pos).length() <= FLAG_RADIUS {
+            if (player.ship.pos - flag.pos).length() <= flag_radius {
                 if capturer.is_some() {
                     capturer = None;
                     break;
@@ -173,13 +173,13 @@ pub fn update(duel: &mut DuelState, players: &mut [Player], now: f64, dt: f32) -
     None
 }
 
-pub fn draw_flag(flag: &FlagObjective) {
+pub fn draw_flag(flag: &FlagObjective, flag_radius: f32) {
     let base_color = Color::new(0.95, 0.8, 0.2, 0.35);
-    draw_circle(flag.pos.x, flag.pos.y, FLAG_RADIUS, base_color);
+    draw_circle(flag.pos.x, flag.pos.y, flag_radius, base_color);
     draw_circle_lines(
         flag.pos.x,
         flag.pos.y,
-        FLAG_RADIUS,
+        flag_radius,
         3.,
         Color::new(1.0, 0.85, 0.3, 0.8),
     );
@@ -188,7 +188,7 @@ pub fn draw_flag(flag: &FlagObjective) {
     draw_circle(
         flag.pos.x,
         flag.pos.y,
-        FLAG_RADIUS * progress_ratio,
+        flag_radius * progress_ratio,
         Color::new(1.0, 0.9, 0.4, 0.5),
     );
 
@@ -201,7 +201,7 @@ pub fn draw_flag(flag: &FlagObjective) {
     draw_text(
         &text,
         flag.pos.x - size.width / 2.,
-        flag.pos.y - FLAG_RADIUS - 12.,
+        flag.pos.y - flag_radius - 12.,
         24.,
         DARKGRAY,
     );

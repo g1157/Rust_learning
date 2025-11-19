@@ -102,6 +102,7 @@ pub struct GameSettings {
     pub enable_screen_shake: bool,      // 是否开启振动
     pub enable_slow_motion: bool,       // 是否开启慢动作
     pub enable_debug_panel: bool,       // 是否默认显示性能面板
+    pub flag_radius: f32,               // Flag 半径 (50.0-150.0)
 }
 
 impl GameSettings {
@@ -116,6 +117,7 @@ impl GameSettings {
             enable_screen_shake: true,
             enable_slow_motion: true,
             enable_debug_panel: true,
+            flag_radius: 90.0, // 默认 90 像素
         }
     }
 
@@ -137,6 +139,7 @@ pub enum SettingOption {
     ScreenShake,
     SlowMotion,
     DebugPanel,
+    FlagRadius,
     ResetDefaults,
     ResetAchievements,
 }
@@ -152,7 +155,8 @@ impl SettingOption {
             Self::WeaponSwitch => Self::ScreenShake,
             Self::ScreenShake => Self::SlowMotion,
             Self::SlowMotion => Self::DebugPanel,
-            Self::DebugPanel => Self::ResetDefaults,
+            Self::DebugPanel => Self::FlagRadius,
+            Self::FlagRadius => Self::ResetDefaults,
             Self::ResetDefaults => Self::ResetAchievements,
             Self::ResetAchievements => Self::Lives,
         }
@@ -169,7 +173,8 @@ impl SettingOption {
             Self::ScreenShake => Self::WeaponSwitch,
             Self::SlowMotion => Self::ScreenShake,
             Self::DebugPanel => Self::SlowMotion,
-            Self::ResetDefaults => Self::DebugPanel,
+            Self::FlagRadius => Self::DebugPanel,
+            Self::ResetDefaults => Self::FlagRadius,
             Self::ResetAchievements => Self::ResetDefaults,
         }
     }
@@ -283,7 +288,7 @@ pub enum GameMode {
 enum GameState {
     ModeSelection { selection: GameMode },
     SettingsDetail { selection: SettingOption }, // 设置详细界面
-    AchievementsView, // 成就查看界面
+    AchievementsView,                            // 成就查看界面
     WaitingStart,
     Playing,
     Paused { selection: PauseSelection },
@@ -314,14 +319,15 @@ async fn main() {
     let mut duel_state = DuelState::new(start_time);
     let mut highest_survival_score: u32 = 0;
     let mut survival_wave: u32 = 0;
-    let mut game_start_time: f64 = 0.0; // 当前局游戏开始时间
-    let mut session_bullets_fired: u32 = 0; // 当前会话发射的子弹数
+    let _game_start_time: f64 = 0.0; // 当前局游戏开始时间（保留供未来使用）
+    // session_bullets_fired 已移除 - 改用 achievements.stats.bullets_fired
     let mut state = GameState::ModeSelection {
         selection: GameMode::Survival,
     };
     let mut screen_shake: Option<ScreenShake> = None;
     let mut slow_motion = SlowMotion::new(); // 慢动作系统
     let mut show_debug = settings.enable_debug_panel; // 从设置初始化
+    let mut toast_message: Option<(String, f64)> = None; // (消息文本, 显示开始时间)
 
     loop {
         let frame_t = get_time();
@@ -341,7 +347,11 @@ async fn main() {
 
         match state {
             GameState::SettingsDetail { selection } => {
-                ui::draw_settings_screen(&settings, selection, fonts.get_best(settings.font_choice));
+                ui::draw_settings_screen(
+                    &settings,
+                    selection,
+                    fonts.get_best(settings.font_choice),
+                );
 
                 let mut next_selection = selection;
 
@@ -397,13 +407,19 @@ async fn main() {
                             show_debug = settings.enable_debug_panel;
                             setting_changed = true;
                         }
+                        SettingOption::FlagRadius => {
+                            settings.flag_radius = (settings.flag_radius - 5.0).max(50.0);
+                            setting_changed = true;
+                        }
                         SettingOption::ResetDefaults => {
                             settings.reset_to_default();
                             show_debug = settings.enable_debug_panel;
                             setting_changed = true;
+                            toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
                         }
                         SettingOption::ResetAchievements => {
                             achievements.reset();
+                            toast_message = Some(("Achievements reset successfully".to_string(), frame_t));
                         }
                     }
                 } else if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
@@ -449,13 +465,19 @@ async fn main() {
                             show_debug = settings.enable_debug_panel;
                             setting_changed = true;
                         }
+                        SettingOption::FlagRadius => {
+                            settings.flag_radius = (settings.flag_radius + 5.0).min(150.0);
+                            setting_changed = true;
+                        }
                         SettingOption::ResetDefaults => {
                             settings.reset_to_default();
                             show_debug = settings.enable_debug_panel;
                             setting_changed = true;
+                            toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
                         }
                         SettingOption::ResetAchievements => {
                             achievements.reset();
+                            toast_message = Some(("Achievements reset successfully".to_string(), frame_t));
                         }
                     }
                 }
@@ -471,8 +493,10 @@ async fn main() {
                         settings.reset_to_default();
                         show_debug = settings.enable_debug_panel;
                         achievements.stats.settings_changed += 1;
+                        toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
                     } else if matches!(selection, SettingOption::ResetAchievements) {
                         achievements.reset();
+                        toast_message = Some(("Achievements reset successfully".to_string(), frame_t));
                     }
                 }
 
@@ -489,12 +513,27 @@ async fn main() {
                     };
                 }
 
+                // 绘制消息提示（如果有）
+                if let Some((message, show_time)) = &toast_message {
+                    let time_since = (frame_t - show_time) as f32;
+                    ui::draw_message_toast(message, time_since, fonts.get_best(settings.font_choice));
+                    
+                    // 清理过期的消息
+                    if time_since > 3.0 {
+                        toast_message = None;
+                    }
+                }
+
                 next_frame().await;
                 continue;
             }
             GameState::AchievementsView => {
                 // 绘制成就界面
-                ui::draw_achievements_screen(&achievements, fonts.get_best(settings.font_choice), frame_t);
+                ui::draw_achievements_screen(
+                    &achievements,
+                    fonts.get_best(settings.font_choice),
+                    frame_t,
+                );
 
                 // ESC 返回模式选择
                 if is_key_pressed(KeyCode::Escape) {
@@ -554,7 +593,12 @@ async fn main() {
                     }
                 }
 
-                ui::draw_mode_selection(next_selection, &settings, &achievements, fonts.get_best(settings.font_choice));
+                ui::draw_mode_selection(
+                    next_selection,
+                    &settings,
+                    &achievements,
+                    fonts.get_best(settings.font_choice),
+                );
                 next_frame().await;
                 continue;
             }
@@ -571,22 +615,27 @@ async fn main() {
                     GameMode::Duel => "Duel: capture the flag!",
                     GameMode::Settings => unreachable!("Settings is not a playable mode"),
                     GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
-                });
-                ui::draw_players_hud(&players, HudMode::Waiting);
+                }, fonts.get_best(settings.font_choice));
+                ui::draw_players_hud(&players, HudMode::Waiting, fonts.get_best(settings.font_choice));
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score);
+                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
                 } else {
                     let text = format!(
                         "First to {} captures wins. Press [Enter] to start.",
                         duel_state.target_score
                     );
-                    let width = measure_text(&text, None, 24, 1.0).width;
-                    draw_text(
+                    let font_choice = fonts.get_best(settings.font_choice);
+                    let width = measure_text(&text, font_choice, 24, 1.0).width;
+                    draw_text_ex(
                         &text,
                         screen_width() / 2. - width / 2.,
                         screen_height() / 2. + 100.,
-                        24.,
-                        DARKGRAY,
+                        TextParams {
+                            font: font_choice,
+                            font_size: 24,
+                            color: DARKGRAY,
+                            ..Default::default()
+                        },
                     );
                 }
 
@@ -604,10 +653,10 @@ async fn main() {
                         current_mode,
                         settings.starting_lives,
                     );
-                    
+
                     // 触发 FirstFlight 成就（完成第一次游戏）
                     achievements.unlock(achievement::AchievementId::FirstFlight, frame_t);
-                    
+
                     state = GameState::Playing;
                 }
 
@@ -646,11 +695,11 @@ async fn main() {
                     GameMode::Settings => unreachable!("Settings is not a playable mode"),
                     GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
                 };
-                ui::draw_game_over_message(&text);
-                ui::draw_center_scores(&players, end_time, highest_survival_score);
-                ui::draw_players_hud(&players, HudMode::Active { time: end_time });
+                ui::draw_game_over_message(&text, fonts.get_best(settings.font_choice));
+                ui::draw_center_scores(&players, end_time, highest_survival_score, fonts.get_best(settings.font_choice));
+                ui::draw_players_hud(&players, HudMode::Active { time: end_time }, fonts.get_best(settings.font_choice));
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score);
+                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
                 }
 
                 if is_key_pressed(KeyCode::Enter) {
@@ -685,11 +734,22 @@ async fn main() {
             GameState::Paused { selection } => {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
                 render_scene(
-                    &players, &asteroids, &powerups, &particles, duel_view, frame_t, false, None,
-                    None, 1.0, &achievements, fonts.get_best(settings.font_choice),
+                    &players,
+                    &asteroids,
+                    &powerups,
+                    &particles,
+                    duel_view,
+                    frame_t,
+                    false,
+                    None,
+                    None,
+                    1.0,
+                    &achievements,
+                    fonts.get_best(settings.font_choice),
+                    settings.flag_radius,
                 );
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score);
+                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
                 }
 
                 let mut next_selection = selection;
@@ -707,7 +767,7 @@ async fn main() {
                     next_selection = PauseSelection::ModeSelect;
                 }
 
-                ui::draw_pause_menu(next_selection);
+                ui::draw_pause_menu(next_selection, fonts.get_best(settings.font_choice));
 
                 if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
                     match next_selection {
@@ -742,14 +802,26 @@ async fn main() {
             GameState::VictoryPause { started_at } => {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
                 render_scene(
-                    &players, &asteroids, &powerups, &particles, duel_view, frame_t, false, None,
-                    None, 1.0, &achievements, fonts.get_best(settings.font_choice),
+                    &players,
+                    &asteroids,
+                    &powerups,
+                    &particles,
+                    duel_view,
+                    frame_t,
+                    false,
+                    None,
+                    None,
+                    1.0,
+                    &achievements,
+                    fonts.get_best(settings.font_choice),
+                    settings.flag_radius,
                 );
                 ui::draw_victory_pause_overlay(
                     (started_at + VICTORY_PAUSE_DURATION - frame_t).max(0.0),
+                    fonts.get_best(settings.font_choice),
                 );
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score);
+                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
                 }
                 if frame_t - started_at >= VICTORY_PAUSE_DURATION {
                     // 生成下一波小行星并继续游戏
@@ -764,10 +836,21 @@ async fn main() {
                 // 显示回合结束画面
                 let duel_view = Some(&duel_state);
                 render_scene(
-                    &players, &asteroids, &powerups, &particles, duel_view, frame_t, false, None,
-                    None, 1.0, &achievements, fonts.get_best(settings.font_choice),
+                    &players,
+                    &asteroids,
+                    &powerups,
+                    &particles,
+                    duel_view,
+                    frame_t,
+                    false,
+                    None,
+                    None,
+                    1.0,
+                    &achievements,
+                    fonts.get_best(settings.font_choice),
+                    settings.flag_radius,
                 );
-                ui::draw_round_end(winner_idx, &duel_state);
+                ui::draw_round_end(winner_idx, &duel_state, fonts.get_best(settings.font_choice));
 
                 // 按空格或回车开始下一回合
                 if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Enter) {
@@ -795,12 +878,11 @@ async fn main() {
         // 累积游戏时间和子弹发射统计
         achievements.stats.total_playtime += dt as f64;
         achievements.stats.bullets_fired += bullets_fired;
-        session_bullets_fired += bullets_fired;
+        // session_bullets_fired 已移除 - 改用 achievements.stats.bullets_fired
 
         // 武器切换（Q键）- 仅当设置允许时
         if settings.enable_weapon_switch && is_key_pressed(KeyCode::Q) {
             for player in players.iter_mut() {
-                let old_weapon = player.weapon_type;
                 player.weapon_type = match player.weapon_type {
                     WeaponType::Normal => WeaponType::Spread,
                     WeaponType::Spread => WeaponType::Penetrating,
@@ -854,8 +936,8 @@ async fn main() {
                 let asteroid = &asteroids[obj.index];
                 if circle_intersects_triangle(asteroid.pos, asteroid.size, t1, t2, t3) {
                     player.mark_dead(frame_t);
-                    // 添加碰撞爆炸效果
-                    particles.spawn_explosion(asteroid.pos, asteroid.size, GRAY, frame_t as f32);
+                    // 添加碰撞爆炸效果 - 使用飞船位置而不是小行星位置
+                    particles.spawn_explosion(ship_center, asteroid.size, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     // 玩家死亡触发中等强度震动（仅当设置允许时）
                     if settings.enable_screen_shake {
@@ -955,7 +1037,7 @@ async fn main() {
         }
 
         if matches!(current_mode, GameMode::Duel) {
-            handle_duel_hits(&mut players, frame_t);
+            handle_duel_hits(&mut players, &mut particles, frame_t);
         }
 
         for player in players.iter_mut() {
@@ -967,7 +1049,8 @@ async fn main() {
         match current_mode {
             GameMode::Survival => {
                 powerup::spawn(frame_t, &mut powerups, &mut next_shield_spawn);
-                let shields_collected = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                let shields_collected =
+                    powerup::handle_pickups(&mut players, &mut powerups, frame_t);
                 if shields_collected > 0 {
                     achievements.stats.shields_collected += shields_collected;
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
@@ -995,7 +1078,7 @@ async fn main() {
             GameMode::Duel => {
                 powerups.clear();
                 // 检查旗帜夺取胜利
-                if let Some(winner_idx) = duel::update(&mut duel_state, &mut players, frame_t, dt) {
+                if let Some(winner_idx) = duel::update(&mut duel_state, &mut players, frame_t, dt, settings.flag_radius) {
                     duel_state.record_round_winner(winner_idx);
                     duel_state.last_winner = Some(winner_idx);
 
@@ -1055,21 +1138,23 @@ async fn main() {
             particle_count: particles.count(),
         };
 
-        render_scene(
-            &players,
-            &asteroids,
-            &powerups,
-            &particles,
-            duel_view,
-            frame_t,
-            true,
-            screen_shake,
-            show_debug.then_some(&debug_stats),
-            time_scale,
-            &achievements, fonts.get_best(settings.font_choice),
-        );
+                render_scene(
+                    &players,
+                    &asteroids,
+                    &powerups,
+                    &particles,
+                    duel_view,
+                    frame_t,
+                    false,
+                    None,
+                    None,
+                    1.0,
+                    &achievements,
+                    fonts.get_best(settings.font_choice),
+                    settings.flag_radius,
+                );
         if matches!(current_mode, GameMode::Survival) {
-            ui::draw_survival_record(highest_survival_score);
+            ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
         }
         next_frame().await;
     }
@@ -1165,26 +1250,33 @@ fn update_asteroids(asteroids: &mut [Asteroid], dt: f32, speed_multiplier: f32) 
     }
 }
 
-fn handle_duel_hits(players: &mut [Player], frame_t: f64) {
+fn handle_duel_hits(players: &mut [Player], particles: &mut ParticleSystem, frame_t: f64) {
     for shooter_idx in 0..players.len() {
         let (before, rest) = players.split_at_mut(shooter_idx);
         let (shooter, after) = rest
             .split_first_mut()
             .expect("Player array should not be empty");
         for target in before.iter_mut() {
-            apply_bullet_hits(shooter, target, frame_t, DUEL_BULLET_RADIUS);
+            apply_bullet_hits(shooter, target, particles, frame_t, DUEL_BULLET_RADIUS);
         }
         for target in after.iter_mut() {
-            apply_bullet_hits(shooter, target, frame_t, DUEL_BULLET_RADIUS);
+            apply_bullet_hits(shooter, target, particles, frame_t, DUEL_BULLET_RADIUS);
         }
     }
 }
 
-fn apply_bullet_hits(shooter: &mut Player, target: &mut Player, frame_t: f64, radius: f32) {
+fn apply_bullet_hits(
+    shooter: &mut Player,
+    target: &mut Player,
+    particles: &mut ParticleSystem,
+    frame_t: f64,
+    radius: f32,
+) {
     if !target.alive {
         return;
     }
     let (t1, t2, t3) = target.ship.triangle_vertices();
+    let ship_center = target.ship.pos;
     for bullet in shooter.bullets.iter_mut() {
         if bullet.collided {
             continue;
@@ -1192,6 +1284,8 @@ fn apply_bullet_hits(shooter: &mut Player, target: &mut Player, frame_t: f64, ra
         if circle_intersects_triangle(bullet.pos, radius, t1, t2, t3) {
             target.mark_dead(frame_t);
             bullet.collided = true;
+            // 添加飞船爆炸粒子效果 - 使用飞船位置
+            particles.spawn_explosion(ship_center, SHIP_HEIGHT * 1.5, GRAY, frame_t as f32);
         }
     }
 }
@@ -1210,6 +1304,7 @@ fn render_scene(
     time_scale: f32,
     achievements: &AchievementManager,
     font: Option<&Font>,
+    flag_radius: f32,
 ) {
     // 应用屏幕震动偏移
     let shake_offset = screen_shake
@@ -1295,38 +1390,38 @@ fn render_scene(
     if let Some(state) = duel_state
         && let Some(flag) = &state.flag
     {
-        duel::draw_flag(flag);
+        duel::draw_flag(flag, flag_radius);
     }
 
-    ui::draw_players_hud(players, HudMode::Active { time: frame_t });
+    ui::draw_players_hud(players, HudMode::Active { time: frame_t }, font);
 
     // 在 Duel 模式下显示连击状态
     if duel_state.is_some() {
-        ui::draw_killstreak(players);
+        ui::draw_killstreak(players, font);
     }
 
     // 显示慢动作指示器
-    ui::draw_slow_motion_indicator(time_scale);
+    ui::draw_slow_motion_indicator(time_scale, font);
 
     // 显示性能监控面板
     if let Some(stats) = debug_stats {
-        ui::draw_debug_panel(stats);
+        ui::draw_debug_panel(stats, font);
     }
 
     if show_pause_hint {
-        ui::draw_pause_hint();
+        ui::draw_pause_hint(font);
     }
 
     // 显示成就解锁提示
     let recent_unlocks = achievements.get_recent_unlocks(6.0, frame_t);
     for (i, id) in recent_unlocks.iter().enumerate() {
-        if let Some(progress) = achievements.get_progress(*id) {
-            if let Some(unlock_time) = progress.unlock_time {
-                let time_since = (frame_t - unlock_time) as f32;
-                // 每个提示稍微偏移一点，避免重叠
-                let offset_y = i as f32 * 110.0;
-                ui::draw_achievement_unlock_toast_offset(*id, time_since, offset_y, font);
-            }
+        if let Some(progress) = achievements.get_progress(*id)
+            && let Some(unlock_time) = progress.unlock_time
+        {
+            let time_since = (frame_t - unlock_time) as f32;
+            // 每个提示稍微偏移一点，避免重叠
+            let offset_y = i as f32 * 110.0;
+            ui::draw_achievement_unlock_toast_offset(*id, time_since, offset_y, font);
         }
     }
 }
@@ -1415,7 +1510,7 @@ fn update_achievements(
     // 检查连击成就
     for player in players {
         let streak = player.killstreak;
-        
+
         if streak >= 2 {
             achievements.update_progress(AchievementId::DoubleTrouble, streak.max(2), frame_t);
         }
@@ -1435,7 +1530,7 @@ fn update_achievements(
         if streak >= 15 {
             achievements.update_progress(AchievementId::Godlike, streak.max(15), frame_t);
         }
-        
+
         // 更新最高连击记录
         achievements.stats.max_killstreak = achievements.stats.max_killstreak.max(streak);
 
@@ -1445,18 +1540,30 @@ fn update_achievements(
             achievements.update_progress(AchievementId::FirstBlood, 1, frame_t);
         }
         if session_kills >= 10 {
-            achievements.update_progress(AchievementId::Marksman, achievements.stats.total_kills, frame_t);
+            achievements.update_progress(
+                AchievementId::Marksman,
+                achievements.stats.total_kills,
+                frame_t,
+            );
         }
     }
 
     // 检查累计击杀数
     if achievements.stats.total_kills >= 500 {
-        achievements.update_progress(AchievementId::Deadeye, achievements.stats.total_kills, frame_t);
+        achievements.update_progress(
+            AchievementId::Deadeye,
+            achievements.stats.total_kills,
+            frame_t,
+        );
     }
 
     // 检查子弹发射数
     if achievements.stats.bullets_fired >= 100 {
-        achievements.update_progress(AchievementId::Armed, achievements.stats.bullets_fired, frame_t);
+        achievements.update_progress(
+            AchievementId::Armed,
+            achievements.stats.bullets_fired,
+            frame_t,
+        );
     }
 
     // 检查护盾拾取数
@@ -1464,13 +1571,17 @@ fn update_achievements(
         achievements.update_progress(AchievementId::Protected, 1, frame_t);
     }
     if achievements.stats.shields_collected >= 20 {
-        achievements.update_progress(AchievementId::ShieldMaster, achievements.stats.shields_collected, frame_t);
+        achievements.update_progress(
+            AchievementId::ShieldMaster,
+            achievements.stats.shields_collected,
+            frame_t,
+        );
     }
 
     // 检查生存模式相关成就
     if matches!(current_mode, GameMode::Survival) {
         let survival_score = total_survival_score(players);
-        
+
         // 分数成就
         if survival_score >= 1000 {
             achievements.update_progress(AchievementId::Century, survival_score, frame_t);
@@ -1489,32 +1600,54 @@ fn update_achievements(
         if survival_wave >= 10 {
             achievements.update_progress(AchievementId::WaveGod, survival_wave, frame_t);
         }
-        
+
         // 更新最高波次
         achievements.stats.max_wave = achievements.stats.max_wave.max(survival_wave);
     }
 
     // 检查累计时间成就
-    if achievements.stats.total_playtime >= 1800.0 { // 30分钟
-        achievements.update_progress(AchievementId::Veteran, achievements.stats.total_playtime as u32, frame_t);
+    if achievements.stats.total_playtime >= 1800.0 {
+        // 30分钟
+        achievements.update_progress(
+            AchievementId::Veteran,
+            achievements.stats.total_playtime as u32,
+            frame_t,
+        );
     }
-    if achievements.stats.total_playtime >= 7200.0 { // 2小时
-        achievements.update_progress(AchievementId::Legend, achievements.stats.total_playtime as u32, frame_t);
+    if achievements.stats.total_playtime >= 7200.0 {
+        // 2小时
+        achievements.update_progress(
+            AchievementId::Legend,
+            achievements.stats.total_playtime as u32,
+            frame_t,
+        );
     }
 
     // 检查模式探索成就
     if achievements.stats.modes_played.len() >= 2 {
-        achievements.update_progress(AchievementId::Adventurer, achievements.stats.modes_played.len() as u32, frame_t);
+        achievements.update_progress(
+            AchievementId::Adventurer,
+            achievements.stats.modes_played.len() as u32,
+            frame_t,
+        );
     }
 
     // 检查武器使用成就
     if achievements.stats.weapons_used.len() >= 3 {
-        achievements.update_progress(AchievementId::Arsenal, achievements.stats.weapons_used.len() as u32, frame_t);
+        achievements.update_progress(
+            AchievementId::Arsenal,
+            achievements.stats.weapons_used.len() as u32,
+            frame_t,
+        );
     }
 
     // 检查设置修改成就
     if achievements.stats.settings_changed >= 5 {
-        achievements.update_progress(AchievementId::Tinkerer, achievements.stats.settings_changed, frame_t);
+        achievements.update_progress(
+            AchievementId::Tinkerer,
+            achievements.stats.settings_changed,
+            frame_t,
+        );
     }
 
     // 检查对战模式成就
@@ -1523,7 +1656,11 @@ fn update_achievements(
             achievements.update_progress(AchievementId::Warrior, 1, frame_t);
         }
         if achievements.stats.duel_wins >= 5 {
-            achievements.update_progress(AchievementId::Duelist, achievements.stats.duel_wins, frame_t);
+            achievements.update_progress(
+                AchievementId::Duelist,
+                achievements.stats.duel_wins,
+                frame_t,
+            );
         }
     }
 

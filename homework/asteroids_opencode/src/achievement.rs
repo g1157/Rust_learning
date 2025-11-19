@@ -130,10 +130,10 @@ impl AchievementId {
 /// 成就等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AchievementTier {
-    Bronze,   // 🥉 青铜（新手友好）
-    Silver,   // 🥈 银牌（需要技巧）
-    Gold,     // 🥇 金牌（有挑战性）
-    Diamond,  // 💎 钻石（顶级成就）
+    Bronze,  // 🥉 青铜（新手友好）
+    Silver,  // 🥈 银牌（需要技巧）
+    Gold,    // 🥇 金牌（有挑战性）
+    Diamond, // 💎 钻石（顶级成就）
 }
 
 impl AchievementTier {
@@ -160,14 +160,14 @@ impl AchievementTier {
 /// 成就分类
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AchievementCategory {
-    Beginner,    // 新手村
-    Combo,       // 连击大师
-    Survival,    // 生存模式
-    Duel,        // 对战模式
+    Beginner,      // 新手村
+    Combo,         // 连击大师
+    Survival,      // 生存模式
+    Duel,          // 对战模式
     Perfectionist, // 完美主义
-    Explorer,    // 探索实验
-    Veteran,     // 累计成就
-    Hidden,      // 隐藏成就
+    Explorer,      // 探索实验
+    Veteran,       // 累计成就
+    Hidden,        // 隐藏成就
 }
 
 impl AchievementCategory {
@@ -322,7 +322,7 @@ impl Achievement {
                 name: "Unstoppable",
                 description: "达到10连击",
                 quote: "无人能挡！",
-                icon: "!!", 
+                icon: "!!",
                 tier: AchievementTier::Gold,
                 category: AchievementCategory::Combo,
                 hidden: false,
@@ -642,47 +642,37 @@ impl Achievement {
 }
 
 /// 成就进度
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AchievementProgress {
     pub unlocked: bool,
     pub unlock_time: Option<f64>,
     pub current: u32,
 }
 
-impl Default for AchievementProgress {
-    fn default() -> Self {
-        Self {
-            unlocked: false,
-            unlock_time: None,
-            current: 0,
-        }
-    }
-}
-
 /// 玩家统计数据（累计追踪）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlayerStats {
-    pub total_playtime: f64,        // 总游戏时长（秒）
-    pub total_kills: u32,            // 总击杀数
-    pub bullets_fired: u32,          // 发射的子弹总数
-    pub shields_collected: u32,      // 拾取的护盾数
-    pub games_played: u32,           // 游戏局数
-    pub survival_games: u32,         // 生存模式局数
-    pub duel_games: u32,             // 对战模式局数
-    pub duel_wins: u32,              // 对战胜利数
+    pub total_playtime: f64,           // 总游戏时长（秒）
+    pub total_kills: u32,              // 总击杀数
+    pub bullets_fired: u32,            // 发射的子弹总数
+    pub shields_collected: u32,        // 拾取的护盾数
+    pub games_played: u32,             // 游戏局数
+    pub survival_games: u32,           // 生存模式局数
+    pub duel_games: u32,               // 对战模式局数
+    pub duel_wins: u32,                // 对战胜利数
     pub modes_played: HashSet<String>, // 已玩过的模式
     pub weapons_used: HashSet<String>, // 已使用的武器
-    pub settings_changed: u32,       // 设置修改次数
-    pub max_wave: u32,               // 最高波次
-    pub max_killstreak: u32,         // 最高连击
-    pub five_streaks: u32,           // 5连击次数
+    pub settings_changed: u32,         // 设置修改次数
+    pub max_wave: u32,                 // 最高波次
+    pub max_killstreak: u32,           // 最高连击
+    pub five_streaks: u32,             // 5连击次数
 }
 
 /// 成就管理器
 pub struct AchievementManager {
     progress: HashMap<AchievementId, AchievementProgress>,
     recently_unlocked: Vec<(AchievementId, f64)>, // 最近解锁的成就（用于显示动画）
-    pub stats: PlayerStats,          // 玩家统计
+    pub stats: PlayerStats,                       // 玩家统计
     save_path: PathBuf,
 }
 
@@ -723,14 +713,14 @@ impl AchievementManager {
 
     /// 检查并解锁成就
     pub fn unlock(&mut self, id: AchievementId, time: f64) -> bool {
-        if let Some(progress) = self.progress.get_mut(&id) {
-            if !progress.unlocked {
-                progress.unlocked = true;
-                progress.unlock_time = Some(time);
-                self.recently_unlocked.push((id, time));
-                self.save();
-                return true;
-            }
+        if let Some(progress) = self.progress.get_mut(&id)
+            && !progress.unlocked
+        {
+            progress.unlocked = true;
+            progress.unlock_time = Some(time);
+            self.recently_unlocked.push((id, time));
+            self.save();
+            return true;
         }
         false
     }
@@ -738,18 +728,19 @@ impl AchievementManager {
     /// 更新进度
     pub fn update_progress(&mut self, id: AchievementId, value: u32, time: f64) {
         let achievement = Achievement::get(id);
-        if let Some(progress) = self.progress.get_mut(&id) {
-            if !progress.unlocked {
-                progress.current = value;
-                // 检查是否达到目标
-                if achievement.target > 0 && progress.current >= achievement.target {
-                    self.unlock(id, time);
-                }
+        if let Some(progress) = self.progress.get_mut(&id)
+            && !progress.unlocked
+        {
+            progress.current = value;
+            // 检查是否达到目标
+            if achievement.target > 0 && progress.current >= achievement.target {
+                self.unlock(id, time);
             }
         }
     }
 
     /// 增加进度
+    #[allow(dead_code)]
     pub fn increment_progress(&mut self, id: AchievementId, delta: u32, time: f64) {
         if let Some(progress) = self.progress.get(&id) {
             let new_value = progress.current + delta;
@@ -763,11 +754,9 @@ impl AchievementManager {
     }
 
     /// 是否已解锁
+    #[allow(dead_code)]
     pub fn is_unlocked(&self, id: AchievementId) -> bool {
-        self.progress
-            .get(&id)
-            .map(|p| p.unlocked)
-            .unwrap_or(false)
+        self.progress.get(&id).map(|p| p.unlocked).unwrap_or(false)
     }
 
     /// 获取最近解锁的成就（用于显示）
@@ -814,27 +803,27 @@ impl AchievementManager {
             stats: self.stats.clone(),
         };
 
-        if let Ok(json) = serde_json::to_string_pretty(&save_data) {
-            if let Err(e) = fs::write(&self.save_path, json) {
-                eprintln!("Failed to save achievements: {}", e);
-            }
+        if let Ok(json) = serde_json::to_string_pretty(&save_data)
+            && let Err(e) = fs::write(&self.save_path, json)
+        {
+            eprintln!("Failed to save achievements: {}", e);
         }
     }
 
     /// 从文件加载
     pub fn load(&mut self) {
-        if let Ok(data) = fs::read_to_string(&self.save_path) {
-            if let Ok(save_data) = serde_json::from_str::<SaveData>(&data) {
-                // 加载统计数据
-                self.stats = save_data.stats;
+        if let Ok(data) = fs::read_to_string(&self.save_path)
+            && let Ok(save_data) = serde_json::from_str::<SaveData>(&data)
+        {
+            // 加载统计数据
+            self.stats = save_data.stats;
 
-                // 加载成就进度
-                for (id_str, progress) in save_data.progress {
-                    if let Some(id) = self.parse_achievement_id(&id_str) {
-                        if let Some(existing_progress) = self.progress.get_mut(&id) {
-                            *existing_progress = progress;
-                        }
-                    }
+            // 加载成就进度
+            for (id_str, progress) in save_data.progress {
+                if let Some(id) = self.parse_achievement_id(&id_str)
+                    && let Some(existing_progress) = self.progress.get_mut(&id)
+                {
+                    *existing_progress = progress;
                 }
             }
         }
@@ -886,6 +875,7 @@ impl AchievementManager {
     }
 
     /// 从字符串中提取数字
+    #[allow(dead_code)]
     fn extract_number(&self, s: &str, key: &str) -> u32 {
         if let Some(pos) = s.find(key) {
             let after = &s[pos + key.len()..];
@@ -901,6 +891,7 @@ impl AchievementManager {
     }
 
     /// 从字符串中提取浮点数
+    #[allow(dead_code)]
     fn extract_number_f64(&self, s: &str, key: &str) -> f64 {
         if let Some(pos) = s.find(key) {
             let after = &s[pos + key.len()..];
@@ -920,6 +911,7 @@ impl AchievementManager {
         for progress in self.progress.values_mut() {
             *progress = AchievementProgress::default();
         }
+        self.stats = PlayerStats::default(); // 重置统计数据
         self.recently_unlocked.clear();
         self.save();
     }
