@@ -86,16 +86,19 @@
         
         console.log('🔧 Loading WASM module...');
         
-        load("asteroids_opencode.wasm")
-            .then(() => {
-                console.log('✅ WASM loaded successfully');
+        // Macroquad's load() doesn't return a Promise, it starts the game directly
+        try {
+            load("asteroids_opencode.wasm");
+            // Hide loading screen after a short delay
+            setTimeout(() => {
+                console.log('✅ Game started');
                 loadingScreen.classList.add('hidden');
-            })
-            .catch(err => {
-                console.error('❌ Failed to load WASM:', err);
-                loadingText.textContent = 'Error: ' + err.message;
-                loadingText.style.color = '#ff4444';
-            });
+            }, 1000);
+        } catch (err) {
+            console.error('❌ Failed to load WASM:', err);
+            loadingText.textContent = 'Error: ' + err.message;
+            loadingText.style.color = '#ff4444';
+        }
     </script>
 </body>
 </html>
