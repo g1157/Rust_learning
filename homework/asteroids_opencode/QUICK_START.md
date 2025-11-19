@@ -1,6 +1,6 @@
 # 🚀 快速开始指南
 
-## 立即运行
+## 🎮 桌面版运行
 
 ```bash
 # 直接运行（调试模式）
@@ -9,6 +9,31 @@ cargo run
 # 发布模式（更流畅）
 cargo run --release
 ```
+
+## 🌐 Web 版测试
+
+### 快速启动
+```bash
+cd /home/blue/Rust_learning/homework/asteroids_opencode
+./diagnose_wasm.sh
+```
+
+或者简单版本：
+```bash
+cd web
+python3 -m http.server 8000
+```
+
+然后访问: **http://localhost:8000**
+
+### 测试 LocalStorage 持久化
+1. 打开浏览器开发者工具 (F12)
+2. Application → Local Storage → http://localhost:8000
+3. 游玩游戏，解锁成就
+4. 刷新页面 (F5)
+5. 验证成就保留 ✅
+
+详细测试步骤见: **LOCALSTORAGE_TEST.md**
 
 ## 📋 发布/展示前 5 分钟检查清单
 
