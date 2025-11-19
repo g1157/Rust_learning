@@ -72,11 +72,20 @@
         <div class="loading-text">Loading...</div>
     </div>
     <canvas id="glcanvas" tabindex="1"></canvas>
-    <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
+    <script src="mq_js_bundle.js"></script>
     <script>
-        load("asteroids_opencode.wasm").then(() => {
-            document.getElementById('loading-screen').classList.add('hidden');
-        });
+        const loadingText = document.querySelector('.loading-text');
+        
+        load("asteroids_opencode.wasm")
+            .then(() => {
+                console.log('✅ WASM loaded successfully');
+                document.getElementById('loading-screen').classList.add('hidden');
+            })
+            .catch(err => {
+                console.error('❌ Failed to load WASM:', err);
+                loadingText.textContent = 'Error: ' + err.message;
+                loadingText.style.color = '#ff4444';
+            });
     </script>
 </body>
 </html>
