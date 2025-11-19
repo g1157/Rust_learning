@@ -415,11 +415,13 @@ async fn main() {
                             settings.reset_to_default();
                             show_debug = settings.enable_debug_panel;
                             setting_changed = true;
-                            toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
+                            toast_message =
+                                Some(("Settings reset to defaults".to_string(), frame_t));
                         }
                         SettingOption::ResetAchievements => {
                             achievements.reset();
-                            toast_message = Some(("Achievements reset successfully".to_string(), frame_t));
+                            toast_message =
+                                Some(("Achievements reset successfully".to_string(), frame_t));
                         }
                     }
                 } else if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
@@ -473,11 +475,13 @@ async fn main() {
                             settings.reset_to_default();
                             show_debug = settings.enable_debug_panel;
                             setting_changed = true;
-                            toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
+                            toast_message =
+                                Some(("Settings reset to defaults".to_string(), frame_t));
                         }
                         SettingOption::ResetAchievements => {
                             achievements.reset();
-                            toast_message = Some(("Achievements reset successfully".to_string(), frame_t));
+                            toast_message =
+                                Some(("Achievements reset successfully".to_string(), frame_t));
                         }
                     }
                 }
@@ -496,7 +500,8 @@ async fn main() {
                         toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
                     } else if matches!(selection, SettingOption::ResetAchievements) {
                         achievements.reset();
-                        toast_message = Some(("Achievements reset successfully".to_string(), frame_t));
+                        toast_message =
+                            Some(("Achievements reset successfully".to_string(), frame_t));
                     }
                 }
 
@@ -516,8 +521,12 @@ async fn main() {
                 // 绘制消息提示（如果有）
                 if let Some((message, show_time)) = &toast_message {
                     let time_since = (frame_t - show_time) as f32;
-                    ui::draw_message_toast(message, time_since, fonts.get_best(settings.font_choice));
-                    
+                    ui::draw_message_toast(
+                        message,
+                        time_since,
+                        fonts.get_best(settings.font_choice),
+                    );
+
                     // 清理过期的消息
                     if time_since > 3.0 {
                         toast_message = None;
@@ -610,15 +619,27 @@ async fn main() {
                     continue;
                 }
 
-                ui::draw_waiting_screen(match current_mode {
-                    GameMode::Survival => "Survival: press [Enter] to start",
-                    GameMode::Duel => "Duel: capture the flag!",
-                    GameMode::Settings => unreachable!("Settings is not a playable mode"),
-                    GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
-                }, fonts.get_best(settings.font_choice));
-                ui::draw_players_hud(&players, HudMode::Waiting, fonts.get_best(settings.font_choice));
+                ui::draw_waiting_screen(
+                    match current_mode {
+                        GameMode::Survival => "Survival: press [Enter] to start",
+                        GameMode::Duel => "Duel: capture the flag!",
+                        GameMode::Settings => unreachable!("Settings is not a playable mode"),
+                        GameMode::Achievements => {
+                            unreachable!("Achievements is not a playable mode")
+                        }
+                    },
+                    fonts.get_best(settings.font_choice),
+                );
+                ui::draw_players_hud(
+                    &players,
+                    HudMode::Waiting,
+                    fonts.get_best(settings.font_choice),
+                );
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
+                    ui::draw_survival_record(
+                        highest_survival_score,
+                        fonts.get_best(settings.font_choice),
+                    );
                 } else {
                     let text = format!(
                         "First to {} captures wins. Press [Enter] to start.",
@@ -696,10 +717,22 @@ async fn main() {
                     GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
                 };
                 ui::draw_game_over_message(&text, fonts.get_best(settings.font_choice));
-                ui::draw_center_scores(&players, end_time, highest_survival_score, fonts.get_best(settings.font_choice));
-                ui::draw_players_hud(&players, HudMode::Active { time: end_time }, fonts.get_best(settings.font_choice));
+                ui::draw_center_scores(
+                    &players,
+                    end_time,
+                    highest_survival_score,
+                    fonts.get_best(settings.font_choice),
+                );
+                ui::draw_players_hud(
+                    &players,
+                    HudMode::Active { time: end_time },
+                    fonts.get_best(settings.font_choice),
+                );
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
+                    ui::draw_survival_record(
+                        highest_survival_score,
+                        fonts.get_best(settings.font_choice),
+                    );
                 }
 
                 if is_key_pressed(KeyCode::Enter) {
@@ -749,7 +782,10 @@ async fn main() {
                     settings.flag_radius,
                 );
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
+                    ui::draw_survival_record(
+                        highest_survival_score,
+                        fonts.get_best(settings.font_choice),
+                    );
                 }
 
                 let mut next_selection = selection;
@@ -821,7 +857,10 @@ async fn main() {
                     fonts.get_best(settings.font_choice),
                 );
                 if matches!(current_mode, GameMode::Survival) {
-                    ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
+                    ui::draw_survival_record(
+                        highest_survival_score,
+                        fonts.get_best(settings.font_choice),
+                    );
                 }
                 if frame_t - started_at >= VICTORY_PAUSE_DURATION {
                     // 生成下一波小行星并继续游戏
@@ -850,7 +889,11 @@ async fn main() {
                     fonts.get_best(settings.font_choice),
                     settings.flag_radius,
                 );
-                ui::draw_round_end(winner_idx, &duel_state, fonts.get_best(settings.font_choice));
+                ui::draw_round_end(
+                    winner_idx,
+                    &duel_state,
+                    fonts.get_best(settings.font_choice),
+                );
 
                 // 按空格或回车开始下一回合
                 if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Enter) {
@@ -1078,7 +1121,13 @@ async fn main() {
             GameMode::Duel => {
                 powerups.clear();
                 // 检查旗帜夺取胜利
-                if let Some(winner_idx) = duel::update(&mut duel_state, &mut players, frame_t, dt, settings.flag_radius) {
+                if let Some(winner_idx) = duel::update(
+                    &mut duel_state,
+                    &mut players,
+                    frame_t,
+                    dt,
+                    settings.flag_radius,
+                ) {
                     duel_state.record_round_winner(winner_idx);
                     duel_state.last_winner = Some(winner_idx);
 
@@ -1138,21 +1187,21 @@ async fn main() {
             particle_count: particles.count(),
         };
 
-                render_scene(
-                    &players,
-                    &asteroids,
-                    &powerups,
-                    &particles,
-                    duel_view,
-                    frame_t,
-                    false,
-                    None,
-                    None,
-                    1.0,
-                    &achievements,
-                    fonts.get_best(settings.font_choice),
-                    settings.flag_radius,
-                );
+        render_scene(
+            &players,
+            &asteroids,
+            &powerups,
+            &particles,
+            duel_view,
+            frame_t,
+            false,
+            screen_shake,
+            Some(&debug_stats),
+            time_scale,
+            &achievements,
+            fonts.get_best(settings.font_choice),
+            settings.flag_radius,
+        );
         if matches!(current_mode, GameMode::Survival) {
             ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
         }

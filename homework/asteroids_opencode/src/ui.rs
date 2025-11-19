@@ -889,12 +889,24 @@ pub fn draw_round_end(winner_idx: usize, duel_state: &DuelState, font: Option<&F
         "Score: {} - {}",
         duel_state.round_wins[0], duel_state.round_wins[1]
     );
-    draw_text_centered(&score_text, y + 110., 28, Color::new(0.3, 0.4, 0.5, 1.0), font);
+    draw_text_centered(
+        &score_text,
+        y + 110.,
+        28,
+        Color::new(0.3, 0.4, 0.5, 1.0),
+        font,
+    );
 
     // 赛制信息
     let rounds_to_win = duel_state.round_mode.rounds_to_win();
     let mode_text = format!("First to {} rounds", rounds_to_win);
-    draw_text_centered(&mode_text, y + 150., 20, Color::new(0.4, 0.5, 0.6, 1.0), font);
+    draw_text_centered(
+        &mode_text,
+        y + 150.,
+        20,
+        Color::new(0.4, 0.5, 0.6, 1.0),
+        font,
+    );
 
     // 提示
     let hint = "Press [Space] or [Enter] to continue";
@@ -1534,7 +1546,13 @@ fn draw_reset_option(panel_x: f32, y: f32, panel_width: f32, selected: bool, fon
 }
 
 /// 绘制重置成就选项（特殊样式）
-fn draw_reset_achievements_option(panel_x: f32, y: f32, panel_width: f32, selected: bool, font: Option<&Font>) {
+fn draw_reset_achievements_option(
+    panel_x: f32,
+    y: f32,
+    panel_width: f32,
+    selected: bool,
+    font: Option<&Font>,
+) {
     let option_height = 60.;
     let padding = 30.;
 
@@ -1975,7 +1993,11 @@ fn draw_wrapped_text_in_card(
 
 /// 绘制成就解锁提示（浮动通知）
 #[allow(dead_code)]
-pub fn draw_achievement_unlock_toast(id: AchievementId, time_since_unlock: f32, font: Option<&Font>) {
+pub fn draw_achievement_unlock_toast(
+    id: AchievementId,
+    time_since_unlock: f32,
+    font: Option<&Font>,
+) {
     let achievement = Achievement::get(id);
 
     // 动画：从右侧滑入，停留，然后淡出
@@ -2239,7 +2261,7 @@ pub fn draw_achievement_unlock_toast_offset(
 /// 绘制消息提示（用于显示重置成功等通知）
 pub fn draw_message_toast(message: &str, time_since_show: f32, font: Option<&Font>) {
     let display_duration = 3.0; // 显示3秒
-    
+
     if time_since_show > display_duration {
         return;
     }

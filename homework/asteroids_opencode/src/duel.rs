@@ -122,7 +122,13 @@ impl DuelState {
 /// 返回值：
 /// - Some(player_idx): 该玩家赢得了当前回合（达到 target_score）
 /// - None: 回合继续进行
-pub fn update(duel: &mut DuelState, players: &mut [Player], now: f64, dt: f32, flag_radius: f32) -> Option<usize> {
+pub fn update(
+    duel: &mut DuelState,
+    players: &mut [Player],
+    now: f64,
+    dt: f32,
+    flag_radius: f32,
+) -> Option<usize> {
     if duel.flag.is_none() && now >= duel.next_flag_spawn {
         duel.flag = Some(FlagObjective::new(flag_radius));
     }
