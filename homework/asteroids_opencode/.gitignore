@@ -34,3 +34,8 @@ assets/fonts/*.otf
 assets/sounds/*.wav
 assets/sounds/*.ogg
 homework/hk8-1/*.html
+
+# Release builds and packages
+release_windows/
+*.zip
+*.tar.gz
