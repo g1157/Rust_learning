@@ -1,24 +1,43 @@
-# 🌐 Asteroids Web 版本 - 快速开始指南
+# 🌐 Asteroids Web 版本 - 使用指南
 
-## ✅ 第一阶段完成！
+## ✅ 完整功能已实现！
 
-你已经成功将 Asteroids 编译为 WebAssembly！🎉
+游戏已完全移植到 Web 平台，包含 LocalStorage 持久化！🎉
 
 ## 📦 当前状态
 
 ```
 web/
-├── asteroids_opencode.wasm  (572 KB) - 游戏主程序
-├── index.html               (2.5 KB) - 网页入口
-└── assets/                          - 游戏资源
+├── pkg/
+│   ├── asteroids_opencode_bg.wasm  (608 KB) - 游戏主程序
+│   └── asteroids_opencode.js       (12 KB)  - wasm-bindgen 绑定
+├── mq_js_bundle.js                 (36 KB)  - Macroquad 渲染引擎
+├── index.html                      (3.2 KB) - 网页入口
+└── assets/                                  - 游戏资源
     ├── sounds/
     └── fonts/
 ```
 
-## 🚀 本地测试
+## 🚀 构建和运行
 
-### 方法 1：使用 Python HTTP 服务器
+### 快速构建
+```bash
+./build_web.sh
+```
 
+### 手动构建
+```bash
+# 1. 编译 WASM
+cargo build --target wasm32-unknown-unknown --release
+
+# 2. 生成 JS 绑定
+wasm-bindgen target/wasm32-unknown-unknown/release/asteroids_opencode.wasm \
+  --out-dir web/pkg \
+  --target web \
+  --no-typescript
+```
+
+### 启动测试服务器
 ```bash
 cd web
 python3 -m http.server 8000
@@ -26,44 +45,49 @@ python3 -m http.server 8000
 
 然后打开浏览器访问：**http://localhost:8000**
 
-### 方法 2：使用其他服务器
-
-```bash
-# 使用 Node.js
-npx http-server web -p 8000
-
-# 使用 PHP
-php -S localhost:8000 -t web
-```
-
 ## 🎮 功能状态
 
 ### ✅ 已完成
-- [x] WASM 编译成功（572 KB，已优化）
-- [x] HTML 入口页面
+- [x] WASM 编译成功（608 KB + 12 KB JS）
+- [x] HTML 入口页面（ES6 模块）
 - [x] 游戏逻辑完整移植
-- [x] 成就系统（内存模式）
+- [x] **LocalStorage 持久化**（成就和统计）
 - [x] 本地双人游戏
 - [x] 所有游戏模式（Survival, Duel）
+- [x] 跨平台存储接口
 
 ### 🚧 待实现
-- [ ] LocalStorage 持久化（成就和设置）
 - [ ] WebSocket 联机对战
 - [ ] 触控操作支持（手机/平板）
 - [ ] 游戏服务器
+- [ ] 云同步（多设备）
 
 ## 📊 性能数据
 
-- **WASM 文件大小**: 572 KB
+- **总文件大小**: ~660 KB (WASM + JS)
 - **加载时间**: ~1-3秒（取决于网络）
 - **运行性能**: 60 FPS
 - **内存占用**: ~50 MB
+- **持久化**: LocalStorage (5-10 MB 配额)
 
 ## 🔧 技术栈
 
-- **前端**: Rust (WASM) + Macroquad
+- **前端**: Rust (WASM) + Macroquad + web-sys
 - **编译**: rustc 1.90.0 + wasm32-unknown-unknown
+- **绑定**: wasm-bindgen v0.2.105
 - **加载器**: Macroquad miniquad JS bundle
+- **存储**: Browser LocalStorage API
+
+## 🧪 测试 LocalStorage
+
+1. 打开浏览器开发者工具 (F12)
+2. 切换到 **Application** 标签
+3. 左侧: **Storage → Local Storage → http://localhost:8000**
+4. 游玩游戏，解锁成就
+5. 刷新页面 (F5)
+6. **验证**: 成就和统计应该保留
+
+详细测试步骤见: `LOCALSTORAGE_TEST.md`
 
 ## 📝 下一步
 
@@ -117,6 +141,12 @@ server {
 
 ## ❓ 常见问题
 
+**Q: 为什么一直在 Loading？**
+A: 请确保使用了正确的 wasm-bindgen 绑定。运行 `./build_web.sh` 重新构建。
+
+**Q: 控制台显示 "No __wbg_localStorage" 错误？**
+A: WASM 文件缺少 JS 绑定。需要用 `wasm-bindgen` 生成绑定，而不是直接用 `cargo build`。
+
 **Q: 为什么音效不工作？**
 A: 浏览器的音频需要用户交互才能播放。Macroquad 会自动处理，首次点击后音效就会生效。
 
@@ -124,7 +154,7 @@ A: 浏览器的音频需要用户交互才能播放。Macroquad 会自动处理�
 A: 可以运行，但需要添加触控控制。当前只支持键盘。
 
 **Q: 成就会保存吗？**
-A: 当前不会，刷新页面后会重置。需要添加 LocalStorage 支持。
+A: 是的！使用 LocalStorage 持久化，刷新页面后成就会保留。
 
 **Q: 能和朋友联机吗？**
 A: 还不能，需要实现 WebSocket 服务器（下一阶段）。
