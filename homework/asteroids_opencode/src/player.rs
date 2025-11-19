@@ -32,11 +32,18 @@ pub struct Controls {
     pub right: KeyCode,
     pub shoot_primary: KeyCode,
     pub shoot_alt: Option<KeyCode>,
+    pub weapon_switch: KeyCode,
+    pub weapon_switch_alt: Option<KeyCode>,
 }
 
 impl Controls {
     pub fn shoot_pressed(&self) -> bool {
         is_key_down(self.shoot_primary) || self.shoot_alt.map(is_key_down).unwrap_or(false)
+    }
+
+    pub fn weapon_switch_pressed(&self) -> bool {
+        is_key_pressed(self.weapon_switch)
+            || self.weapon_switch_alt.map(is_key_pressed).unwrap_or(false)
     }
 }
 

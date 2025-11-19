@@ -27,10 +27,12 @@ A modern take on the classic Asteroids arcade game, built with Rust and Macroqua
 ### Player 1
 - **W/A/D**: Thrust / Rotate Left / Rotate Right
 - **J or F**: Shoot
+- **U**: Switch weapon (when enabled in settings)
 
 ### Player 2
 - **↑/←/→**: Thrust / Rotate Left / Rotate Right
 - **1 or Numpad 1**: Shoot
+- **4 or Numpad 4**: Switch weapon (when enabled in settings)
 
 ### General
 - **Enter**: Start game / Confirm selection

@@ -923,17 +923,19 @@ async fn main() {
         achievements.stats.bullets_fired += bullets_fired;
         // session_bullets_fired 已移除 - 改用 achievements.stats.bullets_fired
 
-        // 武器切换（Q键）- 仅当设置允许时
-        if settings.enable_weapon_switch && is_key_pressed(KeyCode::Q) {
+        // 武器切换 - 每个玩家独立控制（仅当设置允许时）
+        if settings.enable_weapon_switch {
             for player in players.iter_mut() {
-                player.weapon_type = match player.weapon_type {
-                    WeaponType::Normal => WeaponType::Spread,
-                    WeaponType::Spread => WeaponType::Penetrating,
-                    WeaponType::Penetrating => WeaponType::Normal,
-                };
-                // 追踪武器使用统计
-                let weapon_name = format!("{:?}", player.weapon_type);
-                achievements.stats.weapons_used.insert(weapon_name);
+                if player.controls.weapon_switch_pressed() {
+                    player.weapon_type = match player.weapon_type {
+                        WeaponType::Normal => WeaponType::Spread,
+                        WeaponType::Spread => WeaponType::Penetrating,
+                        WeaponType::Penetrating => WeaponType::Normal,
+                    };
+                    // 追踪武器使用统计
+                    let weapon_name = format!("{:?}", player.weapon_type);
+                    achievements.stats.weapons_used.insert(weapon_name);
+                }
             }
         }
 
@@ -1505,6 +1507,8 @@ fn init_players(now: f64, starting_lives: u32) -> Vec<Player> {
                 right: KeyCode::D,
                 shoot_primary: KeyCode::J,
                 shoot_alt: Some(KeyCode::F),
+                weapon_switch: KeyCode::U,
+                weapon_switch_alt: None,
             },
             now,
             starting_lives,
@@ -1519,6 +1523,8 @@ fn init_players(now: f64, starting_lives: u32) -> Vec<Player> {
                 right: KeyCode::Right,
                 shoot_primary: KeyCode::Key1,
                 shoot_alt: Some(KeyCode::Kp1),
+                weapon_switch: KeyCode::Key4,
+                weapon_switch_alt: Some(KeyCode::Kp4),
             },
             now,
             starting_lives,
