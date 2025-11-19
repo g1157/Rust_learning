@@ -1,5 +1,58 @@
 # 更新总结 - 最新改进 (2025-11-19)
 
+## 本次更新内容 (傍晚)
+
+### 1. 屏幕震动功能修复 ✅
+
+**问题**: 游戏中配置了屏幕震动效果，但从未实际生效。编译器产生6个警告：`screen_shake` 变量被赋值但从未使用。
+
+**原因**: `screen_shake` 变量在碰撞事件中被创建和赋值（玩家死亡、小行星爆炸），但在调用 `render_scene()` 渲染场景时传递的是 `None` 而不是 `screen_shake`。
+
+**解决方案**:
+1. 修改 `render_scene()` 调用，传递 `screen_shake` 而非 `None`
+2. 同时修复 `debug_stats` 和 `time_scale` 参数传递
+3. 确保屏幕震动数据正确传递到渲染函数
+
+**修改文件**:
+- `src/main.rs:1141-1155`: 更新游戏循环中的 `render_scene()` 调用
+  - 第9个参数: `None` → `screen_shake`
+  - 第10个参数: `None` → `Some(&debug_stats)`
+  - 第11个参数: `1.0` → `time_scale`
+
+**震动触发场景**:
+- 玩家死亡 (强度 4.0, 持续 0.25s)
+- 小行星被摧毁 (强度 3.0-6.0, 持续 0.12-0.2s)
+- 基于小行星大小调整强度
+
+**效果**: 
+- ✅ 所有6个编译器警告消除
+- ✅ 屏幕震动在战斗中正常工作
+- ✅ 调试面板和时间缩放也正确传递
+
+**技术细节**:
+```rust
+// 震动系统工作流程
+screen_shake = Some(ScreenShake::new(intensity, duration, now))
+    ↓
+render_scene(..., screen_shake, ...)
+    ↓
+shake_offset = screen_shake.get_offset(frame_t)
+    ↓
+所有游戏对象位置 += shake_offset
+```
+
+### 2. 代码格式优化 🎨
+
+**改进内容**:
+- 运行 `cargo fmt` 自动格式化所有代码
+- 改善长函数调用的换行和缩进
+- 统一代码风格，提升可读性
+
+**通过检查**:
+- ✅ `cargo check` - 无警告
+- ✅ `cargo clippy -- -D warnings` - 无lint问题
+- ✅ `cargo fmt --check` - 格式正确
+
 ## 本次更新内容 (下午)
 
 ### 1. 设置界面字体系统完全修复 ✅
