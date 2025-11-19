@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asteroids - Online Multiplayer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1a2e 100%);
+            font-family: 'Courier New', Courier, monospace;
+            color: #fff;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 14, 39, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 0.5s ease-out;
+        }
+
+        #loading-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-content {
+            text-align: center;
+        }
+
+        .loading-title {
+            font-size: 48px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #00f2ff, #ff00ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: glow 2s ease-in-out infinite;
+        }
+
+        @keyframes glow {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.5); }
+        }
+
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #00f2ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 18px;
+            color: #888;
+            margin-top: 10px;
+        }
+
+        .loading-progress {
+            width: 300px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        .loading-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00f2ff, #ff00ff);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        canvas {
+            display: block;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            box-shadow: 0 10px 50px rgba(0, 242, 255, 0.3);
+            background: #000;
+        }
+
+        .game-info {
+            text-align: center;
+            padding: 20px;
+            background: rgba(26, 26, 46, 0.8);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 600px;
+        }
+
+        .game-info h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #00f2ff;
+        }
+
+        .game-info p {
+            font-size: 14px;
+            color: #aaa;
+            line-height: 1.6;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+            font-size: 12px;
+        }
+
+        .control-group h3 {
+            font-size: 14px;
+            color: #ff00ff;
+            margin-bottom: 8px;
+        }
+
+        .control-group div {
+            padding: 4px 0;
+            color: #ccc;
+        }
+
+        .key {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            color: #00f2ff;
+        }
+
+        #error-message {
+            display: none;
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 0, 0, 0.9);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 2000;
+            box-shadow: 0 4px 20px rgba(255, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="loading-screen">
+        <div class="loading-content">
+            <div class="loading-title">🚀 ASTEROIDS 🚀</div>
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading game...</div>
+            <div class="loading-progress">
+                <div class="loading-progress-bar" id="progress-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="error-message"></div>
+
+    <div id="game-container">
+        <canvas id="glcanvas" tabindex="1"></canvas>
+        
+        <div class="game-info">
+            <h2>🎮 Controls</h2>
+            <div class="controls">
+                <div class="control-group">
+                    <h3>Player 1</h3>
+                    <div><span class="key">W/A/D</span> Move / Rotate</div>
+                    <div><span class="key">J</span> or <span class="key">F</span> Shoot</div>
+                    <div><span class="key">U</span> Switch Weapon</div>
+                </div>
+                <div class="control-group">
+                    <h3>Player 2</h3>
+                    <div><span class="key">↑/←/→</span> Move / Rotate</div>
+                    <div><span class="key">1</span> or <span class="key">Numpad 1</span> Shoot</div>
+                    <div><span class="key">4</span> or <span class="key">Numpad 4</span> Switch Weapon</div>
+                </div>
+            </div>
+            <p style="margin-top: 15px;">
+                <span class="key">Enter</span> Start | 
+                <span class="key">Esc</span> Pause | 
+                <span class="key">M</span> Menu | 
+                <span class="key">F3</span> Debug
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Progress bar simulation
+        let progress = 0;
+        const progressBar = document.getElementById('progress-bar');
+        const loadingScreen = document.getElementById('loading-screen');
+        
+        const progressInterval = setInterval(() => {
+            progress += Math.random() * 15;
+            if (progress > 90) progress = 90;
+            progressBar.style.width = progress + '%';
+        }, 100);
+
+        // Error handling
+        window.showError = function(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        };
+
+        // Load game
+        window.addEventListener('load', async () => {
+            try {
+                // Macroquad will handle the rest
+                // The canvas is automatically managed by macroquad
+                
+                // Complete loading after a short delay
+                setTimeout(() => {
+                    progress = 100;
+                    progressBar.style.width = '100%';
+                    clearInterval(progressInterval);
+                    
+                    setTimeout(() => {
+                        loadingScreen.classList.add('hidden');
+                        
+                        // Focus canvas for keyboard input
+                        const canvas = document.getElementById('glcanvas');
+                        if (canvas) {
+                            canvas.focus();
+                        }
+                    }, 500);
+                }, 1000);
+            } catch (error) {
+                console.error('Failed to load game:', error);
+                showError('Failed to load game: ' + error.message);
+            }
+        });
+
+        // Prevent context menu on right click
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+
+        // Keep canvas focused
+        document.addEventListener('click', () => {
+            const canvas = document.getElementById('glcanvas');
+            if (canvas) canvas.focus();
+        });
+    </script>
+</body>
+</html>

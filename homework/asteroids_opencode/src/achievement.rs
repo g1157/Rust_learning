@@ -791,41 +791,59 @@ impl AchievementManager {
 
     /// 保存到文件
     pub fn save(&self) {
-        // 转换progress的key为String（因为enum不能直接序列化为JSON key）
-        let progress_map: HashMap<String, AchievementProgress> = self
-            .progress
-            .iter()
-            .map(|(id, prog)| (format!("{:?}", id), prog.clone()))
-            .collect();
-
-        let save_data = SaveData {
-            progress: progress_map,
-            stats: self.stats.clone(),
-        };
-
-        if let Ok(json) = serde_json::to_string_pretty(&save_data)
-            && let Err(e) = fs::write(&self.save_path, json)
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            eprintln!("Failed to save achievements: {}", e);
+            // 转换progress的key为String（因为enum不能直接序列化为JSON key）
+            let progress_map: HashMap<String, AchievementProgress> = self
+                .progress
+                .iter()
+                .map(|(id, prog)| (format!("{:?}", id), prog.clone()))
+                .collect();
+
+            let save_data = SaveData {
+                progress: progress_map,
+                stats: self.stats.clone(),
+            };
+
+            if let Ok(json) = serde_json::to_string_pretty(&save_data)
+                && let Err(e) = fs::write(&self.save_path, json)
+            {
+                eprintln!("Failed to save achievements: {}", e);
+            }
+        }
+        
+        #[cfg(target_arch = "wasm32")]
+        {
+            // TODO: 实现 LocalStorage 存储
+            // 当前 WASM 版本暂不持久化
         }
     }
 
     /// 从文件加载
     pub fn load(&mut self) {
-        if let Ok(data) = fs::read_to_string(&self.save_path)
-            && let Ok(save_data) = serde_json::from_str::<SaveData>(&data)
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            // 加载统计数据
-            self.stats = save_data.stats;
+            if let Ok(data) = fs::read_to_string(&self.save_path)
+                && let Ok(save_data) = serde_json::from_str::<SaveData>(&data)
+            {
+                // 加载统计数据
+                self.stats = save_data.stats;
 
-            // 加载成就进度
-            for (id_str, progress) in save_data.progress {
-                if let Some(id) = self.parse_achievement_id(&id_str)
-                    && let Some(existing_progress) = self.progress.get_mut(&id)
-                {
-                    *existing_progress = progress;
+                // 加载成就进度
+                for (id_str, progress) in save_data.progress {
+                    if let Some(id) = self.parse_achievement_id(&id_str)
+                        && let Some(existing_progress) = self.progress.get_mut(&id)
+                    {
+                        *existing_progress = progress;
+                    }
                 }
             }
+        }
+        
+        #[cfg(target_arch = "wasm32")]
+        {
+            // TODO: 实现 LocalStorage 加载
+            // 当前 WASM 版本使用默认值
         }
     }
 
