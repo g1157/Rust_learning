@@ -30,6 +30,7 @@ mod quadtree;
 mod score;
 mod ship;
 mod sound;
+mod storage;
 mod ui;
 mod utils;
 

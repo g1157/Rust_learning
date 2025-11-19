@@ -10,10 +10,10 @@
 //! - 重置功能
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+use crate::storage;
 
 /// 成就唯一标识符
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -673,7 +673,6 @@ pub struct AchievementManager {
     progress: HashMap<AchievementId, AchievementProgress>,
     recently_unlocked: Vec<(AchievementId, f64)>, // 最近解锁的成就（用于显示动画）
     pub stats: PlayerStats,                       // 玩家统计
-    save_path: PathBuf,
 }
 
 /// 保存数据结构
@@ -686,12 +685,10 @@ struct SaveData {
 impl AchievementManager {
     /// 创建成就管理器
     pub fn new() -> Self {
-        let save_path = Self::get_save_path();
         let mut manager = Self {
             progress: HashMap::new(),
             recently_unlocked: Vec::new(),
             stats: PlayerStats::default(),
-            save_path,
         };
 
         // 初始化所有成就
@@ -702,13 +699,6 @@ impl AchievementManager {
         // 尝试加载保存的数据
         manager.load();
         manager
-    }
-
-    /// 获取保存路径
-    fn get_save_path() -> PathBuf {
-        let mut path = std::env::current_dir().unwrap_or_default();
-        path.push("achievements.json");
-        path
     }
 
     /// 检查并解锁成就
@@ -791,59 +781,41 @@ impl AchievementManager {
 
     /// 保存到文件
     pub fn save(&self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // 转换progress的key为String（因为enum不能直接序列化为JSON key）
-            let progress_map: HashMap<String, AchievementProgress> = self
-                .progress
-                .iter()
-                .map(|(id, prog)| (format!("{:?}", id), prog.clone()))
-                .collect();
+        // 转换progress的key为String（因为enum不能直接序列化为JSON key）
+        let progress_map: HashMap<String, AchievementProgress> = self
+            .progress
+            .iter()
+            .map(|(id, prog)| (format!("{:?}", id), prog.clone()))
+            .collect();
 
-            let save_data = SaveData {
-                progress: progress_map,
-                stats: self.stats.clone(),
-            };
+        let save_data = SaveData {
+            progress: progress_map,
+            stats: self.stats.clone(),
+        };
 
-            if let Ok(json) = serde_json::to_string_pretty(&save_data)
-                && let Err(e) = fs::write(&self.save_path, json)
-            {
+        if let Ok(json) = serde_json::to_string(&save_data) {
+            if let Err(e) = storage::save("achievements", &json) {
                 eprintln!("Failed to save achievements: {}", e);
             }
-        }
-        
-        #[cfg(target_arch = "wasm32")]
-        {
-            // TODO: 实现 LocalStorage 存储
-            // 当前 WASM 版本暂不持久化
         }
     }
 
     /// 从文件加载
     pub fn load(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(data) = storage::load("achievements")
+            && let Ok(save_data) = serde_json::from_str::<SaveData>(&data)
         {
-            if let Ok(data) = fs::read_to_string(&self.save_path)
-                && let Ok(save_data) = serde_json::from_str::<SaveData>(&data)
-            {
-                // 加载统计数据
-                self.stats = save_data.stats;
+            // 加载统计数据
+            self.stats = save_data.stats;
 
-                // 加载成就进度
-                for (id_str, progress) in save_data.progress {
-                    if let Some(id) = self.parse_achievement_id(&id_str)
-                        && let Some(existing_progress) = self.progress.get_mut(&id)
-                    {
-                        *existing_progress = progress;
-                    }
+            // 加载成就进度
+            for (id_str, progress) in save_data.progress {
+                if let Some(id) = self.parse_achievement_id(&id_str)
+                    && let Some(existing_progress) = self.progress.get_mut(&id)
+                {
+                    *existing_progress = progress;
                 }
             }
-        }
-        
-        #[cfg(target_arch = "wasm32")]
-        {
-            // TODO: 实现 LocalStorage 加载
-            // 当前 WASM 版本使用默认值
         }
     }
 
