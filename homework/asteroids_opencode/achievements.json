@@ -1,176 +1,6 @@
 {
   "progress": {
-    "MegaKiller": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Adventurer": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Warrior": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Champion": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Dominator": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "FlagHunter": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Legend": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Duelist": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Sharpshooter": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Deadeye": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Veteran": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Protected": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "TimeWarrior": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "LuckySeven": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Lucky": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "DoubleTrouble": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Arsenal": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Survivor": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "FirstBlood": {
-      "unlocked": true,
-      "unlock_time": 7.443135976791382,
-      "current": 1
-    },
-    "QuickStart": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Armed": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "WaveRider": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Marksman": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "MidnightWarrior": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "ThePacifist": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
     "Assassin": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Endurance": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "WaveMaster": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Godlike": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "ShieldMaster": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "TripleThreat": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Unstoppable": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Century": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "Tinkerer": {
-      "unlocked": false,
-      "unlock_time": null,
-      "current": 0
-    },
-    "WaveGod": {
       "unlocked": false,
       "unlock_time": null,
       "current": 0
@@ -180,7 +10,57 @@
       "unlock_time": null,
       "current": 0
     },
-    "ComboMaster": {
+    "Tinkerer": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Adventurer": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Armed": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Unstoppable": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Survivor": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Champion": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "QuickStart": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "FlagHunter": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Duelist": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "MegaKiller": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Arsenal": {
       "unlocked": false,
       "unlock_time": null,
       "current": 0
@@ -189,12 +69,132 @@
       "unlocked": true,
       "unlock_time": 7.756203889846802,
       "current": 0
+    },
+    "TimeWarrior": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "WaveGod": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "ShieldMaster": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "DoubleTrouble": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "TripleThreat": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Lucky": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Warrior": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "LuckySeven": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Sharpshooter": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Endurance": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Marksman": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "ComboMaster": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "WaveRider": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Protected": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "ThePacifist": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Dominator": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Deadeye": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Legend": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "FirstBlood": {
+      "unlocked": true,
+      "unlock_time": 7.443135976791382,
+      "current": 1
+    },
+    "Godlike": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "WaveMaster": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "MidnightWarrior": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Century": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
+    },
+    "Veteran": {
+      "unlocked": false,
+      "unlock_time": null,
+      "current": 0
     }
   },
   "stats": {
-    "total_playtime": 2.2001700401306152,
+    "total_playtime": 13.344599962234497,
     "total_kills": 0,
-    "bullets_fired": 1,
+    "bullets_fired": 6,
     "shields_collected": 0,
     "games_played": 0,
     "survival_games": 0,
