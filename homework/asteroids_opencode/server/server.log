@@ -1,0 +1,38 @@
+warning: field `id` is never read
+  --> src/main.rs:30:5
+   |
+29 | struct Peer {
+   |        ---- field in this struct
+30 |     id: Uuid,
+   |     ^^
+   |
+   = note: `Peer` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: variants `GameState`, `PlayerDisconnected`, `GameOver`, and `Error` are never constructed
+   --> src/main.rs:86:5
+    |
+ 72 | enum ServerMessage {
+    |      ------------- variants in this enum
+...
+ 86 |     GameState {
+    |     ^^^^^^^^^
+...
+ 92 |     PlayerDisconnected {
+    |     ^^^^^^^^^^^^^^^^^^
+...
+ 96 |     GameOver {
+    |     ^^^^^^^^
+...
+101 |     Error {
+    |     ^^^^^
+    |
+    = note: `ServerMessage` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: `asteroids_server` (bin "server") generated 2 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/server`
+
+thread 'main' panicked at src/main.rs:434:50:
+无法绑定端口: Os { code: 98, kind: AddrInUse, message: "Address already in use" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

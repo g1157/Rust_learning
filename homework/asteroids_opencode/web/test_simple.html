@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Simple WASM Test</title>
+    <style>
+        body { 
+            font-family: monospace; 
+            background: #1a1a1a; 
+            color: #0f0; 
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 { color: #0ff; }
+        .step { 
+            padding: 10px; 
+            margin: 5px 0;
+            background: #2a2a2a;
+            border-left: 3px solid #0f0;
+        }
+        .error { border-left-color: #f00; color: #f00; }
+        .pending { border-left-color: #ff0; color: #ff0; }
+        canvas {
+            border: 2px solid #0f0;
+            margin-top: 20px;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Asteroids WASM 简单测试</h1>
+    <div id="steps"></div>
+    
+    <script src="localstorage_polyfill.js"></script>
+    <script src="mq_js_bundle.js"></script>
+    <script>
+        const steps = document.getElementById('steps');
+        
+        function addStep(text, status = 'pending') {
+            const div = document.createElement('div');
+            div.className = `step ${status}`;
+            const icon = status === 'error' ? '❌' : status === 'pending' ? '⏳' : '✅';
+            div.textContent = `${icon} ${text}`;
+            steps.appendChild(div);
+            return div;
+        }
+        
+        const step1 = addStep('加载 localstorage_polyfill.js', 'success');
+        const step2 = addStep('加载 mq_js_bundle.js', 'success');
+        const step3 = addStep('检查 load() 函数', typeof load === 'function' ? 'success' : 'error');
+        
+        if (typeof load !== 'function') {
+            addStep('错误: load() 函数未定义！', 'error');
+            addStep('这意味着 mq_js_bundle.js 没有正确加载', 'error');
+        } else {
+            const step4 = addStep('加载 WASM 文件', 'pending');
+            
+            try {
+                load("asteroids_opencode.wasm");
+                step4.textContent = '✅ load() 调用成功';
+                step4.className = 'step success';
+                
+                const step5 = addStep('等待 WASM 初始化', 'pending');
+                
+                setTimeout(() => {
+                    const canvas = document.querySelector('canvas');
+                    if (canvas) {
+                        step5.textContent = '✅ Canvas 已创建 - 游戏正在运行！';
+                        step5.className = 'step success';
+                        addStep(`Canvas 大小: ${canvas.width}x${canvas.height}`, 'success');
+                    } else {
+                        step5.textContent = '❌ Canvas 未创建';
+                        step5.className = 'step error';
+                        addStep('WASM 可能初始化失败，请检查浏览器控制台', 'error');
+                    }
+                }, 2000);
+                
+            } catch (e) {
+                step4.textContent = `❌ load() 调用失败: ${e.message}`;
+                step4.className = 'step error';
+                addStep(`错误详情: ${e.stack}`, 'error');
+            }
+        }
+        
+        // 监听错误
+        window.addEventListener('error', (e) => {
+            addStep(`JavaScript 错误: ${e.message}`, 'error');
+        });
+    </script>
+</body>
+</html>

@@ -23,6 +23,7 @@ mod asteroid;
 mod bullet;
 mod duel;
 mod font;
+mod network;
 mod particle;
 mod player;
 mod powerup;
@@ -33,9 +34,12 @@ mod sound;
 mod storage;
 mod ui;
 mod utils;
+mod vortex;
+mod wasm_input;
+mod input;
 
 use achievement::AchievementManager;
-use asteroid::{Asteroid, spawn_initial_wave};
+use asteroid::{Asteroid, spawn_initial_wave, spawn_wave_with_speed};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
 use duel::{DUEL_BULLET_RADIUS, DuelState};
 use font::FontSystem;
@@ -48,6 +52,7 @@ use ship::{SHIP_DAMPING, SHIP_HEIGHT, SHIP_ROTATION_STEP, SHIP_THRUST};
 use sound::{SoundEffect, SoundSystem};
 use ui::{DebugStats, HudMode};
 use utils::{circle_intersects_triangle, wrap_around};
+use vortex::VortexManager;
 
 const ASTEROID_COUNT: usize = 10;
 const ASTEROID_WAVE_INCREMENT: usize = 2;
@@ -277,10 +282,11 @@ impl ScreenShake {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum GameMode {
     Survival,
     Duel,
+    Online,
     Achievements,
     Settings,
 }
@@ -290,6 +296,8 @@ enum GameState {
     ModeSelection { selection: GameMode },
     SettingsDetail { selection: SettingOption }, // 设置详细界面
     AchievementsView,                            // 成就查看界面
+    OnlineLobby { nickname_input: bool },        // 在线大厅
+    OnlineWaiting { room_id: u32 },              // 等待房间
     WaitingStart,
     Playing,
     Paused { selection: PauseSelection },
@@ -304,7 +312,18 @@ pub enum PauseSelection {
     ModeSelect,
 }
 
-#[macroquad::main("Asteroids")]
+fn window_conf() -> Conf {
+    Conf {
+        window_title: "Asteroids".to_owned(),
+        window_width: 1024,
+        window_height: 768,
+        fullscreen: false,
+        window_resizable: true,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(window_conf)]
 async fn main() {
     let start_time = get_time();
     let mut settings = GameSettings::default(); // 先初始化设置
@@ -316,12 +335,23 @@ async fn main() {
     let fonts = FontSystem::new().await; // 加载字体
     let mut achievements = AchievementManager::new(); // 成就系统
     let mut next_shield_spawn = powerup::schedule_next_spawn(start_time);
+    let mut next_weapon_spawn = powerup::schedule_next_weapon_spawn(start_time);
     let mut current_mode = GameMode::Survival;
     let mut duel_state = DuelState::new(start_time);
     let mut highest_survival_score: u32 = 0;
     let mut survival_wave: u32 = 0;
     let _game_start_time: f64 = 0.0; // 当前局游戏开始时间（保留供未来使用）
     // session_bullets_fired 已移除 - 改用 achievements.stats.bullets_fired
+    let mut achievements_scroll: f32 = 0.0; // 成就界面滚动偏移
+    let mut settings_scroll: f32 = 0.0; // 设置界面滚动偏移
+    let mut vortex_manager = VortexManager::new(20.0); // 每20秒生成一个漩涡
+    
+    // 在线多人网络客户端
+    let mut network_client = network::NetworkClient::new("wss://your_domain.com/ws".to_string());
+    let mut online_nickname = String::new(); // 玩家昵称
+    let mut is_online_mode = false; // 是否为在线模式
+    let mut last_key_frame = 0u64; // 防抖：上次按键的帧计数
+    
     let mut state = GameState::ModeSelection {
         selection: GameMode::Survival,
     };
@@ -329,43 +359,60 @@ async fn main() {
     let mut slow_motion = SlowMotion::new(); // 慢动作系统
     let mut show_debug = settings.enable_debug_panel; // 从设置初始化
     let mut toast_message: Option<(String, f64)> = None; // (消息文本, 显示开始时间)
+    let mut frame_count = 0u64; // 帧计数器
 
     loop {
+        let input_state = input::Input::new();
         let frame_t = get_time();
         let raw_dt = get_frame_time();
+        frame_count += 1;
+
+        // 轮询网络事件
+        network_client.poll();
 
         // 应用慢动作时间缩放
         let time_scale = slow_motion.update(frame_t as f32);
         let dt = raw_dt * time_scale;
 
-        let esc_pressed = is_key_pressed(KeyCode::Escape);
-        let pause_pressed = esc_pressed || is_key_pressed(KeyCode::P);
-
-        // F3 切换性能监控
-        if is_key_pressed(KeyCode::F3) {
-            show_debug = !show_debug;
-        }
+        // ⚠️ 注意：不要在这里调用任何输入函数（input_state.is_key_pressed, mouse_wheel 等）
+        // 因为会与状态处理内的输入调用冲突，导致 RefCell panic
 
         match state {
             GameState::SettingsDetail { selection } => {
+                // ⚠️ 暂时禁用鼠标滚轮（避免 RefCell panic）
+                let (_mouse_wheel_x, mouse_wheel_y) = input_state.mouse_wheel();
+                settings_scroll += mouse_wheel_y * 20.0;
+                
+                // 键盘滚动（Page Up/Down 或 鼠标侧键）
+                if input_state.is_key_down(KeyCode::PageDown) {
+                    settings_scroll -= 10.0;
+                }
+                if input_state.is_key_down(KeyCode::PageUp) {
+                    settings_scroll += 10.0;
+                }
+                
+                // 限制滚动范围
+                settings_scroll = settings_scroll.clamp(-300.0, 0.0);
+                
                 ui::draw_settings_screen(
                     &settings,
                     selection,
                     fonts.get_best(settings.font_choice),
+                    settings_scroll,
                 );
 
                 let mut next_selection = selection;
 
                 // 上下键切换选项
-                if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
+                if input_state.is_key_pressed(KeyCode::Up) || input_state.is_key_pressed(KeyCode::W) {
                     next_selection = selection.prev();
-                } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
+                } else if input_state.is_key_pressed(KeyCode::Down) || input_state.is_key_pressed(KeyCode::S) {
                     next_selection = selection.next();
                 }
 
                 // 左右键调整数值
                 let mut setting_changed = false;
-                if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
+                if input_state.is_key_pressed(KeyCode::Left) || input_state.is_key_pressed(KeyCode::A) {
                     match selection {
                         SettingOption::Lives => {
                             if settings.starting_lives > 1 {
@@ -425,7 +472,7 @@ async fn main() {
                                 Some(("Achievements reset successfully".to_string(), frame_t));
                         }
                     }
-                } else if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
+                } else if input_state.is_key_pressed(KeyCode::Right) || input_state.is_key_pressed(KeyCode::D) {
                     match selection {
                         SettingOption::Lives => {
                             if settings.starting_lives < 9 {
@@ -493,7 +540,7 @@ async fn main() {
                 }
 
                 // Enter 触发恢复默认或重置成就
-                if is_key_pressed(KeyCode::Enter) {
+                if input_state.is_key_pressed(KeyCode::Enter) {
                     if matches!(selection, SettingOption::ResetDefaults) {
                         settings.reset_to_default();
                         show_debug = settings.enable_debug_panel;
@@ -513,7 +560,8 @@ async fn main() {
                 }
 
                 // ESC 返回模式选择
-                if is_key_pressed(KeyCode::Escape) {
+                if input_state.is_key_pressed(KeyCode::Escape) {
+                    settings_scroll = 0.0; // 重置滚动
                     state = GameState::ModeSelection {
                         selection: GameMode::Settings,
                     };
@@ -538,15 +586,33 @@ async fn main() {
                 continue;
             }
             GameState::AchievementsView => {
+                // 处理键盘滚动（修正方向）
+                let scroll_speed = 30.0;
+                if input_state.is_key_down(KeyCode::Down) || input_state.is_key_down(KeyCode::S) {
+                    achievements_scroll -= scroll_speed; // 向下滚动 = 内容向上移动
+                }
+                if input_state.is_key_down(KeyCode::Up) || input_state.is_key_down(KeyCode::W) {
+                    achievements_scroll += scroll_speed; // 向上滚动 = 内容向下移动
+                }
+                
+                // ⚠️ 暂时禁用鼠标滚轮（避免 RefCell panic）
+                let (_mouse_wheel_x, mouse_wheel_y) = input_state.mouse_wheel();
+                // achievements_scroll += mouse_wheel_y * 20.0;
+                
+                // 限制滚动范围（最大内容高度约 1200）
+                achievements_scroll = achievements_scroll.clamp(-800.0, 0.0);
+                
                 // 绘制成就界面
                 ui::draw_achievements_screen(
                     &achievements,
                     fonts.get_best(settings.font_choice),
                     frame_t,
+                    achievements_scroll,
                 );
 
                 // ESC 返回模式选择
-                if is_key_pressed(KeyCode::Escape) {
+                if input_state.is_key_pressed(KeyCode::Escape) {
+                    achievements_scroll = 0.0; // 重置滚动
                     state = GameState::ModeSelection {
                         selection: GameMode::Achievements,
                     };
@@ -558,19 +624,22 @@ async fn main() {
             GameState::ModeSelection { selection } => {
                 let mut next_selection = selection;
                 // 上下键切换（纵向布局）
-                if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
+                // 顺序: Survival → Duel → Online → Achievements → Settings
+                if input_state.is_key_pressed(KeyCode::Up) || input_state.is_key_pressed(KeyCode::W) {
                     next_selection = match selection {
-                        GameMode::Survival => GameMode::Settings,
+                        GameMode::Survival => GameMode::Settings,      // 循环到末尾
                         GameMode::Duel => GameMode::Survival,
-                        GameMode::Achievements => GameMode::Duel,
+                        GameMode::Online => GameMode::Duel,
+                        GameMode::Achievements => GameMode::Online,
                         GameMode::Settings => GameMode::Achievements,
                     };
-                } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
+                } else if input_state.is_key_pressed(KeyCode::Down) || input_state.is_key_pressed(KeyCode::S) {
                     next_selection = match selection {
                         GameMode::Survival => GameMode::Duel,
-                        GameMode::Duel => GameMode::Achievements,
+                        GameMode::Duel => GameMode::Online,
+                        GameMode::Online => GameMode::Achievements,
                         GameMode::Achievements => GameMode::Settings,
-                        GameMode::Settings => GameMode::Survival,
+                        GameMode::Settings => GameMode::Survival,      // 循环到开头
                     };
                 }
 
@@ -580,7 +649,7 @@ async fn main() {
                     };
                 }
 
-                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+                if input_state.is_key_pressed(KeyCode::Enter) || input_state.is_key_pressed(KeyCode::Space) {
                     match next_selection {
                         GameMode::Settings => {
                             // 进入设置详细界面
@@ -591,6 +660,11 @@ async fn main() {
                         GameMode::Achievements => {
                             // 进入成就查看界面
                             state = GameState::AchievementsView;
+                        }
+                        GameMode::Online => {
+                            // 进入在线大厅
+                            online_nickname.clear();
+                            state = GameState::OnlineLobby { nickname_input: true };
                         }
                         _ => {
                             // 进入游戏
@@ -613,7 +687,7 @@ async fn main() {
                 continue;
             }
             GameState::WaitingStart => {
-                if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::M) {
+                if input_state.is_key_pressed(KeyCode::Escape) || input_state.is_key_pressed(KeyCode::M) {
                     state = GameState::ModeSelection {
                         selection: current_mode,
                     };
@@ -628,6 +702,7 @@ async fn main() {
                         GameMode::Achievements => {
                             unreachable!("Achievements is not a playable mode")
                         }
+                        GameMode::Online => "Online: multiplayer mode (not yet implemented)",
                     },
                     fonts.get_best(settings.font_choice),
                 );
@@ -661,15 +736,17 @@ async fn main() {
                     );
                 }
 
-                if is_key_pressed(KeyCode::Enter) {
+                if input_state.is_key_pressed(KeyCode::Enter) {
                     start_round(
                         RoundState {
                             players: &mut players,
                             asteroids: &mut asteroids,
                             powerups: &mut powerups,
                             next_shield_spawn: &mut next_shield_spawn,
+                            next_weapon_spawn: &mut next_weapon_spawn,
                             duel_state: &mut duel_state,
                             survival_wave: &mut survival_wave,
+                            vortex_manager: &mut vortex_manager,
                         },
                         frame_t,
                         current_mode,
@@ -686,7 +763,7 @@ async fn main() {
                 continue;
             }
             GameState::GameOver { victory, end_time } => {
-                if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::M) {
+                if input_state.is_key_pressed(KeyCode::Escape) || input_state.is_key_pressed(KeyCode::M) {
                     state = GameState::ModeSelection {
                         selection: current_mode,
                     };
@@ -716,6 +793,7 @@ async fn main() {
                     }
                     GameMode::Settings => unreachable!("Settings is not a playable mode"),
                     GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
+                    GameMode::Online => "Online match finished! Press [Enter] to restart".to_string(),
                 };
                 ui::draw_game_over_message(&text, fonts.get_best(settings.font_choice));
                 ui::draw_center_scores(
@@ -736,15 +814,17 @@ async fn main() {
                     );
                 }
 
-                if is_key_pressed(KeyCode::Enter) {
+                if input_state.is_key_pressed(KeyCode::Enter) {
                     start_round(
                         RoundState {
                             players: &mut players,
                             asteroids: &mut asteroids,
                             powerups: &mut powerups,
                             next_shield_spawn: &mut next_shield_spawn,
+                            next_weapon_spawn: &mut next_weapon_spawn,
                             duel_state: &mut duel_state,
                             survival_wave: &mut survival_wave,
+                            vortex_manager: &mut vortex_manager,
                         },
                         frame_t,
                         current_mode,
@@ -757,6 +837,8 @@ async fn main() {
                 continue;
             }
             GameState::Playing => {
+                // 检测暂停键（在状态内部检测，避免 RefCell 冲突）
+                let pause_pressed = input_state.is_key_pressed(KeyCode::Escape) || input_state.is_key_pressed(KeyCode::P);
                 if pause_pressed {
                     state = GameState::Paused {
                         selection: PauseSelection::Resume,
@@ -781,6 +863,8 @@ async fn main() {
                     &achievements,
                     fonts.get_best(settings.font_choice),
                     settings.flag_radius,
+                    current_mode,
+                    &vortex_manager,
                 );
                 if matches!(current_mode, GameMode::Survival) {
                     ui::draw_survival_record(
@@ -790,23 +874,23 @@ async fn main() {
                 }
 
                 let mut next_selection = selection;
-                if is_key_pressed(KeyCode::Up)
-                    || is_key_pressed(KeyCode::Left)
-                    || is_key_pressed(KeyCode::W)
-                    || is_key_pressed(KeyCode::A)
+                if input_state.is_key_pressed(KeyCode::Up)
+                    || input_state.is_key_pressed(KeyCode::Left)
+                    || input_state.is_key_pressed(KeyCode::W)
+                    || input_state.is_key_pressed(KeyCode::A)
                 {
                     next_selection = PauseSelection::Resume;
-                } else if is_key_pressed(KeyCode::Down)
-                    || is_key_pressed(KeyCode::Right)
-                    || is_key_pressed(KeyCode::S)
-                    || is_key_pressed(KeyCode::D)
+                } else if input_state.is_key_pressed(KeyCode::Down)
+                    || input_state.is_key_pressed(KeyCode::Right)
+                    || input_state.is_key_pressed(KeyCode::S)
+                    || input_state.is_key_pressed(KeyCode::D)
                 {
                     next_selection = PauseSelection::ModeSelect;
                 }
 
                 ui::draw_pause_menu(next_selection, fonts.get_best(settings.font_choice));
 
-                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+                if input_state.is_key_pressed(KeyCode::Enter) || input_state.is_key_pressed(KeyCode::Space) {
                     match next_selection {
                         PauseSelection::Resume => {
                             state = GameState::Playing;
@@ -821,7 +905,8 @@ async fn main() {
                     continue;
                 }
 
-                if esc_pressed {
+                // 检测 ESC 键退出暂停（在状态内部检测）
+                if input_state.is_key_pressed(KeyCode::Escape) {
                     state = GameState::Playing;
                     next_frame().await;
                     continue;
@@ -852,6 +937,8 @@ async fn main() {
                     &achievements,
                     fonts.get_best(settings.font_choice),
                     settings.flag_radius,
+                    current_mode,
+                    &vortex_manager,
                 );
                 ui::draw_victory_pause_overlay(
                     (started_at + VICTORY_PAUSE_DURATION - frame_t).max(0.0),
@@ -889,6 +976,8 @@ async fn main() {
                     &achievements,
                     fonts.get_best(settings.font_choice),
                     settings.flag_radius,
+                    current_mode,
+                    &vortex_manager,
                 );
                 ui::draw_round_end(
                     winner_idx,
@@ -897,7 +986,7 @@ async fn main() {
                 );
 
                 // 按空格或回车开始下一回合
-                if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Enter) {
+                if input_state.is_key_pressed(KeyCode::Space) || input_state.is_key_pressed(KeyCode::Enter) {
                     reset_players(&mut players, frame_t, settings.starting_lives);
                     duel_state.start_new_round(frame_t);
                     state = GameState::Playing;
@@ -905,6 +994,160 @@ async fn main() {
 
                 next_frame().await;
                 continue;
+            }
+            GameState::OnlineLobby { nickname_input } => {
+                ui::draw_online_lobby(
+                    &online_nickname,
+                    nickname_input,
+                    &network_client,
+                    fonts.get_best(settings.font_choice),
+                );
+                
+                // ⚠️ 完全禁用输入处理（macroquad WASM bug）
+                // TODO: 实现纯 JavaScript 输入或 UI 按钮
+                
+                next_frame().await;
+                continue;
+            }
+            GameState::OnlineWaiting { room_id } => {
+                // 等待匹配
+                ui::draw_online_waiting(
+                    room_id,
+                    &network_client,
+                    fonts.get_best(settings.font_choice),
+                );
+                
+                // ESC 离开队列返回大厅
+                if input_state.is_key_pressed(KeyCode::Escape) {
+                    network_client.send(network::ClientMessage::LeaveQueue);
+                    state = GameState::OnlineLobby { nickname_input: false };
+                    next_frame().await;
+                    continue;
+                }
+                
+                // 处理服务器消息
+                while let Some(message) = network_client.receive() {
+                    match message {
+                        network::ServerMessage::MatchFound { room_id: rid, players, mode } => {
+                            // 匹配成功，进入游戏
+                            state = GameState::OnlineWaiting { room_id: rid.parse().unwrap_or(0) };
+                            current_mode = mode;
+                            println!("匹配成功! 房间: {}, 玩家: {:?}, 模式: {:?}", rid, players, mode);
+                        }
+                        network::ServerMessage::GameStart => {
+                            // 游戏开始 - 初始化游戏状态
+                            println!("游戏开始!");
+                            is_online_mode = true;
+                            state = GameState::WaitingStart;
+                            // 游戏初始化会在 WaitingStart 状态完成
+                        }
+                        network::ServerMessage::Error { message } => {
+                            println!("服务器错误: {}", message);
+                        }
+                        _ => {}
+                    }
+                }
+                
+                next_frame().await;
+                continue;
+            }
+        }
+
+        // ========== 在线模式：输入同步 ==========
+        if is_online_mode && matches!(state, GameState::Playing) {
+            // 收集当前按键状态
+            let mut keys_pressed = Vec::new();
+            
+            // 检查玩家1的控制键（假设在线模式只有一个本地玩家）
+            if !players.is_empty() {
+                let controls = &players[0].controls;
+                
+                if input_state.is_key_down(controls.thrust) {
+                    keys_pressed.push("thrust".to_string());
+                }
+                if input_state.is_key_down(controls.left) {
+                    keys_pressed.push("left".to_string());
+                }
+                if input_state.is_key_down(controls.right) {
+                    keys_pressed.push("right".to_string());
+                }
+                if input_state.is_key_down(controls.shoot_primary) {
+                    keys_pressed.push("shoot".to_string());
+                }
+            }
+            
+            // 发送输入到服务器（每帧）
+            if !keys_pressed.is_empty() {
+                network_client.send(network::ClientMessage::GameInput { keys: keys_pressed });
+            }
+            
+            // 接收服务器的游戏状态更新
+            while let Some(message) = network_client.receive() {
+                match message {
+                    network::ServerMessage::GameState { players: server_players, asteroids: server_asteroids, .. } => {
+                        // 更新玩家状态
+                        for (i, server_player) in server_players.iter().enumerate() {
+                            if i < players.len() {
+                                // 更新玩家位置和状态（权威服务器）
+                                players[i].ship.pos = Vec2::new(server_player.x, server_player.y);
+                                players[i].ship.rot = server_player.angle;
+                                players[i].lives = server_player.lives;
+                                
+                                // 注意：分数由 Score 结构管理，服务器同步分数需要特殊处理
+                                // 这里暂时跳过分数更新，或者可以通过 reset + add_points 实现
+                                if players[i].score.value() != server_player.score {
+                                    players[i].score.reset();
+                                    players[i].score.add_points(server_player.score);
+                                }
+                                
+                                // 检查玩家是否存活
+                                if server_player.lives == 0 && players[i].alive {
+                                    players[i].mark_dead(frame_t);
+                                }
+                            }
+                        }
+                        
+                        // 更新小行星状态（简单同步）
+                        // 注意：完整实现需要更复杂的同步策略（ID匹配、插值等）
+                        if server_asteroids.len() != asteroids.len() {
+                            // 小行星数量变化 - 简单重建
+                            asteroids.clear();
+                            for server_ast in server_asteroids.iter() {
+                                let asteroid = Asteroid {
+                                    pos: Vec2::new(server_ast.x, server_ast.y),
+                                    vel: Vec2::new(server_ast.vx, server_ast.vy),
+                                    size: server_ast.size as f32,
+                                    rot: 0.0,
+                                    rot_speed: 0.0,
+                                    sides: 6, // 默认6边形
+                                    collided: false,
+                                };
+                                asteroids.push(asteroid);
+                            }
+                        } else {
+                            // 数量相同 - 更新位置
+                            for (i, server_ast) in server_asteroids.iter().enumerate() {
+                                if i < asteroids.len() {
+                                    asteroids[i].pos = Vec2::new(server_ast.x, server_ast.y);
+                                    asteroids[i].vel = Vec2::new(server_ast.vx, server_ast.vy);
+                                    asteroids[i].size = server_ast.size as f32;
+                                }
+                            }
+                        }
+                    }
+                    network::ServerMessage::GameOver { winner, scores } => {
+                        println!("游戏结束! 胜者: {:?}, 分数: {:?}", winner, scores);
+                        is_online_mode = false;
+                        state = GameState::GameOver { 
+                            victory: winner.as_ref() == network_client.player_id.as_ref(), 
+                            end_time: frame_t 
+                        };
+                    }
+                    network::ServerMessage::PlayerDisconnected { player_id } => {
+                        println!("玩家断开连接: {}", player_id);
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -916,8 +1159,21 @@ async fn main() {
             dt,
             settings.ship_speed_multiplier,
             settings.sound_volume,
+            &input_state,
         );
-        update_asteroids(&mut asteroids, dt, settings.asteroid_speed_multiplier);
+        
+        // 更新漩涡系统（仅在 Survival 模式）
+        if current_mode == GameMode::Survival {
+            vortex_manager.update(frame_t as f32, screen_width(), screen_height());
+        }
+        
+        // 计算漩涡力
+        let vortex_forces: Vec<Vec2> = asteroids
+            .iter()
+            .map(|a| vortex_manager.apply_forces(a.pos, frame_t as f32))
+            .collect();
+        
+        update_asteroids(&mut asteroids, dt, settings.asteroid_speed_multiplier, vortex_forces);
 
         // 累积游戏时间和子弹发射统计
         achievements.stats.total_playtime += dt as f64;
@@ -927,7 +1183,7 @@ async fn main() {
         // 武器切换 - 每个玩家独立控制（仅当设置允许时）
         if settings.enable_weapon_switch {
             for player in players.iter_mut() {
-                if player.controls.weapon_switch_pressed() {
+                if player.controls.weapon_switch_pressed(&input_state) {
                     player.weapon_type = match player.weapon_type {
                         WeaponType::Normal => WeaponType::Spread,
                         WeaponType::Spread => WeaponType::Penetrating,
@@ -1094,7 +1350,7 @@ async fn main() {
 
         match current_mode {
             GameMode::Survival => {
-                powerup::spawn(frame_t, &mut powerups, &mut next_shield_spawn);
+                powerup::spawn(frame_t, &mut powerups, &mut next_shield_spawn, &mut next_weapon_spawn);
                 let shields_collected =
                     powerup::handle_pickups(&mut players, &mut powerups, frame_t);
                 if shields_collected > 0 {
@@ -1174,6 +1430,9 @@ async fn main() {
             }
             GameMode::Settings => unreachable!("Settings is not a playable mode"),
             GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
+            GameMode::Online => {
+                // 在线模式暂未实现，跳过游戏逻辑
+            }
         }
 
         // 更新成就进度
@@ -1204,6 +1463,8 @@ async fn main() {
             &achievements,
             fonts.get_best(settings.font_choice),
             settings.flag_radius,
+            current_mode,
+            &vortex_manager,
         );
         if matches!(current_mode, GameMode::Survival) {
             ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
@@ -1217,15 +1478,20 @@ struct RoundState<'a> {
     asteroids: &'a mut Vec<Asteroid>,
     powerups: &'a mut Vec<PowerUp>,
     next_shield_spawn: &'a mut f64,
+    next_weapon_spawn: &'a mut f64,
     duel_state: &'a mut DuelState,
     survival_wave: &'a mut u32,
+    vortex_manager: &'a mut VortexManager,
 }
 
 fn start_round(state: RoundState, now: f64, mode: GameMode, starting_lives: u32) {
     reset_players(state.players, now, starting_lives);
     state.asteroids.clear();
     state.powerups.clear();
+    state.vortex_manager.clear(); // 清空漩涡
+    state.vortex_manager.reset_game_time(now as f32); // 重置游戏时间
     *state.next_shield_spawn = powerup::schedule_next_spawn(now);
+    *state.next_weapon_spawn = powerup::schedule_next_weapon_spawn(now);
     if matches!(mode, GameMode::Survival) {
         *state.survival_wave = 1;
         spawn_survival_wave(state.asteroids, *state.survival_wave);
@@ -1243,6 +1509,7 @@ fn update_players(
     dt: f32,
     ship_speed_multiplier: f32,
     sound_volume: f32,
+    input: &crate::input::Input,
 ) -> u32 {
     let mut total_bullets_fired = 0;
     for player in players.iter_mut() {
@@ -1251,7 +1518,7 @@ fn update_players(
         }
 
         let mut acc = -player.ship.vel * SHIP_DAMPING;
-        if is_key_down(player.controls.thrust) {
+        if input.is_key_down(player.controls.thrust) {
             acc += player.ship.forward_vector() * SHIP_THRUST * ship_speed_multiplier;
             // 添加推进器粒子效果
             let forward = player.ship.forward_vector();
@@ -1259,16 +1526,16 @@ fn update_players(
             particles.spawn_thruster(thruster_pos, forward, frame_t as f32);
         }
 
-        if is_key_down(player.controls.right) {
+        if input.is_key_down(player.controls.right) {
             player.ship.rot += SHIP_ROTATION_STEP * dt * ship_speed_multiplier;
-        } else if is_key_down(player.controls.left) {
+        } else if input.is_key_down(player.controls.left) {
             player.ship.rot -= SHIP_ROTATION_STEP * dt * ship_speed_multiplier;
         }
 
         // 更新连击状态（检查是否过期）
         player.update_killstreak(frame_t);
 
-        if player.controls.shoot_pressed() && player.can_shoot(frame_t) {
+        if player.controls.shoot_pressed(input) && player.can_shoot(frame_t) {
             let rot_vec = player.ship.forward_vector();
             let bullet_pos = player.ship.pos + rot_vec * SHIP_HEIGHT / 2.;
             let bullet_vel = rot_vec * BULLET_SPEED;
@@ -1295,8 +1562,13 @@ fn update_players(
     total_bullets_fired
 }
 
-fn update_asteroids(asteroids: &mut [Asteroid], dt: f32, speed_multiplier: f32) {
-    for asteroid in asteroids.iter_mut() {
+fn update_asteroids(asteroids: &mut [Asteroid], dt: f32, speed_multiplier: f32, vortex_forces: Vec<Vec2>) {
+    for (i, asteroid) in asteroids.iter_mut().enumerate() {
+        // 应用漩涡力
+        if i < vortex_forces.len() {
+            asteroid.vel += vortex_forces[i] * dt;
+        }
+        
         asteroid.advance(dt * speed_multiplier);
         asteroid.pos = wrap_around(&asteroid.pos);
     }
@@ -1357,6 +1629,8 @@ fn render_scene(
     achievements: &AchievementManager,
     font: Option<&Font>,
     flag_radius: f32,
+    current_mode: GameMode,
+    vortex_manager: &VortexManager,
 ) {
     // 应用屏幕震动偏移
     let shake_offset = screen_shake
@@ -1412,6 +1686,11 @@ fn render_scene(
             2.,
             BLACK,
         );
+    }
+    
+    // 绘制漩涡（仅在 Survival 模式）
+    if current_mode == GameMode::Survival {
+        vortex_manager.draw(frame_t as f32);
     }
 
     powerup::draw(powerups, frame_t);
@@ -1488,10 +1767,15 @@ fn spawn_survival_wave(asteroids: &mut Vec<Asteroid>, wave: u32) {
     let screen_center = Vec2::new(screen_width() / 2., screen_height() / 2.);
     let wave_index = wave.saturating_sub(1) as usize;
     let asteroid_count = ASTEROID_COUNT + wave_index * ASTEROID_WAVE_INCREMENT;
-    asteroids.extend(spawn_initial_wave(
+    
+    // 难度递增：每波速度增加10%，最多200%
+    let speed_multiplier = (1.0 + wave_index as f32 * 0.1).min(2.0);
+    
+    asteroids.extend(spawn_wave_with_speed(
         screen_center,
         screen_width().min(screen_height()),
         asteroid_count,
+        speed_multiplier,
     ));
 }
 

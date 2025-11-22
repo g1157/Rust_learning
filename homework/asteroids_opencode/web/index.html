@@ -2,103 +2,47 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asteroids - Online Multiplayer</title>
+    <title>Asteroids</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            background: linear-gradient(135deg, #0a0e27 0%, #1a1a2e 100%);
-            font-family: 'Courier New', Courier, monospace;
-            color: #fff;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-        #loading-screen {
-            position: fixed;
-            top: 0;
-            left: 0;
+        html, body, canvas {
+            margin: 0px;
+            padding: 0px;
             width: 100%;
             height: 100%;
-            background: rgba(10, 14, 39, 0.95);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-        #loading-screen.hidden {
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.5s;
-        }
-        .loading-title {
-            font-size: 48px;
-            font-weight: bold;
-            margin-bottom: 20px;
-            background: linear-gradient(45deg, #00f2ff, #ff00ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .loading-spinner {
-            width: 60px;
-            height: 60px;
-            border: 4px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #00f2ff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        .loading-text {
-            margin-top: 20px;
-            font-size: 16px;
-            color: #aaa;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        canvas {
-            outline: none;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            box-shadow: 0 10px 50px rgba(0, 242, 255, 0.3);
+            overflow: hidden;
+            position: absolute;
+            background: black;
+            z-index: 0;
         }
     </style>
 </head>
 <body>
-    <div id="loading-screen">
-        <div class="loading-title">🚀 ASTEROIDS 🚀</div>
-        <div class="loading-spinner"></div>
-        <div class="loading-text">Loading...</div>
-    </div>
     <canvas id="glcanvas" tabindex="1"></canvas>
-    
-    <script src="mq_js_bundle.js"></script>
+    <!--
+        Note: The order of scripts is important!
+        1. mq_js_bundle.js: macroquad/miniquad engine. Must be first.
+        2. localstorage_polyfill.js: Provides functions used by the wasm module for local storage.
+        3. websocket_client.js: Provides websocket functions for the wasm module.
+        4. input_handler.js: Provides custom input handling for the wasm module.
+        5. The inline script that loads and runs the wasm module.
+    -->
+    <script src="mq_js_bundle.js?v=0.3.0"></script>
     <script src="localstorage_polyfill.js"></script>
+    <script src="websocket_client.js"></script>
+    <script src="input_handler.js"></script>
     <script>
-        const loadingScreen = document.getElementById('loading-screen');
-        const loadingText = document.querySelector('.loading-text');
-        
-        console.log('🔧 Loading WASM module...');
-        
-        // Macroquad's load() doesn't return a Promise, it starts the game directly
-        try {
-            load("asteroids_opencode.wasm");
-            // Hide loading screen after a short delay
-            setTimeout(() => {
-                console.log('✅ Game started');
-                loadingScreen.classList.add('hidden');
-            }, 1000);
-        } catch (err) {
-            console.error('❌ Failed to load WASM:', err);
-            loadingText.textContent = 'Error: ' + err.message;
-            loadingText.style.color = '#ff4444';
-        }
+        // Use the 'load' function from mq_js_bundle.js to load the wasm module
+        load("asteroids_opencode.wasm?v=0.3.0").then(function(instance) {
+            console.log("WASM module loaded and started.");
+        }).catch(function(error) {
+            console.error("Failed to load WASM module:", error);
+            // Display an error message to the user on the canvas or in an alert
+            var canvas = document.getElementById('glcanvas');
+            var context = canvas.getContext('2d');
+            context.fillStyle = 'white';
+            context.font = '16px sans-serif';
+            context.fillText('Error loading game.', 20, 20);
+        });
     </script>
 </body>
 </html>

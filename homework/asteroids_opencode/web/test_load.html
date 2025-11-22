@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WASM Load Test</title>
+    <style>
+        body { 
+            font-family: monospace; 
+            background: #000; 
+            color: #0f0; 
+            padding: 20px;
+        }
+        #log { 
+            border: 1px solid #0f0; 
+            padding: 10px; 
+            margin-top: 20px;
+            white-space: pre-wrap;
+        }
+        .error { color: #f00; }
+        .success { color: #0f0; }
+        .info { color: #ff0; }
+    </style>
+</head>
+<body>
+    <h1>🧪 WASM Loading Diagnostic</h1>
+    <div id="status">Loading...</div>
+    <div id="log"></div>
+    
+    <script src="mq_js_bundle.js"></script>
+    <script src="localstorage_polyfill.js"></script>
+    
+    <script>
+        const logDiv = document.getElementById('log');
+        const statusDiv = document.getElementById('status');
+        
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<div class="${type}">[${time}] ${msg}</div>`;
+            console.log(msg);
+        }
+        
+        log('✅ Page loaded', 'success');
+        log(`✅ mq_js_bundle.js loaded (typeof load = ${typeof load})`, 'success');
+        log(`✅ LocalStorage polyfill loaded`, 'success');
+        
+        // Check if WASM file exists
+        fetch('asteroids_opencode.wasm')
+            .then(response => {
+                log(`✅ WASM file found (${response.status})`, 'success');
+                log(`   Size: ${response.headers.get('content-length')} bytes`, 'info');
+                return response.arrayBuffer();
+            })
+            .then(buffer => {
+                log(`✅ WASM downloaded (${buffer.byteLength} bytes)`, 'success');
+                
+                // Try to load the WASM
+                log('🚀 Starting WASM load...', 'info');
+                statusDiv.textContent = 'Loading WASM...';
+                
+                if (typeof load === 'function') {
+                    try {
+                        load("asteroids_opencode.wasm");
+                        log('✅ load() called successfully', 'success');
+                        statusDiv.textContent = 'WASM loading...';
+                        
+                        setTimeout(() => {
+                            const canvas = document.querySelector('canvas');
+                            if (canvas) {
+                                log('✅ Canvas created - game loaded!', 'success');
+                                statusDiv.textContent = '✅ Game Running!';
+                                statusDiv.style.color = '#0f0';
+                            } else {
+                                log('⚠️  No canvas found yet', 'info');
+                                statusDiv.textContent = '⏳ Waiting for canvas...';
+                            }
+                        }, 2000);
+                        
+                    } catch (e) {
+                        log(`❌ Error calling load(): ${e.message}`, 'error');
+                        log(`   Stack: ${e.stack}`, 'error');
+                        statusDiv.textContent = '❌ Load Error!';
+                        statusDiv.style.color = '#f00';
+                    }
+                } else {
+                    log('❌ load() function not found!', 'error');
+                    statusDiv.textContent = '❌ Missing load()!';
+                }
+            })
+            .catch(error => {
+                log(`❌ Error fetching WASM: ${error}`, 'error');
+                statusDiv.textContent = '❌ Fetch Error!';
+                statusDiv.style.color = '#f00';
+            });
+            
+        // Monitor for errors
+        window.addEventListener('error', (e) => {
+            log(`❌ JavaScript Error: ${e.message}`, 'error');
+            log(`   at ${e.filename}:${e.lineno}:${e.colno}`, 'error');
+        });
+        
+        window.addEventListener('unhandledrejection', (e) => {
+            log(`❌ Unhandled Promise Rejection: ${e.reason}`, 'error');
+        });
+    </script>
+</body>
+</html>

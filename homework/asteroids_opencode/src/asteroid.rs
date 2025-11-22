@@ -28,13 +28,18 @@ pub struct Asteroid {
 
 impl Asteroid {
     pub fn spawn_initial(center: Vec2, playfield_extent: f32) -> Self {
+        Self::spawn_with_speed_multiplier(center, playfield_extent, 1.0)
+    }
+
+    /// 生成带速度倍数的小行星（用于难度递增）
+    pub fn spawn_with_speed_multiplier(center: Vec2, playfield_extent: f32, speed_multiplier: f32) -> Self {
         let direction = Vec2::new(rand::gen_range(-1., 1.), rand::gen_range(-1., 1.)).normalize();
         Self {
             pos: center + direction * playfield_extent / 2.,
             vel: Vec2::new(
                 rand::gen_range(-ASTEROID_BASE_SPEED, ASTEROID_BASE_SPEED),
                 rand::gen_range(-ASTEROID_BASE_SPEED, ASTEROID_BASE_SPEED),
-            ),
+            ) * speed_multiplier,
             rot: 0.,
             rot_speed: rand::gen_range(-ASTEROID_ROT_SPEED, ASTEROID_ROT_SPEED),
             size: playfield_extent / 10.,
@@ -91,8 +96,13 @@ impl Asteroid {
 }
 
 pub fn spawn_initial_wave(center: Vec2, playfield_extent: f32, count: usize) -> Vec<Asteroid> {
+    spawn_wave_with_speed(center, playfield_extent, count, 1.0)
+}
+
+/// 生成带速度倍数的波次（用于难度递增）
+pub fn spawn_wave_with_speed(center: Vec2, playfield_extent: f32, count: usize, speed_multiplier: f32) -> Vec<Asteroid> {
     (0..count)
-        .map(|_| Asteroid::spawn_initial(center, playfield_extent))
+        .map(|_| Asteroid::spawn_with_speed_multiplier(center, playfield_extent, speed_multiplier))
         .collect()
 }
 

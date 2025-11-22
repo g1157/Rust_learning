@@ -129,7 +129,7 @@ pub fn draw_game_over_message(message: &str, font: Option<&Font>) {
     let banner_width = screen_width() * 0.6;
     let banner_height = 130.;
     let banner_x = screen_width() / 2. - banner_width / 2.;
-    let banner_y = 370.; // 调整位置：从 270 下移 100 像素到 370
+    let banner_y = screen_height() * 0.35; // 稍微上移到 35% 位置
 
     // 使用渐变色背景面板
     draw_shadow_panel(
@@ -202,7 +202,7 @@ pub fn draw_center_scores(
     let panel_width = screen_width() * 0.75;
     let panel_height = panel_padding * 2. + line_height * combined_scores.len() as f32 + 60.;
     let panel_x = screen_width() / 2. - panel_width / 2.;
-    let panel_y = 530.; // 从 430 下移 100 像素到 530 (370 + 130 + 30 = 530)
+    let panel_y = screen_height() * 0.55; // 在 55% 位置（Game Over banner 下方）
 
     // 使用更亮的面板
     draw_shadow_panel(
@@ -364,7 +364,7 @@ pub fn draw_mode_selection(
     let card_width = screen_width() * 0.65;
     let card_height = 140.;
     let spacing = 18.;
-    let total_height = card_height * 4. + spacing * 3.;
+    let total_height = card_height * 5. + spacing * 4.;  // 改为5个卡片
     let start_y = (screen_height() - total_height) / 2. + 20.;
     let card_x = screen_width() / 2. - card_width / 2.;
 
@@ -398,12 +398,27 @@ pub fn draw_mode_selection(
         font,
     });
 
+    // Online 卡片
+    draw_mode_card(ModeCardParams {
+        x: card_x,
+        y: start_y + (card_height + spacing) * 2.,
+        width: card_width,
+        height: card_height,
+        title: "Online Multiplayer",
+        desc: "Challenge players online in real-time battles.",
+        detail: "Connect to server and compete with other pilots worldwide.",
+        active: matches!(selection, GameMode::Online),
+        accent: Color::new(0.6, 0.3, 0.9, 1.0), // 紫色
+        footer: "[Enter] Connect",
+        font,
+    });
+
     // Achievements 卡片
     let (unlocked, total) = achievements.get_stats();
     let achievements_summary = format!("Unlocked: {} / {} achievements", unlocked, total);
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 2.,
+        y: start_y + (card_height + spacing) * 3.,
         width: card_width,
         height: card_height,
         title: "Achievements",
@@ -422,7 +437,7 @@ pub fn draw_mode_selection(
     );
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 3.,
+        y: start_y + (card_height + spacing) * 4.,
         width: card_width,
         height: card_height,
         title: "Settings",
@@ -1165,14 +1180,14 @@ pub fn draw_slow_motion_indicator(time_scale: f32, font: Option<&Font>) {
 }
 
 /// 绘制设置界面
-pub fn draw_settings_screen(settings: &GameSettings, selected: SettingOption, font: Option<&Font>) {
+pub fn draw_settings_screen(settings: &GameSettings, selected: SettingOption, font: Option<&Font>, scroll_offset: f32) {
     // 渐变背景
     draw_gradient_background(
         Color::new(0.90, 0.92, 0.98, 1.0),
         Color::new(0.82, 0.86, 0.94, 1.0),
     );
 
-    // 标题（使用自定义字体）
+    // 标题（固定位置）
     let title = "Game Settings";
     let title_size = 42;
     let title_color = Color::new(0.15, 0.3, 0.6, 1.0);
@@ -1201,11 +1216,11 @@ pub fn draw_settings_screen(settings: &GameSettings, selected: SettingOption, fo
         );
     }
 
-    // 设置面板（增加高度以容纳12个选项）
+    // 设置面板（应用滚动偏移）
     let panel_width = screen_width() * 0.65;
     let panel_height = 880.; // 12个选项（每个60px高 + 68px间距）+ 顶部40px + 底部20px
     let panel_x = screen_width() / 2. - panel_width / 2.;
-    let panel_y = 140.;
+    let panel_y = 140. + scroll_offset; // 应用滚动
 
     draw_shadow_panel(
         panel_x,
@@ -1371,31 +1386,31 @@ pub fn draw_settings_screen(settings: &GameSettings, selected: SettingOption, fo
         font,
     );
 
-    // 底部提示（使用自定义字体）
-    let hint_y = panel_y + panel_height + 40.;
-    let hint = "[Up/Down W/S] Select  |  [Left/Right A/D] Change  |  [ESC] Back";
+    // 底部提示（固定位置）
+    let hint_y = screen_height() - 40.;
+    let hint = "[Up/Down W/S] Select  |  [Left/Right A/D] Change  |  [Mouse Wheel] Scroll  |  [ESC] Back";
     let hint_color = Color::new(0.4, 0.5, 0.6, 1.0);
 
     if let Some(f) = font {
-        let hint_dims = measure_text(hint, Some(f), 22, 1.0);
+        let hint_dims = measure_text(hint, Some(f), 20, 1.0);
         draw_text_ex(
             hint,
             screen_width() / 2. - hint_dims.width / 2.,
             hint_y,
             TextParams {
                 font: Some(f),
-                font_size: 22,
+                font_size: 20,
                 color: hint_color,
                 ..Default::default()
             },
         );
     } else {
-        let hint_width = measure_text(hint, None, 22, 1.0).width;
+        let hint_width = measure_text(hint, None, 20, 1.0).width;
         draw_text(
             hint,
             screen_width() / 2. - hint_width / 2.,
             hint_y,
-            22.,
+            20.,
             hint_color,
         );
     }
@@ -1624,14 +1639,14 @@ fn draw_reset_achievements_option(
 }
 
 /// 绘制成就查看界面
-pub fn draw_achievements_screen(manager: &AchievementManager, font: Option<&Font>, _time: f64) {
+pub fn draw_achievements_screen(manager: &AchievementManager, font: Option<&Font>, _time: f64, scroll_offset: f32) {
     // 渐变背景
     draw_gradient_background(
         Color::new(0.88, 0.90, 0.95, 1.0),
         Color::new(0.80, 0.84, 0.92, 1.0),
     );
 
-    // 标题
+    // 标题（固定位置，不受滚动影响）
     let title = "Achievements";
     let title_size = 48;
     let title_color = Color::new(0.15, 0.3, 0.6, 1.0);
@@ -1660,14 +1675,14 @@ pub fn draw_achievements_screen(manager: &AchievementManager, font: Option<&Font
         );
     }
 
-    // 统计信息
+    // 统计信息（固定位置）
     let (unlocked, total) = manager.get_stats();
     let percentage = if total > 0 {
         (unlocked as f32 / total as f32 * 100.0) as u32
     } else {
         0
     };
-    let stats_text = format!("{} / {} ({整}%)", unlocked, total, 整 = percentage);
+    let stats_text = format!("{} / {} ({}%)", unlocked, total, percentage);
     let stats_size = 24;
 
     if let Some(f) = font {
@@ -1694,7 +1709,7 @@ pub fn draw_achievements_screen(manager: &AchievementManager, font: Option<&Font
         );
     }
 
-    // 分类显示
+    // 分类显示（应用滚动偏移）
     let categories = vec![
         AchievementCategory::Beginner,
         AchievementCategory::Combo,
@@ -1706,7 +1721,7 @@ pub fn draw_achievements_screen(manager: &AchievementManager, font: Option<&Font
         AchievementCategory::Hidden,
     ];
 
-    let mut y_offset = 160.0;
+    let mut y_offset = 160.0 + scroll_offset; // 应用滚动
     let panel_width = screen_width() * 0.85;
     let panel_x = screen_width() / 2. - panel_width / 2.;
 
@@ -1738,9 +1753,9 @@ pub fn draw_achievements_screen(manager: &AchievementManager, font: Option<&Font
         y_offset += rows as f32 * (card_height + spacing) + 30.0;
     }
 
-    // 底部提示
-    let hint = "[ESC] Back to Menu";
-    let hint_size = 22;
+    // 底部提示（固定位置）
+    let hint = "[ESC] Back to Menu  |  [Mouse Wheel / ↑↓ W S] Scroll";
+    let hint_size = 20;
     if let Some(f) = font {
         let hint_dims = measure_text(hint, Some(f), hint_size, 1.0);
         draw_text_ex(
@@ -1804,15 +1819,15 @@ fn draw_achievement_card(
 
     let unlocked = progress.map(|p| p.unlocked).unwrap_or(false);
 
-    // 背景颜色
+    // 背景颜色 - 简化渲染
     let bg_color = if unlocked {
         Color::new(1.0, 1.0, 1.0, 0.95)
     } else {
         Color::new(0.7, 0.7, 0.7, 0.6)
     };
 
-    // 绘制卡片
-    draw_shadow_panel(x, y, width, height, bg_color);
+    // 直接绘制矩形，不使用阴影面板
+    draw_rectangle(x, y, width, height, bg_color);
 
     // 边框（根据等级显示不同颜色）
     let border_color = if unlocked {
@@ -2328,4 +2343,121 @@ pub fn draw_message_toast(message: &str, time_since_show: f32, font: Option<&Fon
             ..Default::default()
         },
     );
+}
+
+/// 绘制在线大厅界面
+pub fn draw_online_lobby(
+    nickname: &str,
+    is_inputting: bool,
+    network_client: &crate::network::NetworkClient,
+    font: Option<&Font>,
+) {
+    let w = screen_width();
+    let h = screen_height();
+    
+    // 背景
+    draw_gradient_background(
+        Color::from_rgba(26, 38, 64, 255),
+        Color::from_rgba(13, 26, 51, 255),
+    );
+    
+    // 标题
+    draw_text_centered("Online Multiplayer", h * 0.2, 60, Color::from_rgba(100, 200, 255, 255), font);
+    
+    // 连接状态
+    let status_text = match &network_client.state {
+        crate::network::ConnectionState::Disconnected => "Status: Disconnected",
+        crate::network::ConnectionState::Connecting => "Status: Connecting...",
+        crate::network::ConnectionState::Connected => "Status: Connected",
+        crate::network::ConnectionState::Error(e) => {
+            &format!("Status: Error - {}", e)
+        }
+    };
+    
+    let status_color = if network_client.is_connected() { GREEN } else { YELLOW };
+    draw_text_centered(status_text, h * 0.3, 32, status_color, font);
+    
+    if is_inputting {
+        // 昵称输入
+        draw_text_centered("Enter your nickname:", h * 0.4, 28, WHITE, font);
+        
+        // 昵称输入框
+        let input_text = if nickname.is_empty() { "_" } else { nickname };
+        let cursor = if (get_time() * 2.0) as i32 % 2 == 0 { "|" } else { "" };
+        let display_text = format!("{}{}", input_text, cursor);
+        
+        draw_text_centered(&display_text, h * 0.5, 40, Color::from_rgba(100, 255, 100, 255), font);
+        
+        // 提示
+        draw_text_centered("Press [Enter] to continue", h * 0.65, 24, LIGHTGRAY, font);
+    } else if network_client.is_connected() {
+        // 已连接，显示模式选择
+        let welcome_text = format!("Welcome, {}!", nickname);
+        draw_text_centered(&welcome_text, h * 0.4, 32, Color::from_rgba(100, 255, 100, 255), font);
+        
+        draw_text_centered("Select game mode:", h * 0.5, 28, WHITE, font);
+        draw_text_centered("[1] Survival Mode", h * 0.58, 24, LIGHTGRAY, font);
+        draw_text_centered("[2] Duel Mode", h * 0.64, 24, LIGHTGRAY, font);
+    } else {
+        // 正在连接
+        draw_text_centered("Connecting to server...", h * 0.5, 32, YELLOW, font);
+    }
+    
+    // 底部提示
+    draw_text_centered("[ESC] Return to menu", h * 0.9, 20, DARKGRAY, font);
+}
+
+/// 绘制在线等待界面
+pub fn draw_online_waiting(
+    room_id: u32,
+    network_client: &crate::network::NetworkClient,
+    font: Option<&Font>,
+) {
+    let w = screen_width();
+    let h = screen_height();
+    
+    // 背景
+    draw_gradient_background(
+        Color::from_rgba(38, 26, 51, 255),
+        Color::from_rgba(26, 13, 38, 255),
+    );
+    
+    // 标题
+    let title = if room_id == 0 {
+        "Searching for match..."
+    } else {
+        "Match found!"
+    };
+    let title_color = if room_id == 0 { YELLOW } else { GREEN };
+    draw_text_centered(title, h * 0.25, 50, title_color, font);
+    
+    // 房间信息
+    if room_id != 0 {
+        let room_text = format!("Room ID: {}", room_id);
+        draw_text_centered(&room_text, h * 0.35, 32, WHITE, font);
+    }
+    
+    // 加载动画
+    if room_id == 0 {
+        let dots = ".".repeat(((get_time() * 2.0) as usize % 4) + 1);
+        let loading_text = format!("Please wait{}", dots);
+        draw_text_centered(&loading_text, h * 0.45, 28, LIGHTGRAY, font);
+    }
+    
+    // 连接状态
+    let latency_text = if network_client.latency_ms > 0.0 {
+        format!("Latency: {:.0} ms", network_client.latency_ms)
+    } else {
+        "Latency: -- ms".to_string()
+    };
+    draw_text_centered(&latency_text, h * 0.6, 24, DARKGRAY, font);
+    
+    // 玩家列表（如果在房间中）
+    if network_client.in_room() {
+        draw_text_centered("Players in room:", h * 0.7, 24, WHITE, font);
+        // TODO: 显示房间中的玩家列表
+    }
+    
+    // 底部提示
+    draw_text_centered("[ESC] Leave queue", h * 0.9, 20, DARKGRAY, font);
 }

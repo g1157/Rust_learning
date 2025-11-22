@@ -20,11 +20,20 @@ pub const INVULNERABLE_DURATION: f64 = 3.0; // 秒
 pub const HIT_INVULNERABLE_DURATION: f64 = 1.0; // 秒
 pub const SHIELD_DURATION: f64 = 5.0; // 秒
 pub const SHOOT_COOLDOWN: f64 = 0.5; // 秒
+pub const WEAPON_POWERUP_DURATION: f64 = 10.0; // 武器道具持续时间
 
 // 连击系统常量
 const KILLSTREAK_RESET_TIME: f64 = 5.0; // 秒内无击杀则重置连击
 const KILLSTREAK_FIRE_RATE_BONUS: f64 = 0.15; // 每次连击减少 15% 冷却时间（最多 3 次）
 const KILLSTREAK_SPEED_BONUS: f32 = 30.0; // 每次连击增加 30 像素/秒速度（最多 3 次）
+
+/// 武器道具类型
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WeaponPowerUp {
+    None,
+    DualShot,   // 前后弹
+    TripleShot, // 三向弹
+}
 
 pub struct Controls {
     pub thrust: KeyCode,
@@ -37,13 +46,14 @@ pub struct Controls {
 }
 
 impl Controls {
-    pub fn shoot_pressed(&self) -> bool {
-        is_key_down(self.shoot_primary) || self.shoot_alt.map(is_key_down).unwrap_or(false)
-    }
+        pub fn shoot_pressed(&self, input: &crate::input::Input) -> bool {
+            input.is_key_down(self.shoot_primary)
+                || self.shoot_alt.map(|key| input.is_key_down(key)).unwrap_or(false)
+        }
 
-    pub fn weapon_switch_pressed(&self) -> bool {
-        is_key_pressed(self.weapon_switch)
-            || self.weapon_switch_alt.map(is_key_pressed).unwrap_or(false)
+    pub fn weapon_switch_pressed(&self, input: &crate::input::Input) -> bool {
+        input.is_key_pressed(self.weapon_switch)
+            || self.weapon_switch_alt.map(|key| input.is_key_pressed(key)).unwrap_or(false)
     }
 }
 
@@ -67,6 +77,9 @@ pub struct Player {
     last_kill_time: f64,
     // 武器系统
     pub weapon_type: WeaponType,
+    // 武器道具系统
+    pub weapon_powerup: WeaponPowerUp,
+    weapon_powerup_until: f64,
 }
 
 impl Player {
@@ -96,6 +109,8 @@ impl Player {
             killstreak: 0,
             last_kill_time: 0.0,
             weapon_type: WeaponType::Normal,
+            weapon_powerup: WeaponPowerUp::None,
+            weapon_powerup_until: now,
         }
     }
 
@@ -113,6 +128,8 @@ impl Player {
         self.shield_ready = false;
         self.killstreak = 0;
         self.last_kill_time = 0.0;
+        self.weapon_powerup = WeaponPowerUp::None;
+        self.weapon_powerup_until = now;
     }
 
     pub fn can_shoot(&self, now: f64) -> bool {
@@ -121,7 +138,18 @@ impl Player {
 
     pub fn record_shot(&mut self, position: Vec2, direction: Vec2, now: f64) -> u32 {
         self.last_shot = now;
+        
+        // 检查武器道具是否过期
+        if now >= self.weapon_powerup_until {
+            self.weapon_powerup = WeaponPowerUp::None;
+        }
 
+        // 如果有武器道具，使用道具射击
+        if self.weapon_powerup != WeaponPowerUp::None {
+            return self.record_powerup_shot(position, direction, now);
+        }
+
+        // 否则使用普通武器
         match self.weapon_type {
             WeaponType::Normal => {
                 self.bullets.push(Bullet::new(position, direction, now));
@@ -161,6 +189,38 @@ impl Player {
                 ));
                 1
             }
+        }
+    }
+    
+    /// 使用武器道具射击
+    fn record_powerup_shot(&mut self, position: Vec2, direction: Vec2, now: f64) -> u32 {
+        match self.weapon_powerup {
+            WeaponPowerUp::DualShot => {
+                // 前后弹：向前和向后各一发
+                self.bullets.push(Bullet::new(position, direction, now));
+                self.bullets.push(Bullet::new(position, -direction, now));
+                2
+            }
+            WeaponPowerUp::TripleShot => {
+                // 三向弹：3 发扇形 60 度
+                use std::f32::consts::PI;
+                let spread_angle = PI / 6.0; // 30 度
+
+                for i in -1..=1 {
+                    let angle = (i as f32) * spread_angle;
+                    let cos_a = angle.cos();
+                    let sin_a = angle.sin();
+
+                    let spread_dir = Vec2::new(
+                        direction.x * cos_a - direction.y * sin_a,
+                        direction.x * sin_a + direction.y * cos_a,
+                    );
+
+                    self.bullets.push(Bullet::new(position, spread_dir, now));
+                }
+                3
+            }
+            WeaponPowerUp::None => unreachable!(),
         }
     }
 
@@ -212,9 +272,31 @@ impl Player {
         self.shield_ready = true;
         self.shield_until = time + SHIELD_DURATION;
     }
+    
+    pub fn grant_dual_shot(&mut self, time: f64) {
+        self.weapon_powerup = WeaponPowerUp::DualShot;
+        self.weapon_powerup_until = time + WEAPON_POWERUP_DURATION;
+    }
+    
+    pub fn grant_triple_shot(&mut self, time: f64) {
+        self.weapon_powerup = WeaponPowerUp::TripleShot;
+        self.weapon_powerup_until = time + WEAPON_POWERUP_DURATION;
+    }
 
     pub fn shield_active(&self, time: f64) -> bool {
         self.shield_ready && time < self.shield_until
+    }
+    
+    pub fn weapon_powerup_active(&self, time: f64) -> bool {
+        self.weapon_powerup != WeaponPowerUp::None && time < self.weapon_powerup_until
+    }
+    
+    pub fn weapon_powerup_remaining(&self, time: f64) -> f64 {
+        if self.weapon_powerup_active(time) {
+            self.weapon_powerup_until - time
+        } else {
+            0.0
+        }
     }
 
     pub fn shield_remaining(&self, time: f64) -> f64 {
