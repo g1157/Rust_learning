@@ -1,0 +1,10 @@
+[package]
+name = "hk10-1"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plotly = "0.9"
+plotters = "0.3"
+plotters-bitmap = "0.3"
+gif = "0.13"

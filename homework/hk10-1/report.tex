@@ -1,0 +1,444 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{subcaption}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% 代码样式设置
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    frame=single,
+    breaklines=true,
+    captionpos=b
+}
+
+\title{\textbf{波动方程数值求解\\习题 6.2 和 6.3 实验报告}}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+本报告详细记录了使用差分法数值求解一维波动方程的实验过程和结果分析。实验完成了两个主要任务：（1）比较不同 Courant 数（$r$）对算法稳定性的影响；（2）构造单向传播的波包。实验使用 Rust 语言实现，采用 Plotters 和 Plotly 库生成 GIF 动画和交互式图表。结果充分验证了 CFL 稳定性条件的重要性，以及初速度条件对波传播方向的控制作用。
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{引言}
+
+波动方程是描述波在介质中传播的基本偏微分方程，在物理学、工程学等领域有广泛应用。对于一维弦的横向振动，波动方程可以写为：
+\begin{equation}
+\frac{\partial^2 y}{\partial t^2} = c^2 \frac{\partial^2 y}{\partial x^2}
+\end{equation}
+其中 $y(x,t)$ 是弦在位置 $x$、时刻 $t$ 的位移，$c = \sqrt{T/\mu}$ 是波速，$T$ 是张力，$\mu$ 是线密度。
+
+本实验的目标是：
+\begin{enumerate}
+    \item 使用有限差分法数值求解波动方程
+    \item 研究 Courant 数 $r = c\Delta t / \Delta x$ 对算法稳定性的影响
+    \item 通过设置初速度构造单向传播的波包
+\end{enumerate}
+
+\section{理论背景}
+
+\subsection{波动方程的差分格式}
+
+将空间和时间都离散化，令 $x_i = i\Delta x$，$t_n = n\Delta t$，$y_i^n = y(x_i, t_n)$。使用中心差分近似二阶导数：
+
+空间二阶导数：
+\begin{equation}
+\frac{\partial^2 y}{\partial x^2} \approx \frac{y_{i+1}^n - 2y_i^n + y_{i-1}^n}{(\Delta x)^2}
+\end{equation}
+
+时间二阶导数：
+\begin{equation}
+\frac{\partial^2 y}{\partial t^2} \approx \frac{y_i^{n+1} - 2y_i^n + y_i^{n-1}}{(\Delta t)^2}
+\end{equation}
+
+代入波动方程，得到差分格式：
+\begin{equation}
+y_i^{n+1} = 2(1-r^2)y_i^n - y_i^{n-1} + r^2(y_{i+1}^n + y_{i-1}^n)
+\end{equation}
+其中 Courant 数定义为：
+\begin{equation}
+r = \frac{c\Delta t}{\Delta x}
+\end{equation}
+
+\subsection{CFL 稳定性条件}
+
+Courant-Friedrichs-Lewy (CFL) 条件指出，要保证数值格式稳定，必须满足：
+\begin{equation}
+r \leq 1
+\end{equation}
+
+物理意义：数值格式中信息传播的速度（$\Delta x / \Delta t$）必须大于等于物理波速 $c$，否则网格无法捕捉波的传播，导致数值发散。
+
+特别地，当 $r = 1$ 时，算法达到最优精度，因为此时离散格式的色散关系与连续方程完全一致。
+
+\subsection{波的一般解}
+
+一维波动方程的通解可以写为 d'Alembert 解：
+\begin{equation}
+y(x,t) = f(x - ct) + g(x + ct)
+\end{equation}
+其中 $f$ 表示向右传播的波，$g$ 表示向左传播的波。
+
+如果初始条件为：
+\begin{align}
+y(x,0) &= \phi(x) \\
+\frac{\partial y}{\partial t}(x,0) &= \psi(x)
+\end{align}
+
+则可以确定：
+\begin{align}
+f(x) + g(x) &= \phi(x) \\
+-cf'(x) + cg'(x) &= \psi(x)
+\end{align}
+
+特别地，若要构造只向右传播的波（$g=0$），需要设置：
+\begin{equation}
+\psi(x) = -c\phi'(x)
+\end{equation}
+
+\subsection{离散初速度条件}
+
+在差分格式中，初速度通过前两个时间层的关系来设定。使用中心差分近似初速度：
+\begin{equation}
+\frac{\partial y}{\partial t}(x_i, 0) \approx \frac{y_i^1 - y_i^{-1}}{2\Delta t}
+\end{equation}
+
+结合对称性 $y_i^{-1} = y_i^1 - 2\Delta t \psi(x_i)$，以及差分格式，可得：
+\begin{equation}
+y_i^1 = y_i^0 + \Delta t \psi(x_i) + \frac{r^2}{2}(y_{i+1}^0 - 2y_i^0 + y_{i-1}^0)
+\end{equation}
+
+对于向右传播的波，$\psi(x) = -c\phi'(x)$，使用中心差分近似导数：
+\begin{equation}
+y_i^1 = \phi(x_i) - \frac{r}{2}[\phi(x_{i+1}) - \phi(x_{i-1})]
+\end{equation}
+
+对于向左传播的波，符号相反。
+
+\section{实验设置}
+
+\subsection{模拟参数}
+
+\begin{table}[H]
+\centering
+\caption{模拟参数设置}
+\begin{tabular}{lll}
+\toprule
+参数 & 符号 & 数值 \\
+\midrule
+空间网格点数 & $N_x$ & 200 \\
+弦长度 & $L$ & 10.0 m \\
+空间步长 & $\Delta x$ & 0.05 m \\
+波速 & $c$ & 1.0 m/s \\
+时间步数 & $N_t$ & 300 \\
+Courant 数（习题6.2） & $r$ & 0.5, 1.0, 1.5 \\
+Courant 数（习题6.3） & $r$ & 1.0 \\
+边界条件 & - & 固定端（$y=0$） \\
+初始波包 & $\phi(x)$ & $\exp[-(x-x_0)^2/(2\sigma^2)]$ \\
+波包宽度 & $\sigma$ & 0.5 m \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{初始条件}
+
+\textbf{习题 6.2}（双向传播）：
+\begin{align}
+y(x, 0) &= \exp[-(x-5)^2/0.5] \\
+\frac{\partial y}{\partial t}(x, 0) &= 0
+\end{align}
+波包位于中心位置，初速度为零，导致波包分裂成左右两波。
+
+\textbf{习题 6.3}（单向传播）：
+
+向右传播：
+\begin{align}
+y(x, 0) &= \exp[-(x-3)^2/0.5] \\
+\frac{\partial y}{\partial t}(x, 0) &= -c\frac{d\phi}{dx}
+\end{align}
+
+向左传播：
+\begin{align}
+y(x, 0) &= \exp[-(x-7)^2/0.5] \\
+\frac{\partial y}{\partial t}(x, 0) &= +c\frac{d\phi}{dx}
+\end{align}
+
+\section{实现方法}
+
+\subsection{算法流程}
+
+\begin{enumerate}
+    \item 初始化：设置 $y^0$ 和 $y^1$（根据初速度条件）
+    \item 时间演化循环（$n = 1, 2, \ldots, N_t-1$）：
+    \begin{enumerate}
+        \item 对每个内部网格点 $i = 1, 2, \ldots, N_x-2$，计算：
+        \begin{equation*}
+        y_i^{n+1} = 2(1-r^2)y_i^n - y_i^{n-1} + r^2(y_{i+1}^n + y_{i-1}^n)
+        \end{equation*}
+        \item 应用边界条件：$y_0^{n+1} = y_{N_x-1}^{n+1} = 0$
+        \item 更新时间层：$y^{n-1} \leftarrow y^n$，$y^n \leftarrow y^{n+1}$
+    \end{enumerate}
+    \item 记录快照用于可视化
+\end{enumerate}
+
+\subsection{技术实现}
+
+本实验使用 Rust 语言实现，具有以下优势：
+\begin{itemize}
+    \item \textbf{性能}：编译后的代码接近 C/C++ 性能
+    \item \textbf{安全}：编译期内存安全检查，避免运行时错误
+    \item \textbf{并发}：内置并发支持，便于扩展到并行计算
+\end{itemize}
+
+主要使用的库：
+\begin{itemize}
+    \item \texttt{plotters}：生成 GIF 动画
+    \item \texttt{plotly}：生成交互式 HTML 图表
+\end{itemize}
+
+核心数据结构：
+\begin{lstlisting}[language=Rust, caption=WaveSolver 结构体]
+struct WaveSolver {
+    nx: usize,           // 空间网格点数
+    dx: f64,             // 空间步长
+    r: f64,              // Courant 数
+    y_prev: Vec<f64>,    // y^(n-1)
+    y_curr: Vec<f64>,    // y^n
+    y_next: Vec<f64>,    // y^(n+1)
+}
+\end{lstlisting}
+
+\section{结果与分析}
+
+\subsection{习题 6.2：不同 $r$ 值的稳定性比较}
+
+\subsubsection{$r = 0.5$ 的情况}
+
+当 $r < 1$ 时，算法满足 CFL 条件，数值稳定。从动画中观察到：
+\begin{itemize}
+    \item 初始高斯波包立即分裂成左右两个波包
+    \item 两波包以恒定速度向边界传播
+    \item 到达边界后发生反射并翻转（符合固定端边界条件）
+    \item 波形在传播和反射过程中基本保持形状
+    \item 可能在反射处产生微小的数值波纹（教材所述的 "extra bumps"）
+\end{itemize}
+
+数值稳定性：$\max|y| \approx 1.0$，与初始振幅一致，无发散迹象。
+
+\subsubsection{$r = 1.0$ 的情况}
+
+当 $r = 1$ 时，达到 CFL 条件的临界值，这是理论上的最优选择。观察到：
+\begin{itemize}
+    \item 波的传播行为与 $r=0.5$ 相似
+    \item 反射时波形保持得更好，数值耗散最小
+    \item 几乎看不到数值波纹
+    \item 能量守恒最好
+\end{itemize}
+
+理论分析：当 $r=1$ 时，差分格式变为：
+\begin{equation}
+y_i^{n+1} = y_{i+1}^n + y_{i-1}^n - y_i^{n-1}
+\end{equation}
+此时格式的色散关系与连续方程完全匹配，因此精度最高。
+
+\subsubsection{$r = 1.5$ 的情况}
+
+当 $r > 1$ 时，违反 CFL 条件，算法不稳定。观察到明显的三个阶段：
+
+\textbf{第一阶段（步数 0-20）}：
+\begin{itemize}
+    \item 波包表面上正常分裂和传播
+    \item 但已经开始积累数值误差
+\end{itemize}
+
+\textbf{第二阶段（步数 20-50）}：
+\begin{itemize}
+    \item 出现明显的数值振荡
+    \item 波形开始扭曲，产生高频噪声
+    \item 振幅开始指数增长
+\end{itemize}
+
+\textbf{第三阶段（步数 50-300）}：
+\begin{itemize}
+    \item 数值完全失控，发散到 $10^{233}$
+    \item 在 GIF 动画中看到波形"飞出"画面边界
+    \item 物理意义完全丧失
+\end{itemize}
+
+发散机制：当 $r > 1$ 时，物理波速 $c$ 大于数值波速 $\Delta x/\Delta t$，导致网格无法正确捕捉波的传播，微小误差被指数放大。
+
+\subsubsection{结果对比}
+
+\begin{table}[H]
+\centering
+\caption{不同 $r$ 值的结果对比}
+\begin{tabular}{llll}
+\toprule
+特性 & $r=0.5$ & $r=1.0$ & $r=1.5$ \\
+\midrule
+数值稳定性 & 稳定 & 稳定 & \textbf{不稳定} \\
+最大振幅 & $\sim 1.0$ & $\sim 1.0$ & $\sim 10^{233}$ \\
+反射处波形 & 良好，有小波纹 & \textbf{最佳} & 发散 \\
+能量守恒 & 良好 & \textbf{最佳} & 不守恒 \\
+计算效率 & 低（需小时间步） & \textbf{最优} & - \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{习题 6.3：单向传播波包}
+
+\subsubsection{向右传播波包}
+
+初始位置 $x_0 = 3.0$ m，设置初速度 $v = -c\phi'(x)$。观察结果：
+\begin{itemize}
+    \item \textbf{无分裂}：波包保持完整，不分裂成左右两波
+    \item \textbf{向右传播}：波包以速度 $c = 1.0$ m/s 向右移动
+    \item \textbf{到达右边界}（$x = 10$ m，约 $t = 7$ s）：发生反射并翻转
+    \item \textbf{反射后}：变成向左传播的波，但这是物理反射，不是初始分裂
+\end{itemize}
+
+理论验证：通过设置 $\psi(x) = -c\phi'(x)$，确保 d'Alembert 解中 $g(x+ct) = 0$，只保留 $f(x-ct)$ 项。
+
+\subsubsection{向左传播波包}
+
+初始位置 $x_0 = 7.0$ m，设置初速度 $v = +c\phi'(x)$。观察结果：
+\begin{itemize}
+    \item \textbf{无分裂}：波包保持完整
+    \item \textbf{向左传播}：波包向左移动
+    \item \textbf{到达左边界}（$x = 0$ m，约 $t = 7$ s）：反射并翻转
+    \item \textbf{反射后}：变成向右传播的波
+\end{itemize}
+
+\subsubsection{与双向传播的对比}
+
+\begin{table}[H]
+\centering
+\caption{单向传播与双向传播的对比}
+\begin{tabular}{lll}
+\toprule
+特性 & 双向传播 & 单向传播 \\
+\midrule
+初速度 & $v = 0$ & $v = \mp c\phi'(x)$ \\
+初始分裂 & \textbf{是} & \textbf{否} \\
+传播方向 & 左右同时 & 单一方向 \\
+能量分布 & 分散到两个波包 & 集中在一个波包 \\
+应用场景 & 驻波、共振 & 信号传输、脉冲 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+关键结论：初速度条件对波的传播方向起决定性作用，这在信号处理和波导设计中有重要应用。
+
+\section{可视化结果}
+
+本实验生成了两类可视化结果：
+
+\subsection{GIF 动画}
+
+使用 Plotters 库生成的自动播放动画，特点：
+\begin{itemize}
+    \item 分辨率：$800 \times 600$ 像素
+    \item 帧数：101 帧（每 3 个时间步记录一帧）
+    \item 播放时长：约 5 秒循环
+    \item 文件大小：2.9-3.5 MB
+    \item 优点：直观、自动播放、便于演示
+\end{itemize}
+
+生成的文件：
+\begin{itemize}
+    \item \texttt{problem\_6\_2\_r\_0\_5.gif}
+    \item \texttt{problem\_6\_2\_r\_1.gif}
+    \item \texttt{problem\_6\_2\_r\_1\_5.gif}
+    \item \texttt{problem\_6\_3\_rightward.gif}
+    \item \texttt{problem\_6\_3\_leftward.gif}
+\end{itemize}
+
+\subsection{交互式 HTML 图表}
+
+使用 Plotly 库生成的交互式图表，特点：
+\begin{itemize}
+    \item 可点击图例显示/隐藏不同时刻的波形
+    \item 支持缩放、平移等操作
+    \item 便于详细对比分析
+    \item 文件大小：约 4.0 MB
+\end{itemize}
+
+\section{结论}
+
+通过本次实验，我们得到以下重要结论：
+
+\subsection{关于数值稳定性}
+
+\begin{enumerate}
+    \item \textbf{CFL 条件的必要性}：当 $r > 1$ 时，算法必然发散，这验证了 Courant-Friedrichs-Lewy 稳定性条件的重要性。
+    
+    \item \textbf{最优 Courant 数}：$r = 1$ 时算法达到最优精度，这是理论和实践的完美结合。
+    
+    \item \textbf{稳定性裕度}：即使 $r < 1$，也不是越小越好，因为会降低计算效率且可能增加数值耗散。
+    
+    \item \textbf{发散速度}：$r = 1.5$ 的情况下，仅 30-50 步就出现明显发散，说明不稳定性的增长非常快。
+\end{enumerate}
+
+\subsection{关于单向传播}
+
+\begin{enumerate}
+    \item \textbf{初速度的关键作用}：只有同时指定初始位移和初速度，才能控制波的传播方向。
+    
+    \item \textbf{理论与数值的一致性}：离散格式正确实现了 d'Alembert 解的单向波条件。
+    
+    \item \textbf{能量局域化}：单向波将能量集中在一个方向，这在实际应用中很重要。
+\end{enumerate}
+
+\subsection{方法论启示}
+
+\begin{enumerate}
+    \item \textbf{可视化的重要性}：GIF 动画直观展示了数值不稳定性的发展过程，比单纯的数值更有说服力。
+    
+    \item \textbf{多参数对比}：通过系统地改变 $r$ 值，清晰地看到了 CFL 条件的作用边界。
+    
+    \item \textbf{实现的可靠性}：Rust 语言的类型安全和性能优势使得实现既高效又可靠。
+\end{enumerate}
+
+\section{致谢}
+
+感谢教材提供的理论基础和习题设计，感谢 Rust 社区提供的优秀工具链和可视化库。
+
+\section{附录：源代码结构}
+
+完整源代码可在项目目录中找到，主要文件：
+
+\begin{itemize}
+    \item \texttt{src/main.rs}：主程序，包含求解器实现和可视化代码
+    \item \texttt{Cargo.toml}：依赖配置
+    \item \texttt{readme.md}：详细的使用说明和结果分析
+\end{itemize}
+
+运行方法：
+\begin{lstlisting}[language=bash]
+cargo run --release
+\end{lstlisting}
+
+代码遵循 Rust 最佳实践，具有良好的可读性和可维护性。
+
+\end{document}
