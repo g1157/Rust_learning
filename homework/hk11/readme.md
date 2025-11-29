@@ -1,8 +1,8 @@
 # 作业十一：分形图形与扩散模拟
 
 > **课程**：计算物理  
-> **学号**：[学号]  
-> **姓名**：[姓名]  
+> **学号**：[202332021221]  
+> **姓名**：[刘凤祥]  
 > **日期**：2024年11月
 
 ---
@@ -97,7 +97,7 @@ fn draw_branch(img: &mut RgbImage, x: f64, y: f64, angle: f64,
 
 #### 生成结果
 
-![分形树](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/fractal_tree.png)
+![分形树](fractal_tree.png)
 
 **分析**：分形树展现了明显的自相似结构，每个分支都是整体的缩小版。颜色从树干的棕色渐变到树叶的绿色，增强了视觉层次感。共有 $2^{12} = 4096$ 个末端分支。
 
@@ -142,7 +142,7 @@ fn barnsley_fern_iteration(x: f64, y: f64, rng: &mut impl Rng) -> (f64, f64) {
 
 #### 生成结果
 
-![Barnsley蕨类](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/barnsley_fern.png)
+![Barnsley蕨类](barnsley_fern.png)
 
 **分析**：经过 500,000 次迭代，点集收敛到蕨类植物的吸引子上。图像呈现出惊人的自然植物形态，每片小叶都是整体的缩小复制品，完美展示了 IFS 生成自然形态的能力。
 
@@ -183,7 +183,7 @@ fn generate_dragon_turns(iterations: u32) -> Vec<bool> {
 
 #### 生成结果
 
-![龙形曲线](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/dragon_curve.png)
+![龙形曲线](dragon_curve.png)
 
 **分析**：15 次迭代生成 $2^{15} = 32768$ 条线段。曲线采用彩虹渐变着色，深蓝背景增强对比度。龙形曲线具有 4 重旋转对称性，是一种空间填充曲线的近似。
 
@@ -230,7 +230,7 @@ fn levy_c_recursive(img: &mut RgbImage, x1: f64, y1: f64, x2: f64, y2: f64, dept
 
 #### 生成结果
 
-![列维C曲线](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/levy_c_curve.png)
+![列维C曲线](levy_c_curve.png)
 
 **分析**：16 层递归生成 $2^{16} = 65536$ 条线段。列维 C 曲线具有对称美感，其分形维数约为 2，接近于平面填充。
 
@@ -262,7 +262,7 @@ fn levy_c_recursive(img: &mut RgbImage, x1: f64, y1: f64, x2: f64, y2: f64, dept
 
 #### 生成结果
 
-![分形植物](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/fractal_plants.png)
+![分形植物](fractal_plants.png)
 
 **分析**：四种植物展示了 L-System 的强大表达能力。从左到右：分形草紧凑对称；灌木茂密舒展；蕨类呈现经典的羽状结构；花朵状植物向上伸展。L-System 用简单规则生成了复杂的自然形态。
 
@@ -298,7 +298,7 @@ for i in 0..num_branches {
 
 #### 生成结果
 
-![分形树变体](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/fractal_tree_variants.png)
+![分形树变体](fractal_tree_variants.png)
 
 **分析**：从左到右展示了不同风力条件下的树木形态：
 - **树1**：无风，对称生长
@@ -364,12 +364,12 @@ pub fn step(&mut self) {
 #### 扩散过程可视化
 
 | $t = 0$（初始） | $t = 10^4$ |
-|:---------------:|:----------:|
-| ![t=0](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/diffusion_t0.png) | ![t=1e4](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/diffusion_t1e4.png) |
+|:---:|:---:|
+| ![t=0](diffusion_t0.png) | ![t=1e4](diffusion_t1e4.png) |
 
 | $t = 10^5$ | $t = 10^6$ |
-|:----------:|:----------:|
-| ![t=1e5](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/diffusion_t1e5.png) | ![t=1e6](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/diffusion_t1e6.png) |
+|:---:|:---:|
+| ![t=1e5](diffusion_t1e5.png) | ![t=1e6](diffusion_t1e6.png) |
 
 **观察**：
 - $t=0$：粒子集中在中心区域
@@ -409,7 +409,7 @@ $$t_{1/2} = \tau \ln 2 \approx 5975 \text{ 时间步}$$
 
 #### 拟合图
 
-![ln(N/N0) vs t](https://raw.githubusercontent.com/g1157/Rust_learning/main/homework/hk11/diffusion_lnN_vs_t.png)
+![ln(N/N0) vs t](diffusion_lnN_vs_t.png)
 
 **分析**：
 - 红色圆点为实验数据，蓝色直线为理论拟合线 $\ln(N/N_0) = -t/\tau$
@@ -455,11 +455,3 @@ image = "0.25"
 rand = "0.8"
 plotters = "0.3"
 ```
-
----
-
-## 参考文献
-
-1. Mandelbrot, B. B. (1982). *The Fractal Geometry of Nature*. W. H. Freeman.
-2. Barnsley, M. F. (1988). *Fractals Everywhere*. Academic Press.
-3. Prusinkiewicz, P., & Lindenmayer, A. (1990). *The Algorithmic Beauty of Plants*. Springer.
