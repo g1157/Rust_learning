@@ -186,6 +186,92 @@ impl SettingOption {
     }
 }
 
+/// 统一的设置调整函数，减少重复代码
+fn adjust_setting(
+    selection: SettingOption,
+    increase: bool,
+    settings: &mut GameSettings,
+    achievements: &mut AchievementManager,
+    show_debug: &mut bool,
+    toast_message: &mut Option<(String, f64)>,
+    frame_t: f64,
+) -> bool {
+    match selection {
+        SettingOption::Lives => {
+            let old = settings.starting_lives;
+            if increase && settings.starting_lives < 9 {
+                settings.starting_lives += 1;
+            } else if !increase && settings.starting_lives > 1 {
+                settings.starting_lives -= 1;
+            }
+            settings.starting_lives != old
+        }
+        SettingOption::ShipSpeed => {
+            let old = settings.ship_speed_multiplier;
+            let delta = if increase { 0.1 } else { -0.1 };
+            settings.ship_speed_multiplier = (settings.ship_speed_multiplier + delta).clamp(0.5, 2.0);
+            (settings.ship_speed_multiplier - old).abs() > f32::EPSILON
+        }
+        SettingOption::AsteroidSpeed => {
+            let old = settings.asteroid_speed_multiplier;
+            let delta = if increase { 0.1 } else { -0.1 };
+            settings.asteroid_speed_multiplier =
+                (settings.asteroid_speed_multiplier + delta).clamp(0.5, 2.0);
+            (settings.asteroid_speed_multiplier - old).abs() > f32::EPSILON
+        }
+        SettingOption::SoundVolume => {
+            let old = settings.sound_volume;
+            let delta = if increase { 0.01 } else { -0.01 };
+            settings.sound_volume = (settings.sound_volume + delta).clamp(0.0, 1.0);
+            (settings.sound_volume - old).abs() > f32::EPSILON
+        }
+        SettingOption::FontChoice => {
+            let old = settings.font_choice;
+            settings.font_choice = if increase {
+                settings.font_choice.next()
+            } else {
+                settings.font_choice.prev()
+            };
+            settings.font_choice != old
+        }
+        SettingOption::WeaponSwitch => {
+            settings.enable_weapon_switch = !settings.enable_weapon_switch;
+            true
+        }
+        SettingOption::ScreenShake => {
+            settings.enable_screen_shake = !settings.enable_screen_shake;
+            true
+        }
+        SettingOption::SlowMotion => {
+            settings.enable_slow_motion = !settings.enable_slow_motion;
+            true
+        }
+        SettingOption::DebugPanel => {
+            settings.enable_debug_panel = !settings.enable_debug_panel;
+            *show_debug = settings.enable_debug_panel;
+            true
+        }
+        SettingOption::FlagRadius => {
+            let old = settings.flag_radius;
+            let delta = if increase { 5.0 } else { -5.0 };
+            settings.flag_radius = (settings.flag_radius + delta).clamp(50.0, 150.0);
+            (settings.flag_radius - old).abs() > f32::EPSILON
+        }
+        SettingOption::ResetDefaults => {
+            settings.reset_to_default();
+            *show_debug = settings.enable_debug_panel;
+            *toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
+            true
+        }
+        SettingOption::ResetAchievements => {
+            achievements.reset();
+            *toast_message = Some(("Achievements reset successfully".to_string(), frame_t));
+            // 注意：重置成就不算设置更改
+            false
+        }
+    }
+}
+
 /// 慢动作系统
 #[derive(Clone, Copy)]
 struct SlowMotion {
@@ -361,6 +447,12 @@ async fn main() {
     let mut toast_message: Option<(String, f64)> = None; // (消息文本, 显示开始时间)
     let mut frame_count = 0u64; // 帧计数器
 
+    // 预分配缓冲区，避免每帧重复分配内存
+    let mut vortex_forces: Vec<Vec2> = Vec::with_capacity(ASTEROID_COUNT * 2);
+    let mut quadtree = QuadTree::new(Bounds::new(0.0, 0.0, 1024.0, 768.0)); // 初始边界，会在每帧更新
+    let mut player_query: Vec<ObjectIndex> = Vec::with_capacity(16);
+    let mut bullet_query: Vec<ObjectIndex> = Vec::with_capacity(16);
+
     loop {
         let input_state = input::Input::new();
         let frame_t = get_time();
@@ -413,125 +505,25 @@ async fn main() {
                 // 左右键调整数值
                 let mut setting_changed = false;
                 if input_state.is_key_pressed(KeyCode::Left) || input_state.is_key_pressed(KeyCode::A) {
-                    match selection {
-                        SettingOption::Lives => {
-                            if settings.starting_lives > 1 {
-                                settings.starting_lives -= 1;
-                                setting_changed = true;
-                            }
-                        }
-                        SettingOption::ShipSpeed => {
-                            settings.ship_speed_multiplier =
-                                (settings.ship_speed_multiplier - 0.1).max(0.5);
-                            setting_changed = true;
-                        }
-                        SettingOption::AsteroidSpeed => {
-                            settings.asteroid_speed_multiplier =
-                                (settings.asteroid_speed_multiplier - 0.1).max(0.5);
-                            setting_changed = true;
-                        }
-                        SettingOption::SoundVolume => {
-                            settings.sound_volume = (settings.sound_volume - 0.01).max(0.0);
-                            setting_changed = true;
-                        }
-                        SettingOption::FontChoice => {
-                            settings.font_choice = settings.font_choice.prev();
-                            setting_changed = true;
-                        }
-                        SettingOption::WeaponSwitch => {
-                            settings.enable_weapon_switch = !settings.enable_weapon_switch;
-                            setting_changed = true;
-                        }
-                        SettingOption::ScreenShake => {
-                            settings.enable_screen_shake = !settings.enable_screen_shake;
-                            setting_changed = true;
-                        }
-                        SettingOption::SlowMotion => {
-                            settings.enable_slow_motion = !settings.enable_slow_motion;
-                            setting_changed = true;
-                        }
-                        SettingOption::DebugPanel => {
-                            settings.enable_debug_panel = !settings.enable_debug_panel;
-                            show_debug = settings.enable_debug_panel;
-                            setting_changed = true;
-                        }
-                        SettingOption::FlagRadius => {
-                            settings.flag_radius = (settings.flag_radius - 5.0).max(50.0);
-                            setting_changed = true;
-                        }
-                        SettingOption::ResetDefaults => {
-                            settings.reset_to_default();
-                            show_debug = settings.enable_debug_panel;
-                            setting_changed = true;
-                            toast_message =
-                                Some(("Settings reset to defaults".to_string(), frame_t));
-                        }
-                        SettingOption::ResetAchievements => {
-                            achievements.reset();
-                            toast_message =
-                                Some(("Achievements reset successfully".to_string(), frame_t));
-                        }
-                    }
+                    setting_changed = adjust_setting(
+                        selection,
+                        false,
+                        &mut settings,
+                        &mut achievements,
+                        &mut show_debug,
+                        &mut toast_message,
+                        frame_t,
+                    );
                 } else if input_state.is_key_pressed(KeyCode::Right) || input_state.is_key_pressed(KeyCode::D) {
-                    match selection {
-                        SettingOption::Lives => {
-                            if settings.starting_lives < 9 {
-                                settings.starting_lives += 1;
-                                setting_changed = true;
-                            }
-                        }
-                        SettingOption::ShipSpeed => {
-                            settings.ship_speed_multiplier =
-                                (settings.ship_speed_multiplier + 0.1).min(2.0);
-                            setting_changed = true;
-                        }
-                        SettingOption::AsteroidSpeed => {
-                            settings.asteroid_speed_multiplier =
-                                (settings.asteroid_speed_multiplier + 0.1).min(2.0);
-                            setting_changed = true;
-                        }
-                        SettingOption::SoundVolume => {
-                            settings.sound_volume = (settings.sound_volume + 0.01).min(1.0);
-                            setting_changed = true;
-                        }
-                        SettingOption::FontChoice => {
-                            settings.font_choice = settings.font_choice.next();
-                            setting_changed = true;
-                        }
-                        SettingOption::WeaponSwitch => {
-                            settings.enable_weapon_switch = !settings.enable_weapon_switch;
-                            setting_changed = true;
-                        }
-                        SettingOption::ScreenShake => {
-                            settings.enable_screen_shake = !settings.enable_screen_shake;
-                            setting_changed = true;
-                        }
-                        SettingOption::SlowMotion => {
-                            settings.enable_slow_motion = !settings.enable_slow_motion;
-                            setting_changed = true;
-                        }
-                        SettingOption::DebugPanel => {
-                            settings.enable_debug_panel = !settings.enable_debug_panel;
-                            show_debug = settings.enable_debug_panel;
-                            setting_changed = true;
-                        }
-                        SettingOption::FlagRadius => {
-                            settings.flag_radius = (settings.flag_radius + 5.0).min(150.0);
-                            setting_changed = true;
-                        }
-                        SettingOption::ResetDefaults => {
-                            settings.reset_to_default();
-                            show_debug = settings.enable_debug_panel;
-                            setting_changed = true;
-                            toast_message =
-                                Some(("Settings reset to defaults".to_string(), frame_t));
-                        }
-                        SettingOption::ResetAchievements => {
-                            achievements.reset();
-                            toast_message =
-                                Some(("Achievements reset successfully".to_string(), frame_t));
-                        }
-                    }
+                    setting_changed = adjust_setting(
+                        selection,
+                        true,
+                        &mut settings,
+                        &mut achievements,
+                        &mut show_debug,
+                        &mut toast_message,
+                        frame_t,
+                    );
                 }
 
                 // 追踪设置更改统计
@@ -541,15 +533,19 @@ async fn main() {
 
                 // Enter 触发恢复默认或重置成就
                 if input_state.is_key_pressed(KeyCode::Enter) {
-                    if matches!(selection, SettingOption::ResetDefaults) {
-                        settings.reset_to_default();
-                        show_debug = settings.enable_debug_panel;
-                        achievements.stats.settings_changed += 1;
-                        toast_message = Some(("Settings reset to defaults".to_string(), frame_t));
-                    } else if matches!(selection, SettingOption::ResetAchievements) {
-                        achievements.reset();
-                        toast_message =
-                            Some(("Achievements reset successfully".to_string(), frame_t));
+                    if matches!(selection, SettingOption::ResetDefaults | SettingOption::ResetAchievements) {
+                        let changed = adjust_setting(
+                            selection,
+                            true,
+                            &mut settings,
+                            &mut achievements,
+                            &mut show_debug,
+                            &mut toast_message,
+                            frame_t,
+                        );
+                        if changed {
+                            achievements.stats.settings_changed += 1;
+                        }
                     }
                 }
 
@@ -1161,19 +1157,20 @@ async fn main() {
             settings.sound_volume,
             &input_state,
         );
-        
+
         // 更新漩涡系统（仅在 Survival 模式）
         if current_mode == GameMode::Survival {
             vortex_manager.update(frame_t as f32, screen_width(), screen_height());
         }
-        
-        // 计算漩涡力
-        let vortex_forces: Vec<Vec2> = asteroids
-            .iter()
-            .map(|a| vortex_manager.apply_forces(a.pos, frame_t as f32))
-            .collect();
-        
-        update_asteroids(&mut asteroids, dt, settings.asteroid_speed_multiplier, vortex_forces);
+
+        // 计算漩涡力（重用预分配的 Vec）
+        vortex_forces.clear();
+        vortex_forces.reserve(asteroids.len());
+        for asteroid in asteroids.iter() {
+            vortex_forces.push(vortex_manager.apply_forces(asteroid.pos, frame_t as f32));
+        }
+
+        update_asteroids(&mut asteroids, dt, settings.asteroid_speed_multiplier, &vortex_forces);
 
         // 累积游戏时间和子弹发射统计
         achievements.stats.total_playtime += dt as f64;
@@ -1205,8 +1202,8 @@ async fn main() {
 
         particles.update(dt, frame_t as f32);
 
-        // 构建 QuadTree 用于加速碰撞检测
-        let mut quadtree = QuadTree::new(Bounds::new(0.0, 0.0, screen_width(), screen_height()));
+        // 重置并重用 QuadTree（避免每帧分配新内存）
+        quadtree.reset(Bounds::new(0.0, 0.0, screen_width(), screen_height()));
 
         // 插入所有小行星到 QuadTree
         for (idx, asteroid) in asteroids.iter().enumerate() {
@@ -1230,11 +1227,11 @@ async fn main() {
             let ship_center = player.ship.pos;
             let ship_radius = SHIP_HEIGHT; // 保守估计
 
-            // 查询附近的小行星
-            let mut nearby = Vec::new();
-            quadtree.query(ship_center, ship_radius, &mut nearby);
+            // 查询附近的小行星（重用预分配的 Vec）
+            player_query.clear();
+            quadtree.query(ship_center, ship_radius, &mut player_query);
 
-            for obj in nearby {
+            for obj in player_query.iter() {
                 let asteroid = &asteroids[obj.index];
                 if circle_intersects_triangle(asteroid.pos, asteroid.size, t1, t2, t3) {
                     player.mark_dead(frame_t);
@@ -1257,11 +1254,11 @@ async fn main() {
                     continue;
                 }
 
-                // 查询附近的小行星
-                let mut nearby = Vec::new();
-                quadtree.query(bullet.pos, BULLET_RADIUS * 3.0, &mut nearby);
+                // 查询附近的小行星（重用预分配的 Vec）
+                bullet_query.clear();
+                quadtree.query(bullet.pos, BULLET_RADIUS * 3.0, &mut bullet_query);
 
-                for obj in nearby {
+                for obj in bullet_query.iter() {
                     let asteroid = &mut asteroids[obj.index];
                     if asteroid.collided {
                         continue;
@@ -1562,24 +1559,30 @@ fn update_players(
     total_bullets_fired
 }
 
-fn update_asteroids(asteroids: &mut [Asteroid], dt: f32, speed_multiplier: f32, vortex_forces: Vec<Vec2>) {
+fn update_asteroids(asteroids: &mut [Asteroid], dt: f32, speed_multiplier: f32, vortex_forces: &[Vec2]) {
     for (i, asteroid) in asteroids.iter_mut().enumerate() {
         // 应用漩涡力
-        if i < vortex_forces.len() {
-            asteroid.vel += vortex_forces[i] * dt;
+        if let Some(force) = vortex_forces.get(i) {
+            asteroid.vel += *force * dt;
         }
-        
+
         asteroid.advance(dt * speed_multiplier);
         asteroid.pos = wrap_around(&asteroid.pos);
     }
 }
 
 fn handle_duel_hits(players: &mut [Player], particles: &mut ParticleSystem, frame_t: f64) {
+    // 防御性检查：空数组直接返回
+    if players.is_empty() {
+        return;
+    }
+
     for shooter_idx in 0..players.len() {
         let (before, rest) = players.split_at_mut(shooter_idx);
-        let (shooter, after) = rest
-            .split_first_mut()
-            .expect("Player array should not be empty");
+        let Some((shooter, after)) = rest.split_first_mut() else {
+            // 理论上不可能到达这里，但安全起见直接跳过
+            continue;
+        };
         for target in before.iter_mut() {
             apply_bullet_hits(shooter, target, particles, frame_t, DUEL_BULLET_RADIUS);
         }

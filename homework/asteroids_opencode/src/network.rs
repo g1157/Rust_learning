@@ -240,29 +240,44 @@ impl NetworkClient {
 #[cfg(target_arch = "wasm32")]
 fn js_ws_connect(url: &str) -> bool {
     use std::ffi::CString;
-    unsafe {
-        let c_url = CString::new(url).unwrap();
-        ws_connect(c_url.as_ptr() as *const u8, url.len())
+    // 安全处理：移除 NUL 字符并处理错误
+    let sanitized_url = url.replace('\0', "");
+    match CString::new(sanitized_url.as_str()) {
+        Ok(c_url) => unsafe { ws_connect(c_url.as_ptr() as *const u8, sanitized_url.len()) },
+        Err(_) => {
+            eprintln!("Invalid URL for WebSocket connection");
+            false
+        }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn js_ws_send(msg: &str) -> bool {
     use std::ffi::CString;
-    unsafe {
-        let c_msg = CString::new(msg).unwrap();
-        ws_send(c_msg.as_ptr() as *const u8, msg.len())
+    // 安全处理：移除 NUL 字符并处理错误
+    let sanitized_msg = msg.replace('\0', "");
+    match CString::new(sanitized_msg.as_str()) {
+        Ok(c_msg) => unsafe { ws_send(c_msg.as_ptr() as *const u8, sanitized_msg.len()) },
+        Err(_) => {
+            eprintln!("Invalid message for WebSocket send");
+            false
+        }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn js_ws_receive() -> Option<String> {
+    // 增大缓冲区以处理较大消息
+    const BUFFER_SIZE: usize = 8192;
     unsafe {
-        let mut buf = vec![0u8; 4096];
+        let mut buf = vec![0u8; BUFFER_SIZE];
         let len = ws_receive(buf.as_mut_ptr(), buf.len());
-        if len > 0 {
+        if len > 0 && (len as usize) <= BUFFER_SIZE {
             buf.truncate(len as usize);
             String::from_utf8(buf).ok()
+        } else if len > BUFFER_SIZE as i32 {
+            eprintln!("WebSocket message too large: {} bytes (max {})", len, BUFFER_SIZE);
+            None
         } else {
             None
         }

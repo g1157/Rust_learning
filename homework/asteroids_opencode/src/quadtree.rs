@@ -95,6 +95,14 @@ impl QuadTree {
         self.children = None;
     }
 
+    /// 重置 QuadTree 的边界并清空内容以便复用
+    pub fn reset(&mut self, bounds: Bounds) {
+        self.bounds = bounds;
+        self.depth = 0;
+        self.objects.clear();
+        self.children = None;
+    }
+
     /// 分裂节点为 4 个子节点
     fn split(&mut self) {
         let half_width = self.bounds.width / 2.0;

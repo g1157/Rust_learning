@@ -4,63 +4,74 @@
 //! - 桌面版: 使用文件系统 (std::fs)
 //! - WASM版: 使用 LocalStorage (quad-storage)
 
+/// 获取存储目录路径（桌面版）
+#[cfg(not(target_arch = "wasm32"))]
+fn get_storage_path(key: &str) -> Result<std::path::PathBuf, String> {
+    // 优先使用当前目录，如果失败则使用临时目录
+    let base_dir = std::env::current_dir()
+        .or_else(|_| std::env::temp_dir().canonicalize())
+        .map_err(|e| format!("无法获取存储目录: {}", e))?;
+
+    let mut path = base_dir;
+    path.push(format!("{}.json", key));
+    Ok(path)
+}
+
 /// 保存数据到存储
-pub fn save(_key: &str, _data: &str) -> Result<(), String> {
+pub fn save(key: &str, data: &str) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use std::fs;
-        let mut path = std::env::current_dir().unwrap_or_default();
-        path.push(format!("{}.json", _key));
-        fs::write(path, _data).map_err(|e| format!("Failed to write file: {}", e))
+        let path = get_storage_path(key)?;
+        fs::write(&path, data).map_err(|e| format!("写入文件失败 '{}': {}", path.display(), e))
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        quad_storage::STORAGE
+        let storage = quad_storage::STORAGE
             .lock()
-            .unwrap()
-            .set(_key, _data);
+            .map_err(|e| format!("获取存储锁失败: {}", e))?;
+        storage.set(key, data);
         Ok(())
     }
 }
 
 /// 从存储加载数据
-pub fn load(_key: &str) -> Result<String, String> {
+pub fn load(key: &str) -> Result<String, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use std::fs;
-        let mut path = std::env::current_dir().unwrap_or_default();
-        path.push(format!("{}.json", _key));
-        fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))
+        let path = get_storage_path(key)?;
+        fs::read_to_string(&path).map_err(|e| format!("读取文件失败 '{}': {}", path.display(), e))
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        quad_storage::STORAGE
+        let storage = quad_storage::STORAGE
             .lock()
-            .unwrap()
-            .get(_key)
-            .ok_or_else(|| format!("Key '{}' not found in storage", _key))
+            .map_err(|e| format!("获取存储锁失败: {}", e))?;
+        storage
+            .get(key)
+            .ok_or_else(|| format!("存储中未找到键 '{}'", key))
     }
 }
 
 /// 从存储删除数据
 #[allow(dead_code)]
-pub fn remove(_key: &str) -> Result<(), String> {
+pub fn remove(key: &str) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use std::fs;
-        let mut path = std::env::current_dir().unwrap_or_default();
-        path.push(format!("{}.json", _key));
-        fs::remove_file(path).map_err(|e| format!("Failed to delete file: {}", e))
+        let path = get_storage_path(key)?;
+        fs::remove_file(&path).map_err(|e| format!("删除文件失败 '{}': {}", path.display(), e))
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        quad_storage::STORAGE
+        let storage = quad_storage::STORAGE
             .lock()
-            .unwrap()
-            .remove(_key);
+            .map_err(|e| format!("获取存储锁失败: {}", e))?;
+        storage.remove(key);
         Ok(())
     }
 }

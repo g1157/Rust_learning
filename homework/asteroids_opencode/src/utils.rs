@@ -77,7 +77,14 @@ fn point_in_triangle(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
 /// 计算点到线段的最短距离的平方
 fn segment_distance_sq(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     let ab = b - a;
-    let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+    let len_sq = ab.length_squared();
+
+    // 处理退化情况：线段两端点重合
+    if len_sq < f32::EPSILON {
+        return (p - a).length_squared();
+    }
+
+    let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
     let projection = a + ab * t;
     (projection - p).length_squared()
 }
