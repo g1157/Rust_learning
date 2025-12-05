@@ -9,10 +9,12 @@
 //! - 射击冷却时间
 //! - 击杀连击系统（连击加成射速和速度）
 //! - 生存时间追踪
+//! - 多种武器类型（普通、散弹、穿透、追踪导弹）
 
 use macroquad::prelude::*;
 
 use crate::bullet::{Bullet, WeaponType};
+use crate::constants::{homing, killstreak};
 use crate::score::Score;
 use crate::ship::Ship;
 
@@ -22,10 +24,25 @@ pub const SHIELD_DURATION: f64 = 5.0; // 秒
 pub const SHOOT_COOLDOWN: f64 = 0.5; // 秒
 pub const WEAPON_POWERUP_DURATION: f64 = 10.0; // 武器道具持续时间
 
-// 连击系统常量
-const KILLSTREAK_RESET_TIME: f64 = 5.0; // 秒内无击杀则重置连击
-const KILLSTREAK_FIRE_RATE_BONUS: f64 = 0.15; // 每次连击减少 15% 冷却时间（最多 3 次）
-const KILLSTREAK_SPEED_BONUS: f32 = 30.0; // 每次连击增加 30 像素/秒速度（最多 3 次）
+// 额外生命奖励阈值
+pub const EXTRA_LIFE_THRESHOLD: u32 = 10_000; // 每 10000 分获得一条额外生命
+
+// 冲刺系统常量
+pub const DASH_COOLDOWN: f64 = 2.0; // 冲刺冷却时间
+pub const DASH_DURATION: f64 = 0.35; // 冲刺持续时间（增加到0.35秒）
+pub const DASH_INVULN_DURATION: f64 = 0.4; // 冲刺无敌时间（略长于冲刺时间）
+pub const DASH_SPEED_MULTIPLIER: f32 = 3.5; // 冲刺速度倍数（增加到3.5倍）
+
+// 超空间跳跃常量
+pub const HYPERSPACE_COOLDOWN: f64 = 5.0; // 超空间跳跃冷却时间
+pub const HYPERSPACE_VANISH_DURATION: f64 = 0.3; // 消失持续时间
+pub const HYPERSPACE_APPEAR_INVULN: f64 = 0.5; // 出现后无敌时间
+pub const HYPERSPACE_RISK_CHANCE: f32 = 0.15; // 风险概率（15%）
+
+// 连击系统常量 - 使用集中化配置
+const KILLSTREAK_RESET_TIME: f64 = killstreak::RESET_TIME;
+const KILLSTREAK_FIRE_RATE_BONUS: f64 = killstreak::FIRE_RATE_BONUS;
+const KILLSTREAK_SPEED_BONUS: f32 = killstreak::SPEED_BONUS;
 
 /// 武器道具类型
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -43,17 +60,25 @@ pub struct Controls {
     pub shoot_alt: Option<KeyCode>,
     pub weapon_switch: KeyCode,
     pub weapon_switch_alt: Option<KeyCode>,
+    pub dash: KeyCode,       // 冲刺键
+    pub hyperspace: KeyCode, // 超空间跳跃键
 }
 
 impl Controls {
-        pub fn shoot_pressed(&self, input: &crate::input::Input) -> bool {
-            input.is_key_down(self.shoot_primary)
-                || self.shoot_alt.map(|key| input.is_key_down(key)).unwrap_or(false)
-        }
+    pub fn shoot_pressed(&self, input: &crate::input::Input) -> bool {
+        input.is_key_down(self.shoot_primary)
+            || self
+                .shoot_alt
+                .map(|key| input.is_key_down(key))
+                .unwrap_or(false)
+    }
 
     pub fn weapon_switch_pressed(&self, input: &crate::input::Input) -> bool {
         input.is_key_pressed(self.weapon_switch)
-            || self.weapon_switch_alt.map(|key| input.is_key_pressed(key)).unwrap_or(false)
+            || self
+                .weapon_switch_alt
+                .map(|key| input.is_key_pressed(key))
+                .unwrap_or(false)
     }
 }
 
@@ -67,6 +92,7 @@ pub struct Player {
     pub score: Score,
     pub alive: bool,
     pub lives: u32,
+    next_extra_life_at: u32, // 下一个额外生命的分数阈值
     survival_start: f64,
     survival_end: Option<f64>,
     invulnerable_until: f64,
@@ -80,6 +106,20 @@ pub struct Player {
     // 武器道具系统
     pub weapon_powerup: WeaponPowerUp,
     weapon_powerup_until: f64,
+    // 渲染状态
+    pub is_thrusting: bool,
+    // 冲刺系统
+    pub dash_cooldown_until: f64,          // 冲刺冷却结束时间
+    pub dash_active_until: f64,            // 冲刺效果结束时间
+    pub dash_invuln_until: f64,            // 冲刺无敌结束时间
+    pub dash_direction: Vec2,              // 冲刺方向
+    pub dash_trail: Vec<(Vec2, f32, f64)>, // 残影轨迹 (位置, 角度, 时间)
+    // 成就追踪
+    pub took_damage_this_life: bool, // 当前生命是否受伤（用于无伤成就判定）
+    // 超空间跳跃系统
+    pub hyperspace_cooldown_until: f64, // 超空间跳跃冷却结束时间
+    pub hyperspace_active: bool,        // 是否正在超空间跳跃中（消失状态）
+    pub hyperspace_appear_at: f64,      // 出现时间点
 }
 
 impl Player {
@@ -101,6 +141,7 @@ impl Player {
             score: Score::new(),
             alive: true,
             lives: starting_lives,
+            next_extra_life_at: EXTRA_LIFE_THRESHOLD,
             survival_start: now + INVULNERABLE_DURATION,
             survival_end: None,
             invulnerable_until: now + INVULNERABLE_DURATION,
@@ -111,6 +152,16 @@ impl Player {
             weapon_type: WeaponType::Normal,
             weapon_powerup: WeaponPowerUp::None,
             weapon_powerup_until: now,
+            is_thrusting: false,
+            dash_cooldown_until: now,
+            dash_active_until: now,
+            dash_invuln_until: now,
+            dash_direction: Vec2::ZERO,
+            dash_trail: Vec::new(),
+            took_damage_this_life: false,
+            hyperspace_cooldown_until: now,
+            hyperspace_active: false,
+            hyperspace_appear_at: now,
         }
     }
 
@@ -119,6 +170,7 @@ impl Player {
         self.bullets.clear();
         self.last_shot = now - 1.0;
         self.score.reset();
+        self.next_extra_life_at = EXTRA_LIFE_THRESHOLD;
         self.alive = true;
         self.lives = starting_lives;
         self.survival_start = now + INVULNERABLE_DURATION;
@@ -130,6 +182,43 @@ impl Player {
         self.last_kill_time = 0.0;
         self.weapon_powerup = WeaponPowerUp::None;
         self.weapon_powerup_until = now;
+        self.is_thrusting = false;
+        self.dash_cooldown_until = now;
+        self.dash_active_until = now;
+        self.dash_invuln_until = now;
+        self.dash_direction = Vec2::ZERO;
+        self.dash_trail.clear();
+        self.took_damage_this_life = false;
+        self.hyperspace_cooldown_until = now;
+        self.hyperspace_active = false;
+        self.hyperspace_appear_at = now;
+    }
+
+    /// 增加分数，并在达到阈值时奖励额外生命
+    ///
+    /// 每达到 10000 分的倍数时获得一条额外生命。
+    /// 如果一次性获得大量分数，可能会获得多条生命。
+    ///
+    /// 返回是否获得了额外生命（用于播放音效）
+    pub fn add_score(&mut self, points: u32) -> bool {
+        self.score.add_points(points);
+        let mut awarded = false;
+
+        // 检查是否达到或超过下一个额外生命阈值
+        while self.score.value() >= self.next_extra_life_at {
+            self.lives += 1;
+            awarded = true;
+
+            // 计算下一个阈值，防止溢出
+            let next = self.next_extra_life_at.saturating_add(EXTRA_LIFE_THRESHOLD);
+            if next == self.next_extra_life_at {
+                // 溢出了，不再增加阈值
+                break;
+            }
+            self.next_extra_life_at = next;
+        }
+
+        awarded
     }
 
     pub fn can_shoot(&self, now: f64) -> bool {
@@ -138,7 +227,7 @@ impl Player {
 
     pub fn record_shot(&mut self, position: Vec2, direction: Vec2, now: f64) -> u32 {
         self.last_shot = now;
-        
+
         // 检查武器道具是否过期
         if now >= self.weapon_powerup_until {
             self.weapon_powerup = WeaponPowerUp::None;
@@ -189,9 +278,20 @@ impl Player {
                 ));
                 1
             }
+            WeaponType::Homing => {
+                // 追踪导弹：速度较慢，但会追踪目标
+                let missile_vel = direction.normalize() * homing::SPEED;
+                self.bullets.push(Bullet::with_weapon_type(
+                    position,
+                    missile_vel,
+                    now,
+                    WeaponType::Homing,
+                ));
+                1
+            }
         }
     }
-    
+
     /// 使用武器道具射击
     fn record_powerup_shot(&mut self, position: Vec2, direction: Vec2, now: f64) -> u32 {
         match self.weapon_powerup {
@@ -233,15 +333,21 @@ impl Player {
             return;
         }
 
+        // 扣除一条生命
         if self.lives > 0 {
             self.lives -= 1;
         }
 
         if self.lives == 0 {
+            // 最后一条命：游戏结束
             self.alive = false;
             self.survival_end = Some(time);
+            // 注意：took_damage_this_life 保持当前值（用于记录这条命是否受伤）
         } else {
+            // 复活：开始新的一条命
             self.invulnerable_until = time + HIT_INVULNERABLE_DURATION;
+            // 重置受伤标记，因为这是新的一条命
+            self.took_damage_this_life = false;
         }
     }
 
@@ -257,7 +363,45 @@ impl Player {
     }
 
     pub fn is_invulnerable(&self, time: f64) -> bool {
-        time < self.invulnerable_until
+        time < self.invulnerable_until || time < self.dash_invuln_until
+    }
+
+    /// 检查是否可以冲刺（冷却结束且没有在冲刺中）
+    pub fn can_dash(&self, time: f64) -> bool {
+        time >= self.dash_cooldown_until && time >= self.dash_active_until
+    }
+
+    /// 检查是否正在冲刺
+    pub fn is_dashing(&self, time: f64) -> bool {
+        time < self.dash_active_until
+    }
+
+    /// 开始冲刺
+    pub fn start_dash(&mut self, time: f64, direction: Vec2) {
+        self.dash_cooldown_until = time + DASH_COOLDOWN;
+        self.dash_active_until = time + DASH_DURATION;
+        self.dash_invuln_until = time + DASH_INVULN_DURATION;
+        self.dash_direction = direction.normalize_or_zero();
+        self.dash_trail.clear();
+    }
+
+    /// 更新冲刺残影轨迹
+    pub fn update_dash_trail(&mut self, time: f64) {
+        // 添加当前位置到残影轨迹
+        if self.is_dashing(time) {
+            self.dash_trail.push((self.ship.pos, self.ship.rot, time));
+        }
+        // 清理过期的残影（超过0.3秒）
+        self.dash_trail.retain(|(_, _, t)| time - *t < 0.3);
+    }
+
+    /// 获取冲刺冷却剩余时间
+    pub fn dash_cooldown_remaining(&self, time: f64) -> f64 {
+        if time < self.dash_cooldown_until {
+            self.dash_cooldown_until - time
+        } else {
+            0.0
+        }
     }
 
     pub fn invulnerability_remaining(&self, time: f64) -> f64 {
@@ -272,12 +416,12 @@ impl Player {
         self.shield_ready = true;
         self.shield_until = time + SHIELD_DURATION;
     }
-    
+
     pub fn grant_dual_shot(&mut self, time: f64) {
         self.weapon_powerup = WeaponPowerUp::DualShot;
         self.weapon_powerup_until = time + WEAPON_POWERUP_DURATION;
     }
-    
+
     pub fn grant_triple_shot(&mut self, time: f64) {
         self.weapon_powerup = WeaponPowerUp::TripleShot;
         self.weapon_powerup_until = time + WEAPON_POWERUP_DURATION;
@@ -286,11 +430,13 @@ impl Player {
     pub fn shield_active(&self, time: f64) -> bool {
         self.shield_ready && time < self.shield_until
     }
-    
+
+    #[allow(dead_code)]
     pub fn weapon_powerup_active(&self, time: f64) -> bool {
         self.weapon_powerup != WeaponPowerUp::None && time < self.weapon_powerup_until
     }
-    
+
+    #[allow(dead_code)]
     pub fn weapon_powerup_remaining(&self, time: f64) -> f64 {
         if self.weapon_powerup_active(time) {
             self.weapon_powerup_until - time
@@ -337,10 +483,14 @@ impl Player {
         }
     }
 
-    /// 获取当前射击冷却时间（考虑连击加成）
+    /// 获取当前射击冷却时间（考虑连击加成和武器类型）
     pub fn shoot_cooldown(&self) -> f64 {
+        let base_cooldown = match self.weapon_type {
+            WeaponType::Homing => homing::COOLDOWN,
+            _ => SHOOT_COOLDOWN,
+        };
         let bonus_multiplier = 1.0 - (self.killstreak.min(3) as f64 * KILLSTREAK_FIRE_RATE_BONUS);
-        SHOOT_COOLDOWN * bonus_multiplier
+        base_cooldown * bonus_multiplier
     }
 
     /// 获取当前最大速度（考虑连击加成）
@@ -357,5 +507,473 @@ impl Player {
             6..=9 => Some("Mega Kill!"),
             _ => Some("UNSTOPPABLE!"),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // 超空间跳跃系统
+    // -------------------------------------------------------------------------
+
+    /// 检查是否可以进行超空间跳跃
+    pub fn can_hyperspace(&self, time: f64) -> bool {
+        self.alive && !self.hyperspace_active && time >= self.hyperspace_cooldown_until
+    }
+
+    /// 开始超空间跳跃（进入消失状态）
+    pub fn start_hyperspace(&mut self, time: f64) {
+        self.hyperspace_active = true;
+        self.hyperspace_cooldown_until = time + HYPERSPACE_COOLDOWN;
+        self.hyperspace_appear_at = time + HYPERSPACE_VANISH_DURATION;
+        // 消失期间无敌
+        self.invulnerable_until = self.invulnerable_until.max(self.hyperspace_appear_at);
+    }
+
+    /// 检查是否正在超空间跳跃中（消失状态）
+    pub fn is_in_hyperspace(&self, time: f64) -> bool {
+        self.hyperspace_active && time < self.hyperspace_appear_at
+    }
+
+    /// 完成超空间跳跃（传送到新位置）
+    pub fn complete_hyperspace(&mut self, new_pos: Vec2, time: f64) {
+        self.ship.pos = new_pos;
+        self.ship.vel = Vec2::ZERO; // 传送后速度归零
+        self.hyperspace_active = false;
+        // 出现后给予短暂无敌
+        self.invulnerable_until = time + HYPERSPACE_APPEAR_INVULN;
+    }
+
+    /// 超空间跳跃失败（传送到危险位置导致死亡）
+    pub fn hyperspace_malfunction(&mut self, time: f64) {
+        self.hyperspace_active = false;
+        // 取消无敌，立即受到伤害
+        self.invulnerable_until = time - 0.1;
+        self.mark_dead(time);
+    }
+
+    /// 获取超空间跳跃冷却剩余时间
+    pub fn hyperspace_cooldown_remaining(&self, time: f64) -> f64 {
+        if time < self.hyperspace_cooldown_until {
+            self.hyperspace_cooldown_until - time
+        } else {
+            0.0
+        }
+    }
+}
+
+// ============================================================================
+// 单元测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 创建测试用控制映射
+    fn test_controls() -> Controls {
+        Controls {
+            thrust: KeyCode::W,
+            left: KeyCode::A,
+            right: KeyCode::D,
+            shoot_primary: KeyCode::Space,
+            shoot_alt: None,
+            weapon_switch: KeyCode::Tab,
+            weapon_switch_alt: None,
+            dash: KeyCode::LeftShift,
+            hyperspace: KeyCode::H,
+        }
+    }
+
+    /// 创建测试用玩家
+    fn make_player(now: f64, lives: u32) -> Player {
+        Player::new("P1", WHITE, Vec2::ZERO, test_controls(), now, lives)
+    }
+
+    #[test]
+    fn player_creation_initial_state() {
+        let now = 1.0;
+        let player = make_player(now, 3);
+
+        assert!(player.alive);
+        assert_eq!(player.lives, 3);
+        assert!(player.is_invulnerable(now));
+        assert!(player.invulnerability_remaining(now) > 0.0);
+        assert!(!player.shield_active(now));
+        assert_eq!(player.killstreak, 0);
+        assert_eq!(player.weapon_powerup, WeaponPowerUp::None);
+        assert!(player.can_shoot(now + 0.6));
+        assert!(player.can_dash(now));
+    }
+
+    #[test]
+    fn shooting_cooldown_respects_timer_and_killstreak_bonus() {
+        let mut player = make_player(0.0, 3);
+        let pos = Vec2::ZERO;
+        let dir = Vec2::new(1.0, 0.0);
+
+        // 初始可以射击
+        assert!(player.can_shoot(0.1));
+        player.record_shot(pos, dir, 0.2);
+        // 刚射击完不能立即再射
+        assert!(!player.can_shoot(0.2));
+
+        // 冷却结束后可以射击
+        let ready_at = 0.2 + player.shoot_cooldown() + 0.01;
+        assert!(player.can_shoot(ready_at));
+
+        // 连击加成减少射击冷却
+        player.record_kill(1.0);
+        player.record_kill(1.1);
+        player.record_kill(1.2);
+        assert!(player.shoot_cooldown() < SHOOT_COOLDOWN);
+    }
+
+    #[test]
+    fn killstreak_tracks_and_resets() {
+        let mut player = make_player(0.0, 3);
+
+        // 记录击杀并检查连击
+        player.record_kill(1.0);
+        player.record_kill(1.5);
+        assert_eq!(player.killstreak, 2);
+        assert_eq!(player.killstreak_level(), Some("Double Kill!"));
+
+        // 超时后连击重置
+        player.update_killstreak(1.5 + KILLSTREAK_RESET_TIME + 0.1);
+        assert_eq!(player.killstreak, 0);
+        assert_eq!(player.killstreak_level(), None);
+    }
+
+    #[test]
+    fn killstreak_level_tiers() {
+        let mut player = make_player(0.0, 3);
+
+        // 测试各级别连击描述
+        player.killstreak = 0;
+        assert_eq!(player.killstreak_level(), None);
+
+        player.killstreak = 3;
+        assert_eq!(player.killstreak_level(), Some("Double Kill!"));
+
+        player.killstreak = 5;
+        assert_eq!(player.killstreak_level(), Some("Triple Kill!"));
+
+        player.killstreak = 8;
+        assert_eq!(player.killstreak_level(), Some("Mega Kill!"));
+
+        player.killstreak = 15;
+        assert_eq!(player.killstreak_level(), Some("UNSTOPPABLE!"));
+    }
+
+    #[test]
+    fn dash_cooldown_and_state() {
+        let mut player = make_player(0.0, 3);
+
+        // 初始可以冲刺
+        assert!(player.can_dash(0.0));
+
+        // 执行冲刺
+        player.start_dash(1.0, Vec2::new(1.0, 0.0));
+        assert!(player.is_dashing(1.1));
+        assert!(!player.can_dash(1.1));
+        assert!(player.dash_cooldown_remaining(1.1) > 0.0);
+
+        // 冷却结束后可以再次冲刺
+        let ready_time = 1.0 + DASH_COOLDOWN + 0.1;
+        assert!(player.can_dash(ready_time));
+        assert!(!player.is_dashing(ready_time));
+    }
+
+    #[test]
+    fn dash_invulnerability() {
+        let mut player = make_player(0.0, 3);
+
+        // 初始无敌结束后
+        let after_invuln = INVULNERABLE_DURATION + 0.1;
+        assert!(!player.is_invulnerable(after_invuln));
+
+        // 冲刺提供无敌
+        player.start_dash(5.0, Vec2::new(1.0, 0.0));
+        assert!(player.is_invulnerable(5.1));
+    }
+
+    #[test]
+    fn shield_grant_and_consume() {
+        let mut player = make_player(0.0, 3);
+
+        // 授予护盾
+        player.grant_shield(2.0);
+        assert!(player.shield_active(2.5));
+        assert!(player.shield_remaining(2.5) > 0.0);
+
+        // 护盾应该在受击时被消耗（保护生命）
+        let before_lives = player.lives;
+        let hit_time = INVULNERABLE_DURATION + 0.5;
+        // 注意：需要先让初始无敌结束，护盾才会被使用
+        player.invulnerable_until = 0.0; // 手动清除初始无敌
+        player.grant_shield(hit_time); // 重新授予护盾
+        player.mark_dead(hit_time + 0.1);
+        assert_eq!(player.lives, before_lives); // 生命未减少
+        assert!(!player.shield_active(hit_time + 0.1)); // 护盾已消耗
+    }
+
+    #[test]
+    fn shield_expires_after_duration() {
+        let mut player = make_player(0.0, 3);
+
+        player.grant_shield(1.0);
+        assert!(player.shield_active(1.0 + SHIELD_DURATION - 0.1));
+        assert!(!player.shield_active(1.0 + SHIELD_DURATION + 0.1));
+    }
+
+    #[test]
+    fn weapon_powerups_set_and_time() {
+        let mut player = make_player(0.0, 3);
+
+        // 双向弹
+        player.grant_dual_shot(1.0);
+        assert_eq!(player.weapon_powerup, WeaponPowerUp::DualShot);
+        assert!(player.weapon_powerup_active(1.5));
+
+        // 三向弹（覆盖双向弹）
+        player.grant_triple_shot(2.0);
+        assert_eq!(player.weapon_powerup, WeaponPowerUp::TripleShot);
+        assert!(player.weapon_powerup_active(2.5));
+        assert!(player.weapon_powerup_remaining(2.5) > 0.0);
+
+        // 超时后失效
+        assert!(!player.weapon_powerup_active(2.0 + WEAPON_POWERUP_DURATION + 0.1));
+    }
+
+    #[test]
+    fn invulnerability_timing() {
+        let player = make_player(0.0, 3);
+
+        // 初始无敌期内
+        assert!(player.is_invulnerable(INVULNERABLE_DURATION - 0.1));
+        assert!(player.invulnerability_remaining(0.5) > 0.0);
+
+        // 初始无敌结束后
+        let after_invuln = INVULNERABLE_DURATION + 0.1;
+        assert!(!player.is_invulnerable(after_invuln));
+        assert_eq!(player.invulnerability_remaining(after_invuln), 0.0);
+    }
+
+    #[test]
+    fn mark_dead_consumes_lives_and_sets_alive() {
+        let mut player = make_player(0.0, 2);
+
+        // 清除初始无敌
+        player.invulnerable_until = 0.0;
+
+        // 第一次死亡
+        player.mark_dead(0.5);
+        assert_eq!(player.lives, 1);
+        assert!(player.alive);
+
+        // 等待受击无敌结束
+        let second_death = 0.5 + HIT_INVULNERABLE_DURATION + 0.2;
+        player.mark_dead(second_death);
+        assert_eq!(player.lives, 0);
+        assert!(!player.alive);
+    }
+
+    #[test]
+    fn mark_dead_respects_invulnerability() {
+        let mut player = make_player(0.0, 3);
+        let initial_lives = player.lives;
+
+        // 无敌期内不会扣命
+        player.mark_dead(INVULNERABLE_DURATION - 0.5);
+        assert_eq!(player.lives, initial_lives);
+        assert!(player.alive);
+    }
+
+    #[test]
+    fn player_reset_clears_state() {
+        let mut player = make_player(0.0, 3);
+
+        // 修改一些状态
+        player.lives = 1;
+        player.killstreak = 5;
+        player.weapon_powerup = WeaponPowerUp::DualShot;
+        player.alive = false;
+
+        // 重置
+        player.reset(Vec2::new(100.0, 100.0), 10.0, 5);
+
+        // 验证重置后的状态
+        assert!(player.alive);
+        assert_eq!(player.lives, 5);
+        assert_eq!(player.killstreak, 0);
+        assert_eq!(player.weapon_powerup, WeaponPowerUp::None);
+        assert!(player.is_invulnerable(10.0));
+    }
+
+    #[test]
+    fn max_speed_increases_with_killstreak() {
+        let mut player = make_player(0.0, 3);
+        let base_speed = player.max_speed();
+
+        player.killstreak = 3;
+        let boosted_speed = player.max_speed();
+
+        assert!(boosted_speed > base_speed);
+    }
+
+    // ------------------------------------------------------------------------
+    // Extra Life Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn extra_life_awarded_on_threshold_cross() {
+        let mut player = make_player(0.0, 3);
+
+        // 接近阈值但未达到，不应获得额外生命
+        assert!(!player.add_score(EXTRA_LIFE_THRESHOLD - 100));
+        assert_eq!(player.lives, 3);
+        assert_eq!(player.score.value(), EXTRA_LIFE_THRESHOLD - 100);
+
+        // 达到阈值，应获得额外生命
+        assert!(player.add_score(150));
+        assert_eq!(player.lives, 4);
+        assert_eq!(player.score.value(), EXTRA_LIFE_THRESHOLD + 50);
+    }
+
+    #[test]
+    fn extra_life_awards_multiple_at_once() {
+        let mut player = make_player(0.0, 1);
+
+        // 一次性获得超过两个阈值的分数，应获得两条生命
+        assert!(player.add_score(EXTRA_LIFE_THRESHOLD * 2 + 500));
+        assert_eq!(player.lives, 3);
+        assert_eq!(player.score.value(), EXTRA_LIFE_THRESHOLD * 2 + 500);
+    }
+
+    #[test]
+    fn extra_life_threshold_resets_on_player_reset() {
+        let mut player = make_player(0.0, 3);
+
+        // 获得一条额外生命
+        assert!(player.add_score(EXTRA_LIFE_THRESHOLD));
+        assert_eq!(player.lives, 4);
+
+        // 重置玩家
+        player.reset(Vec2::new(10.0, 10.0), 5.0, 2);
+        assert_eq!(player.lives, 2);
+        assert_eq!(player.score.value(), 0);
+
+        // 再次达到 10000 分应再次获得额外生命
+        assert!(player.add_score(EXTRA_LIFE_THRESHOLD));
+        assert_eq!(player.lives, 3);
+    }
+
+    #[test]
+    fn extra_life_no_award_below_threshold() {
+        let mut player = make_player(0.0, 3);
+
+        // 多次小额加分，未达阈值
+        assert!(!player.add_score(1000));
+        assert!(!player.add_score(2000));
+        assert!(!player.add_score(3000));
+        assert_eq!(player.lives, 3);
+        assert_eq!(player.score.value(), 6000);
+    }
+
+    // ------------------------------------------------------------------------
+    // Hyperspace Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn hyperspace_can_activate() {
+        let player = make_player(0.0, 3);
+        // 初始可以使用超空间跳跃
+        assert!(player.can_hyperspace(0.0));
+    }
+
+    #[test]
+    fn hyperspace_cooldown_prevents_reuse() {
+        let mut player = make_player(0.0, 3);
+
+        player.start_hyperspace(1.0);
+        // 立即无法再次使用（还在超空间中）
+        assert!(!player.can_hyperspace(1.1));
+
+        // 完成超空间跳跃
+        player.complete_hyperspace(Vec2::new(200.0, 200.0), 1.5);
+
+        // 冷却期间无法使用
+        assert!(!player.can_hyperspace(1.0 + HYPERSPACE_COOLDOWN - 0.1));
+        // 冷却结束后可以使用
+        assert!(player.can_hyperspace(1.0 + HYPERSPACE_COOLDOWN + 0.1));
+    }
+
+    #[test]
+    fn hyperspace_vanish_state() {
+        let mut player = make_player(0.0, 3);
+
+        player.start_hyperspace(1.0);
+        assert!(player.hyperspace_active);
+        assert!(player.is_in_hyperspace(1.1));
+        // 消失期间应该无敌
+        assert!(player.is_invulnerable(1.1));
+
+        // 消失时间结束后不再处于超空间中
+        let after_vanish = 1.0 + HYPERSPACE_VANISH_DURATION + 0.1;
+        assert!(!player.is_in_hyperspace(after_vanish));
+    }
+
+    #[test]
+    fn hyperspace_complete_teleports() {
+        let mut player = make_player(0.0, 3);
+        player.ship.pos = Vec2::new(100.0, 100.0);
+        player.ship.vel = Vec2::new(50.0, 50.0);
+
+        player.start_hyperspace(1.0);
+        let new_pos = Vec2::new(500.0, 500.0);
+        player.complete_hyperspace(new_pos, 1.5);
+
+        assert_eq!(player.ship.pos, new_pos);
+        assert_eq!(player.ship.vel, Vec2::ZERO);
+        assert!(!player.hyperspace_active);
+        // 出现后有无敌时间
+        assert!(player.is_invulnerable(1.5));
+    }
+
+    #[test]
+    fn hyperspace_malfunction_kills() {
+        let mut player = make_player(0.0, 3);
+        // 清除初始无敌
+        player.invulnerable_until = 0.0;
+
+        player.start_hyperspace(1.0);
+        let initial_lives = player.lives;
+        player.hyperspace_malfunction(1.5);
+
+        assert!(!player.hyperspace_active);
+        assert_eq!(player.lives, initial_lives - 1);
+    }
+
+    #[test]
+    fn hyperspace_cooldown_remaining() {
+        let mut player = make_player(0.0, 3);
+
+        player.start_hyperspace(1.0);
+        let remaining = player.hyperspace_cooldown_remaining(2.0);
+        assert!(remaining > 0.0);
+        assert!(remaining < HYPERSPACE_COOLDOWN);
+
+        // 冷却结束后
+        let after_cooldown = player.hyperspace_cooldown_remaining(1.0 + HYPERSPACE_COOLDOWN + 1.0);
+        assert_eq!(after_cooldown, 0.0);
+    }
+
+    #[test]
+    fn hyperspace_reset_clears_state() {
+        let mut player = make_player(0.0, 3);
+
+        player.start_hyperspace(1.0);
+        player.reset(Vec2::ZERO, 10.0, 3);
+
+        assert!(!player.hyperspace_active);
+        assert!(player.can_hyperspace(10.0));
     }
 }

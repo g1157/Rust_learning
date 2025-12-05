@@ -14,8 +14,10 @@
 
 use macroquad::prelude::*;
 
-const MAX_OBJECTS: usize = 4; // 每个节点最多存储的对象数
-const MAX_DEPTH: usize = 5; // 最大递归深度
+use crate::constants::quadtree as qt_config;
+
+const MAX_OBJECTS: usize = qt_config::MAX_OBJECTS;
+const MAX_DEPTH: usize = qt_config::MAX_DEPTH;
 
 /// QuadTree 中存储的对象索引
 #[derive(Clone, Copy, Debug)]

@@ -1,0 +1,17 @@
+[package]
+name = "hk12"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8"
+clap = { version = "4", features = ["derive"] }
+plotters = "0.3"
+
+[[bin]]
+name = "ising_critical"
+path = "src/ising_critical.rs"
+
+[[bin]]
+name = "ising_field"
+path = "src/ising_field.rs"

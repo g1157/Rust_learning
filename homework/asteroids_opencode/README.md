@@ -1,37 +1,68 @@
-# Asteroids 🚀
+# Asteroids
 
-A modern take on the classic Asteroids arcade game, built with Rust and Macroquad. Features cooperative survival mode and competitive duel mode with smooth gameplay, particle effects, and audio.
+A modern take on the classic Asteroids arcade game, built with Rust and Macroquad. Features multiple game modes including cooperative survival, competitive duel, and time attack challenges. Supports both single-player and local multiplayer with smooth gameplay, particle effects, and audio.
 
 ## Features
 
-- **Survival Mode**: Team up with a friend to clear waves of asteroids and compete for the highest score
+### Game Modes
+- **Survival Mode**: Clear waves of asteroids solo or with a friend
   - Wave-by-wave progression with victory pause screens
   - Progressive difficulty (more asteroids each wave)
-- **Duel Mode**: Face off in competitive flag-capture battles (in development)
-- **Local Multiplayer**: Two players on one keyboard
+  - Vortex hazards that pull ships toward the center
+- **TimeAttack Mode**: Race against the clock to clear waves as fast as possible
+  - Timer tracks your completion speed
+  - Optimized for speedrun competition
+- **Duel Mode**: Competitive flag-capture battles (in development)
+- **Online Mode**: WebSocket-based multiplayer (work in progress)
+
+### Core Gameplay
+- **Single-Player & Local Multiplayer**: Play solo or with two players on one keyboard
+- **Dash Ability**: Quick evasive maneuver with temporary invincibility
+  - 2.0s cooldown, 0.35s duration, 3.5x speed boost
+  - 0.4s invulnerability window
+  - Visual trail effect during dash
+  - Cooldown indicator on HUD
+- **4 Weapon Types**: Normal, Spread, Penetrating, Homing missiles
 - **Power-ups**: Shield pickups for temporary invincibility
 - **Smooth Physics**: Realistic momentum-based ship controls
-- **Particle Effects**: 
-  - Explosive asteroid destruction with colored particles
-  - Thruster flames when accelerating
-  - Collision impact effects
-- **Audio System**: 
-  - Sound effects with adjustable volume (default 1%)
-  - Professional audio fadeout processing (250ms/150ms)
-  - No audio artifacts or popping sounds
-  - See `AUDIO_FADEOUT.md` for technical details
-- **Polished UI**: Clean gradients, shadows, and visual feedback
+
+### Visual Effects
+- Explosive asteroid destruction with colored particles
+- Thruster flames when accelerating
+- Collision impact effects
+- Dash trails with fade effect
+- Parallax starfield background
+- Screen shake on impacts
+- Slow motion on high killstreaks
+
+### Audio System
+- Sound effects with adjustable volume (default 1%)
+- Professional audio fadeout processing (250ms/150ms)
+- No audio artifacts or popping sounds
+- See `AUDIO_FADEOUT.md` for technical details
+
+### Progression
+- **38 Achievements** with persistent storage
+- High score tracking
+- Statistics tracking (asteroids destroyed, games played, etc.)
+
+### Polished UI
+- Clean gradients, shadows, and visual feedback
+- Multiple font options including Chinese support
+- Debug panel (F3) showing FPS, entity count, quadtree depth
 
 ## Controls
 
 ### Player 1
 - **W/A/D**: Thrust / Rotate Left / Rotate Right
 - **J or F**: Shoot
+- **Space**: Dash (quick evasive maneuver with invincibility)
 - **U**: Switch weapon (when enabled in settings)
 
 ### Player 2
-- **↑/←/→**: Thrust / Rotate Left / Rotate Right
+- **Arrow Keys**: Thrust / Rotate Left / Rotate Right
 - **1 or Numpad 1**: Shoot
+- **Numpad 0**: Dash
 - **4 or Numpad 4**: Switch weapon (when enabled in settings)
 
 ### General
@@ -39,7 +70,7 @@ A modern take on the classic Asteroids arcade game, built with Rust and Macroqua
 - **Esc or P**: Pause game
 - **M**: Return to mode selection
 - **F3**: Toggle debug panel (FPS, entity count, quadtree depth)
-- **←/→ or A/D** (in settings): Adjust volume and other settings
+- **Arrow Keys or A/D** (in menus): Navigate / Adjust settings
 
 ## Building and Running
 
@@ -125,11 +156,12 @@ All sound files use linear fadeout to prevent "popping" or "clicking" sounds:
 ## Game Modes
 
 ### Survival Mode
-Work together to eliminate all asteroids across increasingly difficult waves. Each destroyed asteroid splits into smaller fragments. Collect shield power-ups to protect against collisions. 
+Work together (or solo) to eliminate all asteroids across increasingly difficult waves. Each destroyed asteroid splits into smaller fragments. Collect shield power-ups to protect against collisions.
 
 **Wave System:**
 - Clear all asteroids to trigger a 2-second victory pause
 - Next wave spawns with 2 additional asteroids
+- Vortex hazards appear and pull ships toward center
 - Game ends when all players are eliminated
 
 **Scoring:**
@@ -137,13 +169,20 @@ Work together to eliminate all asteroids across increasingly difficult waves. Ea
 - Medium asteroids: 50 points  
 - Small asteroids: 100 points
 
-**Visual Effects:**
-- Particle explosions colored by the destroying player
-- Thruster particle trails
-- Shield power-up glowing effects
+### TimeAttack Mode
+Race against the clock to clear asteroid waves as fast as possible. Perfect for speedrunners and competitive players.
+
+**Features:**
+- Real-time timer tracking your performance
+- Same wave progression as Survival
+- Timer resets properly on restart
+- Compare your best times
 
 ### Duel Mode (In Development)
 Capture the flag before your opponent. First player to reach the target score wins. Features respawning flags and strategic bullet-based combat.
+
+### Online Mode (Work in Progress)
+WebSocket-based multiplayer allowing players to compete over the internet. Server code included in `server/` directory.
 
 ## Technical Details
 
@@ -162,38 +201,40 @@ Capture the flag before your opponent. First player to reach the target score wi
 
 ```
 src/
-├── main.rs       # Game loop, state management, and settings
-├── ship.rs       # Player ship physics
-├── asteroid.rs   # Asteroid spawning and splitting logic
-├── bullet.rs     # Projectile mechanics with weapon types
-├── player.rs     # Player state, controls, and killstreaks
-├── powerup.rs    # Shield power-up system
-├── particle.rs   # Particle effects system
-├── sound.rs      # Audio system with volume control
-├── duel.rs       # Flag capture game mode
-├── score.rs      # Score tracking
-├── quadtree.rs   # Spatial partitioning for collision detection
-├── font.rs       # Font loading system
-├── ui.rs         # All rendering and UI components
-└── utils.rs      # Collision detection and helpers
+├── main.rs           # Game loop, state management, input handling
+├── player.rs         # Player state, controls, dash mechanics, killstreaks
+├── ship.rs           # Ship physics and movement
+├── asteroid.rs       # Asteroid spawning and splitting logic
+├── bullet.rs         # Projectile mechanics with 4 weapon types
+├── powerup.rs        # Shield power-up system
+├── vortex.rs         # Vortex hazard system
+├── particle.rs       # Particle effects system
+├── effects.rs        # Screen shake, slow motion effects
+├── background.rs     # Parallax starfield background
+├── render.rs         # Scene rendering, dash trails, visual effects
+├── ui.rs             # UI components and HUD
+├── ui_achievements.rs # Achievement display UI
+├── achievement.rs    # 38 achievements with persistence
+├── score.rs          # Score tracking
+├── duel.rs           # Flag capture game mode
+├── network.rs        # WebSocket multiplayer client
+├── sound.rs          # Audio system with volume control
+├── font.rs           # Font loading with Chinese support
+├── input.rs          # Input handling abstraction
+├── wasm_input.rs     # Web/WASM input handling
+├── storage.rs        # Save/load game data
+├── quadtree.rs       # Spatial partitioning for collision
+├── constants.rs      # Game constants
+└── utils.rs          # Collision detection and helpers
+
+server/               # Online multiplayer server (Rust)
+web/                  # Web build files and assets
 
 assets/
 └── sounds/              # Audio files
     ├── shoot.wav        # (250ms fadeout)
     ├── powerup.wav      # (150ms fadeout)
     └── original_backup/ # Original unprocessed audio
-
-Scripts:
-├── fix_shoot_fadeout.py  # Audio fadeout processor (250ms/150ms)
-├── add_fadeout.py        # Generic fadeout processor (50ms)
-
-Documentation:
-├── README.md                      # This file
-├── FONT_AND_UI_IMPROVEMENTS.md    # Font system and UI improvements (v0.2)
-├── ACHIEVEMENT_FIX.md             # Achievement system fixes
-├── AUDIO_FADEOUT.md               # Audio fadeout guide
-├── SHOOT_FADEOUT_FIX.md           # Shooting sound fix details
-└── AGENTS.md                      # Development guidelines
 ```
 
 ## Contributing
@@ -206,24 +247,40 @@ Educational project - feel free to learn from and adapt the code.
 
 ## Roadmap
 
-- [x] ~~Victory pause between waves~~
-- [x] ~~Particle effects system~~
-- [x] ~~Sound effects support~~
-- [x] ~~Audio fadeout processing~~
-- [x] ~~QuadTree collision optimization~~
-- [x] ~~Adjustable game settings~~
-- [x] ~~Volume control system~~
-- [x] ~~Killstreak and slow motion~~
-- [x] ~~Font system with Chinese support~~
-- [x] ~~Achievement system (38 achievements)~~
-- [x] ~~Settings screen font support~~
-- [x] ~~Reset success notifications~~
+### Completed
+- [x] Victory pause between waves
+- [x] Particle effects system
+- [x] Sound effects support
+- [x] Audio fadeout processing
+- [x] QuadTree collision optimization
+- [x] Adjustable game settings
+- [x] Volume control system
+- [x] Killstreak and slow motion
+- [x] Font system with Chinese support
+- [x] Achievement system (38 achievements)
+- [x] Settings screen font support
+- [x] Reset success notifications
+- [x] Single-player mode
+- [x] TimeAttack mode
+- [x] Dash ability with invincibility
+- [x] Vortex hazards
+- [x] Parallax starfield background
+
+### In Progress
 - [ ] Complete Duel mode features
+- [ ] Online multiplayer (WebSocket server ready)
+
+### Future Ideas
 - [ ] Background music
-- [ ] Implement online multiplayer
+- [ ] UFO enemies (classic Asteroids style)
+- [ ] More power-up types (magnet, score multiplier, speed boost)
+- [ ] Challenge/mission system with specific objectives
+- [ ] Different asteroid types with unique behaviors
+- [ ] Persistent upgrades between runs
+- [ ] Leaderboards
 - [ ] Custom arena designs
 - [ ] Gamepad support
-- [ ] More particle types (shield breaks, power-up trails)
+- [ ] More particle effects (shield breaks, power-up trails)
 
 ## Documentation
 

@@ -24,9 +24,9 @@ impl Score {
         self.value = 0;
     }
 
-    /// 增加分数
+    /// 增加分数（使用饱和加法防止溢出）
     pub fn add_points(&mut self, points: u32) {
-        self.value += points;
+        self.value = self.value.saturating_add(points);
     }
 
     /// 获取当前分数

@@ -71,6 +71,11 @@ pub enum AchievementId {
     ThePacifist,
     LuckySeven,
     MidnightWarrior,
+
+    // UFO 猎手系列 (3个)
+    FirstContact, // 首次击毁 UFO
+    SkyHunter,    // 累计击毁 10 个 UFO
+    CleanSweep,   // 无伤击毁 UFO
 }
 
 impl AchievementId {
@@ -123,6 +128,10 @@ impl AchievementId {
             Self::ThePacifist,
             Self::LuckySeven,
             Self::MidnightWarrior,
+            // UFO 猎手
+            Self::FirstContact,
+            Self::SkyHunter,
+            Self::CleanSweep,
         ]
     }
 }
@@ -637,6 +646,41 @@ impl Achievement {
                 hidden: true,
                 target: 0,
             },
+
+            // ========== UFO 猎手系列 ==========
+            AchievementId::FirstContact => Self {
+                id,
+                name: "First Contact",
+                description: "首次击毁一艘 UFO",
+                quote: "欢迎来到外星空域！",
+                icon: "^",
+                tier: AchievementTier::Bronze,
+                category: AchievementCategory::Explorer,
+                hidden: false,
+                target: 1,
+            },
+            AchievementId::SkyHunter => Self {
+                id,
+                name: "Sky Hunter",
+                description: "累计击毁 10 艘 UFO",
+                quote: "没有飞碟能逃过你的瞄准。",
+                icon: "@",
+                tier: AchievementTier::Silver,
+                category: AchievementCategory::Veteran,
+                hidden: false,
+                target: 10,
+            },
+            AchievementId::CleanSweep => Self {
+                id,
+                name: "Clean Sweep",
+                description: "在未受伤的情况下击毁一艘 UFO",
+                quote: "一尘不染的胜利。",
+                icon: "#",
+                tier: AchievementTier::Gold,
+                category: AchievementCategory::Perfectionist,
+                hidden: false,
+                target: 1,
+            },
         }
     }
 }
@@ -652,20 +696,22 @@ pub struct AchievementProgress {
 /// 玩家统计数据（累计追踪）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlayerStats {
-    pub total_playtime: f64,           // 总游戏时长（秒）
-    pub total_kills: u32,              // 总击杀数
-    pub bullets_fired: u32,            // 发射的子弹总数
-    pub shields_collected: u32,        // 拾取的护盾数
-    pub games_played: u32,             // 游戏局数
-    pub survival_games: u32,           // 生存模式局数
-    pub duel_games: u32,               // 对战模式局数
-    pub duel_wins: u32,                // 对战胜利数
+    pub total_playtime: f64, // 总游戏时长（秒）
+    pub total_kills: u32,    // 总击杀数
+    #[serde(default)]
+    pub ufo_kills_total: u32, // 累计击毁 UFO 数
+    pub bullets_fired: u32,  // 发射的子弹总数
+    pub shields_collected: u32, // 拾取的护盾数
+    pub games_played: u32,   // 游戏局数
+    pub survival_games: u32, // 生存模式局数
+    pub duel_games: u32,     // 对战模式局数
+    pub duel_wins: u32,      // 对战胜利数
     pub modes_played: HashSet<String>, // 已玩过的模式
     pub weapons_used: HashSet<String>, // 已使用的武器
-    pub settings_changed: u32,         // 设置修改次数
-    pub max_wave: u32,                 // 最高波次
-    pub max_killstreak: u32,           // 最高连击
-    pub five_streaks: u32,             // 5连击次数
+    pub settings_changed: u32, // 设置修改次数
+    pub max_wave: u32,       // 最高波次
+    pub max_killstreak: u32, // 最高连击
+    pub five_streaks: u32,   // 5连击次数
 }
 
 /// 成就管理器
@@ -793,10 +839,10 @@ impl AchievementManager {
             stats: self.stats.clone(),
         };
 
-        if let Ok(json) = serde_json::to_string(&save_data) {
-            if let Err(e) = storage::save("achievements", &json) {
-                eprintln!("Failed to save achievements: {}", e);
-            }
+        if let Ok(json) = serde_json::to_string(&save_data)
+            && let Err(e) = storage::save("achievements", &json)
+        {
+            eprintln!("Failed to save achievements: {}", e);
         }
     }
 
@@ -860,6 +906,9 @@ impl AchievementManager {
             "ThePacifist" => Some(AchievementId::ThePacifist),
             "LuckySeven" => Some(AchievementId::LuckySeven),
             "MidnightWarrior" => Some(AchievementId::MidnightWarrior),
+            "FirstContact" => Some(AchievementId::FirstContact),
+            "SkyHunter" => Some(AchievementId::SkyHunter),
+            "CleanSweep" => Some(AchievementId::CleanSweep),
             _ => None,
         }
     }
@@ -904,5 +953,538 @@ impl AchievementManager {
         self.stats = PlayerStats::default(); // 重置统计数据
         self.recently_unlocked.clear();
         self.save();
+    }
+
+    /// 创建不加载存储的管理器（仅用于测试）
+    #[cfg(test)]
+    fn new_without_load() -> Self {
+        let mut manager = Self {
+            progress: HashMap::new(),
+            recently_unlocked: Vec::new(),
+            stats: PlayerStats::default(),
+        };
+        for id in AchievementId::all() {
+            manager.progress.insert(id, AchievementProgress::default());
+        }
+        manager
+    }
+}
+
+// ============================================================================
+// Unit Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ------------------------------------------------------------------------
+    // AchievementId Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_achievement_id_all_returns_correct_count() {
+        let all = AchievementId::all();
+        // 7 新手 + 6 连击 + 8 生存 + 5 对战 + 4 完美 + 3 探索 + 2 累计 + 3 隐藏 + 3 UFO = 41
+        assert_eq!(all.len(), 41);
+    }
+
+    #[test]
+    fn test_achievement_id_all_no_duplicates() {
+        let all = AchievementId::all();
+        let set: std::collections::HashSet<_> = all.iter().collect();
+        assert_eq!(
+            set.len(),
+            all.len(),
+            "AchievementId::all() contains duplicates"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Achievement Definition Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_achievement_get_first_flight() {
+        let achievement = Achievement::get(AchievementId::FirstFlight);
+        assert_eq!(achievement.id, AchievementId::FirstFlight);
+        assert_eq!(achievement.name, "First Flight");
+        assert_eq!(achievement.tier, AchievementTier::Bronze);
+        assert_eq!(achievement.category, AchievementCategory::Beginner);
+        assert_eq!(achievement.target, 1);
+        assert!(!achievement.hidden);
+    }
+
+    #[test]
+    fn test_achievement_get_hidden_achievement() {
+        let achievement = Achievement::get(AchievementId::ThePacifist);
+        assert!(achievement.hidden);
+        assert_eq!(achievement.category, AchievementCategory::Hidden);
+        assert_eq!(achievement.tier, AchievementTier::Gold);
+    }
+
+    #[test]
+    fn test_achievement_get_ufo_achievement() {
+        let achievement = Achievement::get(AchievementId::FirstContact);
+        assert_eq!(achievement.name, "First Contact");
+        assert_eq!(achievement.tier, AchievementTier::Bronze);
+        assert_eq!(achievement.target, 1);
+    }
+
+    #[test]
+    fn test_achievement_get_diamond_tier() {
+        let achievement = Achievement::get(AchievementId::Godlike);
+        assert_eq!(achievement.tier, AchievementTier::Diamond);
+        assert_eq!(achievement.target, 15);
+    }
+
+    // ------------------------------------------------------------------------
+    // AchievementTier Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_achievement_tier_icon() {
+        assert_eq!(AchievementTier::Bronze.icon(), "[B]");
+        assert_eq!(AchievementTier::Silver.icon(), "[S]");
+        assert_eq!(AchievementTier::Gold.icon(), "[G]");
+        assert_eq!(AchievementTier::Diamond.icon(), "[D]");
+    }
+
+    // Note: color() test skipped - requires macroquad graphics context
+
+    // ------------------------------------------------------------------------
+    // AchievementCategory Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_achievement_category_name() {
+        assert_eq!(AchievementCategory::Beginner.name(), "新手村");
+        assert_eq!(AchievementCategory::Combo.name(), "连击大师");
+        assert_eq!(AchievementCategory::Survival.name(), "生存模式专精");
+        assert_eq!(AchievementCategory::Duel.name(), "对战模式荣耀");
+        assert_eq!(AchievementCategory::Perfectionist.name(), "完美主义");
+        assert_eq!(AchievementCategory::Explorer.name(), "探索与实验");
+        assert_eq!(AchievementCategory::Veteran.name(), "累计成就");
+        assert_eq!(AchievementCategory::Hidden.name(), "隐藏成就");
+    }
+
+    // ------------------------------------------------------------------------
+    // PlayerStats Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_player_stats_default() {
+        let stats = PlayerStats::default();
+        assert_eq!(stats.total_playtime, 0.0);
+        assert_eq!(stats.total_kills, 0);
+        assert_eq!(stats.ufo_kills_total, 0);
+        assert_eq!(stats.bullets_fired, 0);
+        assert_eq!(stats.shields_collected, 0);
+        assert_eq!(stats.games_played, 0);
+        assert_eq!(stats.survival_games, 0);
+        assert_eq!(stats.duel_games, 0);
+        assert_eq!(stats.duel_wins, 0);
+        assert_eq!(stats.settings_changed, 0);
+        assert_eq!(stats.max_wave, 0);
+        assert_eq!(stats.max_killstreak, 0);
+        assert_eq!(stats.five_streaks, 0);
+        assert!(stats.modes_played.is_empty());
+        assert!(stats.weapons_used.is_empty());
+    }
+
+    // ------------------------------------------------------------------------
+    // AchievementProgress Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_achievement_progress_default() {
+        let progress = AchievementProgress::default();
+        assert!(!progress.unlocked);
+        assert!(progress.unlock_time.is_none());
+        assert_eq!(progress.current, 0);
+    }
+
+    // ------------------------------------------------------------------------
+    // AchievementManager Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_manager_new_without_load_initializes_all_achievements() {
+        let manager = AchievementManager::new_without_load();
+        assert_eq!(manager.progress.len(), AchievementId::all().len());
+        for progress in manager.progress.values() {
+            assert!(!progress.unlocked);
+            assert_eq!(progress.current, 0);
+        }
+    }
+
+    #[test]
+    fn test_manager_unlock_success() {
+        let mut manager = AchievementManager::new_without_load();
+        let time = 10.0;
+        let result = manager.unlock(AchievementId::FirstFlight, time);
+        assert!(result, "First unlock should succeed");
+
+        let progress = manager.get_progress(AchievementId::FirstFlight).unwrap();
+        assert!(progress.unlocked);
+        assert_eq!(progress.unlock_time, Some(time));
+    }
+
+    #[test]
+    fn test_manager_unlock_already_unlocked_returns_false() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstFlight, 10.0);
+        let result = manager.unlock(AchievementId::FirstFlight, 20.0);
+        assert!(!result, "Second unlock should fail");
+
+        // Time should remain original
+        let progress = manager.get_progress(AchievementId::FirstFlight).unwrap();
+        assert_eq!(progress.unlock_time, Some(10.0));
+    }
+
+    #[test]
+    fn test_manager_unlock_adds_to_recently_unlocked() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstBlood, 5.0);
+        assert_eq!(manager.recently_unlocked.len(), 1);
+        assert_eq!(manager.recently_unlocked[0].0, AchievementId::FirstBlood);
+        assert_eq!(manager.recently_unlocked[0].1, 5.0);
+    }
+
+    #[test]
+    fn test_manager_update_progress_partial() {
+        let mut manager = AchievementManager::new_without_load();
+        // Marksman requires 10 hits
+        manager.update_progress(AchievementId::Marksman, 5, 1.0);
+
+        let progress = manager.get_progress(AchievementId::Marksman).unwrap();
+        assert_eq!(progress.current, 5);
+        assert!(!progress.unlocked, "Should not unlock at 5/10");
+    }
+
+    #[test]
+    fn test_manager_update_progress_auto_unlock_at_target() {
+        let mut manager = AchievementManager::new_without_load();
+        // Marksman target = 10
+        manager.update_progress(AchievementId::Marksman, 10, 2.0);
+
+        let progress = manager.get_progress(AchievementId::Marksman).unwrap();
+        assert!(progress.unlocked);
+        assert_eq!(progress.unlock_time, Some(2.0));
+    }
+
+    #[test]
+    fn test_manager_update_progress_over_target_still_unlocks() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.update_progress(AchievementId::Marksman, 15, 3.0);
+
+        let progress = manager.get_progress(AchievementId::Marksman).unwrap();
+        assert!(progress.unlocked);
+    }
+
+    #[test]
+    fn test_manager_update_progress_zero_target_no_auto_unlock() {
+        let mut manager = AchievementManager::new_without_load();
+        // QuickStart has target = 0 (condition-based)
+        manager.update_progress(AchievementId::QuickStart, 100, 1.0);
+
+        let progress = manager.get_progress(AchievementId::QuickStart).unwrap();
+        assert!(
+            !progress.unlocked,
+            "Zero-target achievements need explicit unlock"
+        );
+    }
+
+    #[test]
+    fn test_manager_increment_progress() {
+        let mut manager = AchievementManager::new_without_load();
+        // Armed target = 100
+        manager.increment_progress(AchievementId::Armed, 30, 1.0);
+        assert_eq!(
+            manager.get_progress(AchievementId::Armed).unwrap().current,
+            30
+        );
+
+        manager.increment_progress(AchievementId::Armed, 70, 2.0);
+        let progress = manager.get_progress(AchievementId::Armed).unwrap();
+        assert_eq!(progress.current, 100);
+        assert!(progress.unlocked);
+    }
+
+    #[test]
+    fn test_manager_increment_progress_on_unlocked_no_change() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::Armed, 1.0);
+        manager.increment_progress(AchievementId::Armed, 50, 2.0);
+
+        // Progress should not change after unlock
+        let progress = manager.get_progress(AchievementId::Armed).unwrap();
+        assert_eq!(progress.current, 0); // Stays at 0 because unlock skips update
+    }
+
+    #[test]
+    fn test_manager_get_progress_returns_some() {
+        let manager = AchievementManager::new_without_load();
+        assert!(manager.get_progress(AchievementId::FirstFlight).is_some());
+    }
+
+    #[test]
+    fn test_manager_is_unlocked() {
+        let mut manager = AchievementManager::new_without_load();
+        assert!(!manager.is_unlocked(AchievementId::Lucky));
+        manager.unlock(AchievementId::Lucky, 1.0);
+        assert!(manager.is_unlocked(AchievementId::Lucky));
+    }
+
+    #[test]
+    fn test_manager_get_recent_unlocks_filters_by_age() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstFlight, 1.0);
+        manager.unlock(AchievementId::FirstBlood, 5.0);
+        manager.unlock(AchievementId::Marksman, 9.0);
+
+        let recent = manager.get_recent_unlocks(3.0, 10.0);
+        // At time 10.0 with max_age 3.0, only Marksman (9.0) should be recent
+        assert_eq!(recent.len(), 1);
+        assert!(recent.contains(&AchievementId::Marksman));
+    }
+
+    #[test]
+    fn test_manager_cleanup_recent_unlocks() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstFlight, 1.0);
+        manager.unlock(AchievementId::FirstBlood, 8.0);
+        assert_eq!(manager.recently_unlocked.len(), 2);
+
+        manager.cleanup_recent_unlocks(5.0, 10.0);
+        // Only FirstBlood (8.0) should remain
+        assert_eq!(manager.recently_unlocked.len(), 1);
+        assert_eq!(manager.recently_unlocked[0].0, AchievementId::FirstBlood);
+    }
+
+    #[test]
+    fn test_manager_get_stats() {
+        let mut manager = AchievementManager::new_without_load();
+        let (unlocked, total) = manager.get_stats();
+        assert_eq!(unlocked, 0);
+        assert_eq!(total, 41);
+
+        manager.unlock(AchievementId::FirstFlight, 1.0);
+        manager.unlock(AchievementId::FirstBlood, 2.0);
+        let (unlocked, total) = manager.get_stats();
+        assert_eq!(unlocked, 2);
+        assert_eq!(total, 41);
+    }
+
+    #[test]
+    fn test_manager_get_by_category_beginner() {
+        let manager = AchievementManager::new_without_load();
+        let beginner = manager.get_by_category(AchievementCategory::Beginner);
+        assert_eq!(beginner.len(), 7);
+        assert!(beginner.contains(&AchievementId::FirstFlight));
+        assert!(beginner.contains(&AchievementId::FirstBlood));
+        assert!(beginner.contains(&AchievementId::Lucky));
+    }
+
+    #[test]
+    fn test_manager_get_by_category_hidden() {
+        let manager = AchievementManager::new_without_load();
+        let hidden = manager.get_by_category(AchievementCategory::Hidden);
+        assert_eq!(hidden.len(), 3);
+        assert!(hidden.contains(&AchievementId::ThePacifist));
+        assert!(hidden.contains(&AchievementId::LuckySeven));
+        assert!(hidden.contains(&AchievementId::MidnightWarrior));
+    }
+
+    #[test]
+    fn test_manager_reset_clears_all() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstFlight, 1.0);
+        manager.update_progress(AchievementId::Marksman, 5, 2.0);
+        manager.stats.total_playtime = 100.0;
+        manager.stats.total_kills = 50;
+
+        manager.reset();
+
+        // Check all progress reset
+        for progress in manager.progress.values() {
+            assert!(!progress.unlocked);
+            assert_eq!(progress.current, 0);
+            assert!(progress.unlock_time.is_none());
+        }
+        // Check stats reset
+        assert_eq!(manager.stats.total_playtime, 0.0);
+        assert_eq!(manager.stats.total_kills, 0);
+        // Check recently_unlocked cleared
+        assert!(manager.recently_unlocked.is_empty());
+    }
+
+    // ------------------------------------------------------------------------
+    // parse_achievement_id Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_achievement_id_known_ids() {
+        let manager = AchievementManager::new_without_load();
+        assert_eq!(
+            manager.parse_achievement_id("FirstFlight"),
+            Some(AchievementId::FirstFlight)
+        );
+        assert_eq!(
+            manager.parse_achievement_id("Godlike"),
+            Some(AchievementId::Godlike)
+        );
+        assert_eq!(
+            manager.parse_achievement_id("CleanSweep"),
+            Some(AchievementId::CleanSweep)
+        );
+    }
+
+    #[test]
+    fn test_parse_achievement_id_unknown_returns_none() {
+        let manager = AchievementManager::new_without_load();
+        assert!(manager.parse_achievement_id("Unknown").is_none());
+        assert!(manager.parse_achievement_id("").is_none());
+        assert!(manager.parse_achievement_id("firstflight").is_none()); // case sensitive
+    }
+
+    // ------------------------------------------------------------------------
+    // Helper Method Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_extract_number() {
+        let manager = AchievementManager::new_without_load();
+        assert_eq!(manager.extract_number("kills: 42 total", "kills:"), 42);
+        assert_eq!(manager.extract_number("no match here", "kills:"), 0);
+        assert_eq!(manager.extract_number("score 100", "score"), 100);
+    }
+
+    #[test]
+    fn test_extract_number_f64() {
+        let manager = AchievementManager::new_without_load();
+        assert_eq!(
+            manager.extract_number_f64("time: 12.5 seconds", "time:"),
+            12.5
+        );
+        assert_eq!(manager.extract_number_f64("no match", "time:"), 0.0);
+    }
+
+    // ------------------------------------------------------------------------
+    // Additional Edge Case Tests (based on code review)
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_manager_update_progress_on_unlocked_no_change() {
+        let mut manager = AchievementManager::new_without_load();
+        // First unlock the achievement
+        manager.unlock(AchievementId::Marksman, 1.0);
+        let original_time = manager
+            .get_progress(AchievementId::Marksman)
+            .unwrap()
+            .unlock_time;
+
+        // Try to update progress after unlock
+        manager.update_progress(AchievementId::Marksman, 999, 5.0);
+
+        let progress = manager.get_progress(AchievementId::Marksman).unwrap();
+        // Progress should NOT be updated
+        assert_eq!(progress.current, 0, "Progress should remain 0 after unlock");
+        // unlock_time should NOT change
+        assert_eq!(
+            progress.unlock_time, original_time,
+            "unlock_time should not change"
+        );
+    }
+
+    #[test]
+    fn test_manager_get_recent_unlocks_empty() {
+        let manager = AchievementManager::new_without_load();
+        let recent = manager.get_recent_unlocks(5.0, 10.0);
+        assert!(recent.is_empty(), "No unlocks means empty recent list");
+    }
+
+    #[test]
+    fn test_manager_get_recent_unlocks_all_too_old() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstFlight, 1.0);
+        manager.unlock(AchievementId::FirstBlood, 2.0);
+
+        // At time 100 with max_age 3, both are too old
+        let recent = manager.get_recent_unlocks(3.0, 100.0);
+        assert!(recent.is_empty());
+    }
+
+    #[test]
+    fn test_manager_get_by_category_explorer() {
+        let manager = AchievementManager::new_without_load();
+        let explorer = manager.get_by_category(AchievementCategory::Explorer);
+        // Explorer: Arsenal, Adventurer, Tinkerer, FirstContact (UFO)
+        assert_eq!(explorer.len(), 4);
+        assert!(explorer.contains(&AchievementId::Arsenal));
+        assert!(explorer.contains(&AchievementId::Adventurer));
+        assert!(explorer.contains(&AchievementId::FirstContact));
+    }
+
+    #[test]
+    fn test_manager_get_by_category_veteran() {
+        let manager = AchievementManager::new_without_load();
+        let veteran = manager.get_by_category(AchievementCategory::Veteran);
+        // Veteran: Veteran, Legend, SkyHunter
+        assert_eq!(veteran.len(), 3);
+        assert!(veteran.contains(&AchievementId::Veteran));
+        assert!(veteran.contains(&AchievementId::Legend));
+        assert!(veteran.contains(&AchievementId::SkyHunter));
+    }
+
+    #[test]
+    fn test_manager_get_stats_repeated_unlock_no_double_count() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstFlight, 1.0);
+        manager.unlock(AchievementId::FirstFlight, 2.0); // repeat
+
+        let (unlocked, _) = manager.get_stats();
+        assert_eq!(unlocked, 1, "Repeated unlock should not double count");
+    }
+
+    #[test]
+    fn test_manager_get_stats_after_reset() {
+        let mut manager = AchievementManager::new_without_load();
+        manager.unlock(AchievementId::FirstFlight, 1.0);
+        manager.unlock(AchievementId::FirstBlood, 2.0);
+        assert_eq!(manager.get_stats().0, 2);
+
+        manager.reset();
+        let (unlocked, total) = manager.get_stats();
+        assert_eq!(
+            unlocked, 0,
+            "After reset, no achievements should be unlocked"
+        );
+        assert_eq!(total, 41, "Total should still be 41");
+    }
+
+    #[test]
+    fn test_manager_cleanup_with_no_recent_unlocks() {
+        let mut manager = AchievementManager::new_without_load();
+        // Should not panic on empty list
+        manager.cleanup_recent_unlocks(5.0, 10.0);
+        assert!(manager.recently_unlocked.is_empty());
+    }
+
+    #[test]
+    fn test_all_achievements_have_valid_definition() {
+        // Ensure Achievement::get() works for every AchievementId
+        for id in AchievementId::all() {
+            let achievement = Achievement::get(id);
+            assert_eq!(achievement.id, id, "Achievement ID mismatch");
+            assert!(
+                !achievement.name.is_empty(),
+                "Achievement name should not be empty"
+            );
+            assert!(
+                !achievement.description.is_empty(),
+                "Description should not be empty"
+            );
+        }
     }
 }

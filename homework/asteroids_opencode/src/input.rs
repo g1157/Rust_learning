@@ -27,13 +27,13 @@ impl Input {
     pub fn is_key_pressed(&self, key_code: KeyCode) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return is_key_pressed(key_code);
+            is_key_pressed(key_code)
         }
 
         #[cfg(target_arch = "wasm32")]
         {
             let key_str = keycode_to_str(key_code);
-            return self.state.pressed.iter().any(|k| k == key_str);
+            self.state.pressed.iter().any(|k| k == key_str)
         }
     }
 
@@ -43,14 +43,14 @@ impl Input {
     pub fn is_key_down(&self, key_code: KeyCode) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return is_key_down(key_code);
+            is_key_down(key_code)
         }
 
         #[cfg(target_arch = "wasm32")]
         {
             let key_str = keycode_to_str(key_code);
             // .get(key_str) returns an Option<&bool>, so we unwrap_or(&false) and then dereference.
-            return *self.state.down.get(key_str).unwrap_or(&false);
+            *self.state.down.get(key_str).unwrap_or(&false)
         }
     }
 
@@ -60,13 +60,13 @@ impl Input {
     pub fn mouse_wheel(&self) -> (f32, f32) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return mouse_wheel();
+            mouse_wheel()
         }
 
         #[cfg(target_arch = "wasm32")]
         {
             // Our JS handler only tracks the Y-axis scroll.
-            return (0.0, self.state.mouse_wheel_y);
+            (0.0, self.state.mouse_wheel_y)
         }
     }
 }
@@ -96,7 +96,7 @@ fn keycode_to_str(key: KeyCode) -> &'static str {
         KeyCode::J => "KeyJ",
         KeyCode::U => "KeyU",
         KeyCode::F => "KeyF",
-        
+
         KeyCode::Key1 => "Digit1",
         KeyCode::Kp1 => "Numpad1",
         KeyCode::Key4 => "Digit4",
