@@ -172,13 +172,19 @@ cargo run --release --bin ising_critical -- --lattice square --size 32
 - $R^2 = 0.95$
 - 与理论值 $0.125$ 的相对误差：**5.6%**
 
+```markdown
 ![M vs T](https://raw.githubusercontent.com/g1157/Rust_learning/dev/homework/hk12/plots/m_vs_t_square.png)
+```
 *图1：正方形晶格磁化强度随温度变化。红线标注 $T_c \approx 2.269$。*
 
+```markdown
 ![log-log](https://raw.githubusercontent.com/g1157/Rust_learning/dev/homework/hk12/plots/loglog_beta_square.png)
+```
 *图2：$\log(M)$ vs $\log(T_c-T)$ 图。拟合直线斜率 $\beta \approx 0.12$。*
 
+```markdown
 ![M^(1/β*)](https://raw.githubusercontent.com/g1157/Rust_learning/dev/homework/hk12/plots/m_beta_star_square.png)
+```
 *图3：方法一分析。$\beta^* = 0.125$ 时线性度最好。*
 
 **三角形晶格结果**
@@ -195,10 +201,14 @@ cargo run --release --bin ising_critical -- --lattice triangular --size 32
 | 方法二 | 0.13 | 0.83 |
 ```
 
+```markdown
 ![三角形 M vs T](https://raw.githubusercontent.com/g1157/Rust_learning/dev/homework/hk12/plots/m_vs_t_triangular.png)
+```
 *图4：三角形晶格磁化强度。$T_c \approx 3.64$。*
 
+```markdown
 ![三角形 log-log](https://raw.githubusercontent.com/g1157/Rust_learning/dev/homework/hk12/plots/loglog_beta_triangular.png)
+```
 *图5：三角形晶格 log-log 拟合。*
 
 > **★ 关键发现**：正方形和三角形晶格的临界温度不同（$2.27$ vs $3.64$），但临界指数 $\beta \approx 0.125$ **相同**，验证了 ***普适性***！
@@ -250,10 +260,14 @@ cargo run --release --bin ising_field -- --temperatures 100,30,10
 
 > **★ 关键发现**：从 $T = 100$ 到 $T = 10$，偏差增大约 **40 倍**，验证了 *自旋相互作用的影响随温度降低而增大*
 
+```markdown
 ![M(H) vs H](https://raw.githubusercontent.com/g1157/Rust_learning/dev/homework/hk12/plots/m_vs_h_field.png)
+```
 *图6：不同温度下 $M(H)$ 与 $\tanh(H/T)$ 对比。实线为模拟，虚线为理论。*
 
+```markdown
 ![误差 vs T](https://raw.githubusercontent.com/g1157/Rust_learning/dev/homework/hk12/plots/error_vs_temp.png)
+```
 *图7：平均绝对误差随温度的变化。*
 
 **物理解释**：
