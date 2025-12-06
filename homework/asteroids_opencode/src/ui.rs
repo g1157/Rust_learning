@@ -1149,20 +1149,49 @@ pub fn draw_killstreak(players: &[Player], font: Option<&Font>) {
     }
 }
 
+/// 插值缓冲区调试信息
+#[derive(Debug, Clone)]
+pub struct InterpDebugStats {
+    pub player_buffers: usize,
+    pub asteroid_buffers: usize,
+    pub bullet_buffers: usize,
+    pub avg_player_snapshots: f32,
+    pub avg_bullet_snapshots: f32,
+    pub render_delay_ms: f64,
+}
+
+/// 网络诊断信息
+#[derive(Debug, Clone)]
+pub struct NetworkDebugStats {
+    pub rtt_ms: f32,
+    pub pending_inputs: usize,
+    pub interp: Option<InterpDebugStats>,
+}
+
 /// 性能监控统计数据
 pub struct DebugStats {
     pub fps: f32,
     pub entity_count: usize,
     pub quadtree_depth: usize,
     pub particle_count: usize,
+    pub network: Option<NetworkDebugStats>,
 }
 
 /// 绘制性能监控面板（左上角）
 pub fn draw_debug_panel(stats: &DebugStats, font: Option<&Font>) {
     let panel_x = 12.0;
-    let panel_y = screen_height() - 130.0;
-    let panel_width = 280.0;
-    let panel_height = 115.0;
+    let line_height = 22.0;
+    let base_height = 115.0;
+
+    // 根据网络调试信息动态扩展面板高度
+    let extra_lines = if let Some(net) = &stats.network {
+        1 + net.interp.as_ref().map(|_| 2).unwrap_or(0)
+    } else {
+        0
+    };
+    let panel_height = base_height + line_height * extra_lines as f32;
+    let panel_y = screen_height() - panel_height - 15.0;
+    let panel_width = 300.0;
 
     // 半透明背景面板
     draw_rectangle(
@@ -1183,7 +1212,6 @@ pub fn draw_debug_panel(stats: &DebugStats, font: Option<&Font>) {
 
     let text_x = panel_x + 10.0;
     let mut text_y = panel_y + 25.0;
-    let line_height = 22.0;
     let font_size = 18;
 
     // FPS（绿色表示性能良好）
@@ -1244,6 +1272,63 @@ pub fn draw_debug_panel(stats: &DebugStats, font: Option<&Font>) {
             ..Default::default()
         },
     );
+
+    // 网络调试信息
+    if let Some(net) = &stats.network {
+        text_y += line_height;
+        let rtt_color = if net.rtt_ms <= 120.0 {
+            Color::new(0.2, 1.0, 0.2, 1.0) // 绿色：延迟良好
+        } else if net.rtt_ms <= 200.0 {
+            Color::new(1.0, 0.9, 0.2, 1.0) // 黄色：延迟一般
+        } else {
+            Color::new(1.0, 0.4, 0.2, 1.0) // 红色：延迟过高
+        };
+        draw_text_ex(
+            &format!("RTT: {:.1}ms | Pending: {}", net.rtt_ms, net.pending_inputs),
+            text_x,
+            text_y,
+            TextParams {
+                font,
+                font_size,
+                color: rtt_color,
+                ..Default::default()
+            },
+        );
+
+        if let Some(interp) = &net.interp {
+            text_y += line_height;
+            draw_text_ex(
+                &format!(
+                    "Interp buf P:{} A:{} B:{}",
+                    interp.player_buffers, interp.asteroid_buffers, interp.bullet_buffers
+                ),
+                text_x,
+                text_y,
+                TextParams {
+                    font,
+                    font_size,
+                    color: Color::new(0.6, 0.9, 1.0, 1.0),
+                    ..Default::default()
+                },
+            );
+
+            text_y += line_height;
+            draw_text_ex(
+                &format!(
+                    "Snap P~{:.1} B~{:.1} | Delay:{:.0}ms",
+                    interp.avg_player_snapshots, interp.avg_bullet_snapshots, interp.render_delay_ms
+                ),
+                text_x,
+                text_y,
+                TextParams {
+                    font,
+                    font_size,
+                    color: Color::new(0.8, 0.8, 0.8, 1.0),
+                    ..Default::default()
+                },
+            );
+        }
+    }
 
     // 提示文本
     let hint = "[F3] Close Debug";

@@ -90,6 +90,8 @@ struct ServerPlayerState {
     invulnerable_until: f32,
     // 上次收到输入的时间（秒，用于超时保护）
     last_input_at: f32,
+    // 最后处理的输入序列号（用于客户端预测确认）
+    last_input_seq: u32,
 }
 
 /// 服务器端小行星状态
@@ -148,7 +150,12 @@ enum ClientMessage {
     /// 离开队列
     LeaveQueue,
     /// 游戏输入
-    GameInput { keys: Vec<String> },
+    GameInput {
+        keys: Vec<String>,
+        /// 输入序列号（用于客户端预测确认）
+        #[serde(default)]
+        seq: u32,
+    },
     /// 玩家准备
     Ready,
     /// 离开房间
@@ -179,6 +186,8 @@ enum ServerMessage {
         bullets: Vec<BulletState>,
         vortices: Vec<VortexState>,
         powerups: Vec<PowerupState>,
+        /// 服务器已处理的各玩家最后输入序列号 (player_id -> seq)
+        last_input_seqs: HashMap<String, u32>,
         timestamp: i64,
     },
     /// 玩家断线
@@ -317,6 +326,7 @@ impl Room {
                     shoot_cooldown: 0.0,
                     invulnerable_until: 0.0,
                     last_input_at: 0.0,
+                    last_input_seq: 0,
                 },
             );
         }
@@ -482,8 +492,8 @@ async fn handle_message(
         ClientMessage::LeaveQueue => {
             handle_leave_queue(player_id, peer_map, room_map).await?;
         }
-        ClientMessage::GameInput { keys } => {
-            handle_game_input(player_id, keys, peer_map, room_map).await?;
+        ClientMessage::GameInput { keys, seq } => {
+            handle_game_input(player_id, keys, seq, peer_map, room_map).await?;
         }
         ClientMessage::Ready => {
             handle_ready(player_id, peer_map, room_map).await?;
@@ -603,6 +613,7 @@ async fn handle_leave_queue(
 async fn handle_game_input(
     player_id: Uuid,
     keys: Vec<String>,
+    seq: u32,
     peer_map: &PeerMap,
     room_map: &RoomMap,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -636,6 +647,8 @@ async fn handle_game_input(
             player.shoot = new_shoot;
             // 更新最后输入时间
             player.last_input_at = state.start_time.elapsed().as_secs_f32();
+            // 更新最后处理的输入序列号（用于客户端预测确认）
+            player.last_input_seq = seq;
         }
     }
 
@@ -1326,6 +1339,13 @@ async fn broadcast_game_state(room_id: Uuid, peer_map: &PeerMap, room_map: &Room
             })
             .collect();
 
+        // 构建 last_input_seqs: player_id -> last_input_seq
+        let last_input_seqs: HashMap<String, u32> = state
+            .players
+            .iter()
+            .map(|(id, p)| (id.to_string(), p.last_input_seq))
+            .collect();
+
         let timestamp = state.start_time.elapsed().as_millis() as i64;
 
         let msg = ServerMessage::GameState {
@@ -1334,6 +1354,7 @@ async fn broadcast_game_state(room_id: Uuid, peer_map: &PeerMap, room_map: &Room
             bullets,
             vortices,
             powerups,
+            last_input_seqs,
             timestamp,
         };
 

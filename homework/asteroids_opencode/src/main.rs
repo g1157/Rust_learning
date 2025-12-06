@@ -61,7 +61,7 @@ use quadtree::{Bounds, ObjectIndex, QuadTree};
 use ship::{SHIP_DAMPING, SHIP_HEIGHT, SHIP_ROTATION_STEP, SHIP_THRUST};
 use sound::{SoundEffect, SoundSystem};
 use ufo::{ENEMY_BULLET_RADIUS, EnemyBullet, UFO_RADIUS, Ufo, draw_enemy_bullet};
-use ui::{DebugStats, HudMode};
+use ui::{DebugStats, HudMode, InterpDebugStats, NetworkDebugStats};
 use utils::{circle_intersects_triangle, wrap_around};
 use vortex::VortexManager;
 
@@ -2361,32 +2361,68 @@ async fn main() {
         let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
 
         // === 在线模式：应用实体插值 ===
-        // 在渲染前，用插值后的状态更新远程玩家位置，实现平滑渲染
-        if is_online_mode && players.len() > 1 {
+        // 在渲染前，用插值后的状态更新远程实体，实现平滑渲染
+        if is_online_mode {
             let sampled = interp_manager.sample_world(frame_t);
+
             // 更新远程玩家（players[1..] 是远程玩家）
-            for remote_player in sampled.remote_players.iter() {
-                // 查找对应的本地 Player 对象
-                for player in players.iter_mut().skip(1) {
-                    // 注意：当前实现只支持一个对手，未来可以通过 ID 匹配
-                    if player.alive || remote_player.alive {
-                        player.ship.pos = remote_player.pos;
-                        player.ship.rot = remote_player.rot;
-                        player.ship.vel = remote_player.vel;
-                        // 生死状态和分数仍从服务器直接同步（在 GameState 处理中）
-                        break;
+            if players.len() > 1 {
+                for remote_player in sampled.remote_players.iter() {
+                    // 查找对应的本地 Player 对象
+                    for player in players.iter_mut().skip(1) {
+                        // 注意：当前实现只支持一个对手，未来可以通过 ID 匹配
+                        if player.alive || remote_player.alive {
+                            player.ship.pos = remote_player.pos;
+                            player.ship.rot = remote_player.rot;
+                            player.ship.vel = remote_player.vel;
+                            // 生死状态和分数仍从服务器直接同步（在 GameState 处理中）
+                            break;
+                        }
                     }
                 }
+            }
+
+            // 使用插值后的子弹替换在线子弹列表（平滑子弹渲染）
+            online_bullets.clear();
+            for bullet in sampled.bullets.iter() {
+                online_bullets.push(OnlineBullet {
+                    x: bullet.pos.x,
+                    y: bullet.pos.y,
+                    vx: bullet.vel.x,
+                    vy: bullet.vel.y,
+                });
             }
         }
 
         // 计算性能统计
         let entity_count = asteroids.len() + players.iter().map(|p| p.bullets.len()).sum::<usize>();
+
+        // 网络调试信息（仅在线模式）
+        let network_debug = if is_online_mode {
+            let interp_debug = interp_manager.debug_info().map(|info| InterpDebugStats {
+                player_buffers: info.player_buffers,
+                asteroid_buffers: info.asteroid_buffers,
+                bullet_buffers: info.bullet_buffers,
+                avg_player_snapshots: info.avg_player_snapshots,
+                avg_bullet_snapshots: info.avg_bullet_snapshots,
+                render_delay_ms: info.render_delay_ms,
+            });
+
+            Some(NetworkDebugStats {
+                rtt_ms: network_client.latency_ms,
+                pending_inputs: network_client.pending_input_count(),
+                interp: interp_debug,
+            })
+        } else {
+            None
+        };
+
         let debug_stats = DebugStats {
             fps: 1.0 / raw_dt, // 使用原始 dt 计算真实 FPS
             entity_count,
             quadtree_depth: quadtree.max_depth(),
             particle_count: particles.count(),
+            network: network_debug,
         };
 
         render_scene(

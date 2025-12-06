@@ -255,6 +255,23 @@ pub struct InterpolatedWorld {
     pub bullets: Vec<InterpolatedBullet>,
 }
 
+/// 插值系统的调试信息（用于网络诊断 HUD）
+#[derive(Debug, Clone)]
+pub struct InterpDebugInfo {
+    /// 远程玩家缓冲区数量
+    pub player_buffers: usize,
+    /// 小行星缓冲区数量
+    pub asteroid_buffers: usize,
+    /// 子弹缓冲区数量
+    pub bullet_buffers: usize,
+    /// 平均玩家快照数量
+    pub avg_player_snapshots: f32,
+    /// 平均子弹快照数量
+    pub avg_bullet_snapshots: f32,
+    /// 渲染延迟（毫秒）
+    pub render_delay_ms: f64,
+}
+
 // ============================================================================
 // 插值管理器
 // ============================================================================
@@ -583,6 +600,40 @@ impl InterpolationManager {
         self.asteroids.clear();
         self.bullets.clear();
         self.last_server_time = 0.0;
+    }
+
+    /// 获取插值缓冲区的调试信息（用于网络诊断 HUD）
+    pub fn debug_info(&self) -> Option<InterpDebugInfo> {
+        self.server_offset?;
+
+        let player_buffers = self.players.len();
+        let asteroid_buffers = self.asteroids.len();
+        let bullet_buffers = self.bullets.len();
+
+        // 计算平均玩家快照数量
+        let avg_player_snapshots = if self.players.is_empty() {
+            0.0
+        } else {
+            self.players.values().map(|buf| buf.history.len()).sum::<usize>() as f32
+                / self.players.len() as f32
+        };
+
+        // 计算平均子弹快照数量
+        let avg_bullet_snapshots = if self.bullets.is_empty() {
+            0.0
+        } else {
+            self.bullets.values().map(|buf| buf.history.len()).sum::<usize>() as f32
+                / self.bullets.len() as f32
+        };
+
+        Some(InterpDebugInfo {
+            player_buffers,
+            asteroid_buffers,
+            bullet_buffers,
+            avg_player_snapshots,
+            avg_bullet_snapshots,
+            render_delay_ms: self.config.render_delay_ms,
+        })
     }
 }
 
