@@ -88,6 +88,8 @@ struct ServerPlayerState {
     shoot_cooldown: f32,
     // 无敌时间（秒，碰撞后重生保护）
     invulnerable_until: f32,
+    // 上次收到输入的时间（秒，用于超时保护）
+    last_input_at: f32,
 }
 
 /// 服务器端小行星状态
@@ -314,6 +316,7 @@ impl Room {
                     shoot: false,
                     shoot_cooldown: 0.0,
                     invulnerable_until: 0.0,
+                    last_input_at: 0.0,
                 },
             );
         }
@@ -631,6 +634,8 @@ async fn handle_game_input(
             player.turn_left = new_turn_left;
             player.turn_right = new_turn_right;
             player.shoot = new_shoot;
+            // 更新最后输入时间
+            player.last_input_at = state.start_time.elapsed().as_secs_f32();
         }
     }
 
@@ -817,6 +822,10 @@ fn update_game_physics(
 ) {
     use game_constants::*;
 
+    // 输入超时阈值（秒）- 超过此时间未收到输入则清空输入状态
+    const INPUT_TIMEOUT: f32 = 0.3;
+    let now_secs = state.start_time.elapsed().as_secs_f32();
+
     // 收集需要生成的子弹（避免借用冲突）
     let mut new_bullets: Vec<ServerBulletState> = Vec::new();
     let mut next_bullet_id = state.bullets.iter().map(|b| b.id).max().unwrap_or(0) + 1;
@@ -825,6 +834,14 @@ fn update_game_physics(
     for (player_id, player) in state.players.iter_mut() {
         if !player.alive {
             continue;
+        }
+
+        // 输入超时保护：长时间未收到输入则清空，防止"卡键"持续射击/转向
+        if now_secs - player.last_input_at > INPUT_TIMEOUT {
+            player.thrust = false;
+            player.turn_left = false;
+            player.turn_right = false;
+            player.shoot = false;
         }
 
         // 旋转

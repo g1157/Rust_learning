@@ -1316,6 +1316,11 @@ async fn main() {
                             is_online_mode = true;
                             online_bullets.clear();
 
+                            // 清空本地玩家的子弹（避免残留本地子弹渲染）
+                            for player in players.iter_mut() {
+                                player.bullets.clear();
+                            }
+
                             // 确保有一个本地玩家用于输入处理
                             // 在线模式下，本地只需要一个玩家对象来处理输入
                             if players.is_empty() {
@@ -1392,29 +1397,79 @@ async fn main() {
                         powerups: server_powerups,
                         ..
                     } => {
-                        // 更新玩家状态
-                        for (i, server_player) in server_players.iter().enumerate() {
-                            if i < players.len() {
+                        // 按玩家ID更新本地玩家状态（避免HashMap顺序不稳定导致的错位）
+                        // 在线模式下，players[0] 是本地玩家，需要用 player_id 找到对应的服务器数据
+                        if let Some(my_id) = &network_client.player_id {
+                            // 找到服务器返回的本玩家数据并更新本地玩家
+                            if let Some(my_server_data) = server_players.iter().find(|p| &p.id == my_id)
+                                && !players.is_empty()
+                            {
+                                let local_player = &mut players[0];
                                 // 更新玩家位置和状态（权威服务器）
-                                players[i].ship.pos = Vec2::new(server_player.x, server_player.y);
-                                players[i].ship.rot = server_player.angle;
-                                players[i].ship.vel =
-                                    Vec2::new(server_player.vel_x, server_player.vel_y);
-                                players[i].lives = server_player.lives;
+                                local_player.ship.pos = Vec2::new(my_server_data.x, my_server_data.y);
+                                local_player.ship.rot = my_server_data.angle;
+                                local_player.ship.vel = Vec2::new(my_server_data.vel_x, my_server_data.vel_y);
+                                local_player.lives = my_server_data.lives;
 
-                                // 注意：分数由 Score 结构管理，服务器同步分数需要特殊处理
-                                // 这里暂时跳过分数更新，或者可以通过 reset + add_points 实现
-                                if players[i].score.value() != server_player.score {
-                                    players[i].score.reset();
-                                    players[i].score.add_points(server_player.score);
+                                // 分数同步
+                                if local_player.score.value() != my_server_data.score {
+                                    local_player.score.reset();
+                                    local_player.score.add_points(my_server_data.score);
                                 }
 
                                 // 检查玩家是否存活
-                                if !server_player.alive && players[i].alive {
-                                    players[i].mark_dead(frame_t);
-                                } else if server_player.alive && !players[i].alive {
-                                    // 玩家复活
-                                    players[i].alive = true;
+                                if !my_server_data.alive && local_player.alive {
+                                    local_player.mark_dead(frame_t);
+                                } else if my_server_data.alive && !local_player.alive {
+                                    local_player.alive = true;
+                                }
+                            }
+
+                            // 同步其他玩家（对手）用于渲染
+                            // 如果 players 只有一个本地玩家，需要添加对手
+                            for server_player in server_players.iter() {
+                                if &server_player.id != my_id {
+                                    // 这是对手玩家，确保有对应的本地 Player 对象
+                                    if players.len() < 2 {
+                                        // 添加对手玩家用于渲染
+                                        let now = get_time();
+                                        players.push(Player::new(
+                                            "Opponent",
+                                            RED, // 对手用红色
+                                            Vec2::new(server_player.x, server_player.y),
+                                            Controls {
+                                                // 对手不需要本地控制
+                                                thrust: KeyCode::Unknown,
+                                                left: KeyCode::Unknown,
+                                                right: KeyCode::Unknown,
+                                                shoot_primary: KeyCode::Unknown,
+                                                shoot_alt: None,
+                                                weapon_switch: KeyCode::Unknown,
+                                                weapon_switch_alt: None,
+                                                dash: KeyCode::Unknown,
+                                                hyperspace: KeyCode::Unknown,
+                                            },
+                                            now,
+                                            server_player.lives,
+                                        ));
+                                    }
+                                    // 更新对手位置
+                                    if players.len() > 1 {
+                                        let opponent = &mut players[1];
+                                        opponent.ship.pos = Vec2::new(server_player.x, server_player.y);
+                                        opponent.ship.rot = server_player.angle;
+                                        opponent.ship.vel = Vec2::new(server_player.vel_x, server_player.vel_y);
+                                        opponent.lives = server_player.lives;
+                                        if opponent.score.value() != server_player.score {
+                                            opponent.score.reset();
+                                            opponent.score.add_points(server_player.score);
+                                        }
+                                        if !server_player.alive && opponent.alive {
+                                            opponent.mark_dead(frame_t);
+                                        } else if server_player.alive && !opponent.alive {
+                                            opponent.alive = true;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1522,19 +1577,25 @@ async fn main() {
             }
         }
 
-        let bullets_fired = update_players(
-            &mut players,
-            &mut particles,
-            &sounds,
-            frame_t,
-            dt,
-            settings.ship_speed_multiplier,
-            settings.sound_volume,
-            &input_state,
-            &vortex_manager,
-            current_mode,
-            &asteroids,
-        );
+        // 在线模式下跳过本地物理更新，由服务器权威控制
+        // 本地只负责渲染服务器同步过来的状态
+        let bullets_fired = if is_online_mode {
+            0 // 在线模式不产生本地子弹
+        } else {
+            update_players(
+                &mut players,
+                &mut particles,
+                &sounds,
+                frame_t,
+                dt,
+                settings.ship_speed_multiplier,
+                settings.sound_volume,
+                &input_state,
+                &vortex_manager,
+                current_mode,
+                &asteroids,
+            )
+        };
 
         // 更新追踪导弹的目标（寻找最近的小行星）
         update_homing_missiles(&mut players, &asteroids);
