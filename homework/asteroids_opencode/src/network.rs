@@ -58,7 +58,11 @@ pub enum ClientMessage {
     /// 离开匹配队列
     LeaveQueue,
     /// 游戏输入（按键状态）
-    GameInput { keys: Vec<String> },
+    GameInput {
+        keys: Vec<String>,
+        /// 输入序列号，用于服务器协调
+        seq: u32,
+    },
     /// 准备就绪
     Ready,
     /// 离开房间
@@ -93,6 +97,9 @@ pub enum ServerMessage {
         vortices: Vec<VortexState>,
         powerups: Vec<PowerupState>,
         timestamp: i64,
+        /// 服务器已处理的各玩家最后输入序列号 (player_id -> seq)
+        #[serde(default)]
+        last_input_seqs: std::collections::HashMap<String, u32>,
     },
     /// 玩家断开连接
     PlayerDisconnected { player_id: String },
@@ -178,6 +185,38 @@ pub struct PowerupState {
 }
 
 // ============================================================================
+// 客户端预测支持
+// ============================================================================
+
+/// 客户端本地输入命令（用于预测与重播）
+#[derive(Debug, Clone)]
+pub struct InputCommand {
+    /// 输入序列号
+    pub seq: u32,
+    /// 按键状态
+    pub keys: Vec<String>,
+    /// 本地时间戳
+    pub timestamp: f64,
+}
+
+/// 预测状态快照（用于服务器协调后的重播）
+#[derive(Debug, Clone)]
+pub struct PredictedSnapshot {
+    /// 对应的输入序列号
+    pub seq: u32,
+    /// 玩家位置 x
+    pub x: f32,
+    /// 玩家位置 y
+    pub y: f32,
+    /// 玩家朝向角度
+    pub angle: f32,
+    /// 玩家速度 x
+    pub vel_x: f32,
+    /// 玩家速度 y
+    pub vel_y: f32,
+}
+
+// ============================================================================
 // 连接状态
 // ============================================================================
 
@@ -218,6 +257,13 @@ pub struct NetworkClient {
     sender: Option<WsSender>,
     /// WebSocket 接收端
     receiver: Option<WsReceiver>,
+    // ---- 客户端预测相关 ----
+    /// 当前输入序列号（单调递增）
+    input_seq: u32,
+    /// 待服务器确认的输入队列
+    pending_inputs: VecDeque<InputCommand>,
+    /// 最后确认的服务器状态
+    last_confirmed_state: Option<PlayerState>,
 }
 
 impl NetworkClient {
@@ -233,6 +279,10 @@ impl NetworkClient {
             last_ping: 0.0,
             sender: None,
             receiver: None,
+            // 客户端预测
+            input_seq: 0,
+            pending_inputs: VecDeque::new(),
+            last_confirmed_state: None,
         }
     }
 
@@ -403,6 +453,88 @@ impl NetworkClient {
         self.room_id.is_some()
     }
 
+    // ========================================================================
+    // 客户端预测 API
+    // ========================================================================
+
+    /// 发送游戏输入并记录到待确认队列（用于客户端预测）
+    ///
+    /// 调用方应在发送后立即在本地应用该输入进行预测模拟。
+    /// 当收到服务器状态时，调用 `reconcile` 进行协调。
+    pub fn send_input(&mut self, keys: Vec<String>, timestamp: f64) {
+        let seq = self.input_seq;
+        self.input_seq = self.input_seq.wrapping_add(1);
+
+        // 记录输入到待确认队列
+        let cmd = InputCommand {
+            seq,
+            keys: keys.clone(),
+            timestamp,
+        };
+        self.pending_inputs.push_back(cmd);
+
+        // 限制队列长度（防止长时间无响应导致内存增长）
+        const MAX_PENDING_INPUTS: usize = 120; // 约 2 秒 @ 60fps
+        while self.pending_inputs.len() > MAX_PENDING_INPUTS {
+            self.pending_inputs.pop_front();
+        }
+
+        // 发送到服务器
+        self.send(ClientMessage::GameInput { keys, seq });
+    }
+
+    /// 服务器状态协调
+    ///
+    /// 当收到 `GameState` 后调用此方法：
+    /// 1. 更新 `last_confirmed_state` 为服务器的权威状态
+    /// 2. 移除已被服务器确认的输入
+    /// 3. 返回剩余未确认的输入，供调用方重播预测
+    ///
+    /// # 参数
+    /// - `server_seq`: 服务器已处理的最后输入序列号
+    /// - `server_state`: 服务器返回的玩家状态
+    ///
+    /// # 返回
+    /// 未被服务器确认的输入列表（需要在服务器状态基础上重播）
+    pub fn reconcile(&mut self, server_seq: u32, server_state: &PlayerState) -> Vec<InputCommand> {
+        // 保存服务器权威状态
+        self.last_confirmed_state = Some(server_state.clone());
+
+        // 移除已确认的输入（seq <= server_seq）
+        while let Some(front) = self.pending_inputs.front() {
+            // 处理 wrapping: 如果 front.seq 在 server_seq 之前或等于，则移除
+            let diff = server_seq.wrapping_sub(front.seq);
+            if diff < 0x8000_0000 {
+                // front.seq <= server_seq
+                self.pending_inputs.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        // 返回剩余输入供重播
+        self.pending_inputs.iter().cloned().collect()
+    }
+
+    /// 获取待确认输入数量（用于调试/UI显示）
+    #[allow(dead_code)]
+    pub fn pending_input_count(&self) -> usize {
+        self.pending_inputs.len()
+    }
+
+    /// 获取最后确认的服务器状态
+    #[allow(dead_code)]
+    pub fn last_confirmed_state(&self) -> Option<&PlayerState> {
+        self.last_confirmed_state.as_ref()
+    }
+
+    /// 清除预测状态（切换房间/断线重连时调用）
+    pub fn reset_prediction_state(&mut self) {
+        self.input_seq = 0;
+        self.pending_inputs.clear();
+        self.last_confirmed_state = None;
+    }
+
     /// 断开连接
     pub fn disconnect(&mut self) {
         // 发送关闭消息（如果连接存在）
@@ -415,6 +547,8 @@ impl NetworkClient {
         self.player_id = None;
         self.room_id = None;
         self.message_queue.clear();
+        // 重置预测状态
+        self.reset_prediction_state();
     }
 
     /// 获取服务器 URL
@@ -562,5 +696,112 @@ mod tests {
 
         client.state = ConnectionState::Connected;
         assert!(client.is_connected());
+    }
+
+    // ========================================================================
+    // 客户端预测测试
+    // ========================================================================
+
+    #[test]
+    fn test_client_message_game_input_serialization() {
+        let msg = ClientMessage::GameInput {
+            keys: vec!["w".to_string(), "space".to_string()],
+            seq: 42,
+        };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert!(json.contains("GameInput"));
+        assert!(json.contains(r#""seq":42"#));
+        assert!(json.contains("space"));
+    }
+
+    #[test]
+    fn test_input_command_creation() {
+        let cmd = InputCommand {
+            seq: 10,
+            keys: vec!["w".to_string()],
+            timestamp: 1.5,
+        };
+        assert_eq!(cmd.seq, 10);
+        assert_eq!(cmd.keys, vec!["w"]);
+        assert!((cmd.timestamp - 1.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_reconcile_removes_confirmed_inputs() {
+        let mut client = NetworkClient::new("wss://example.com/ws".to_string());
+
+        // 手动添加一些待确认输入
+        client.pending_inputs.push_back(InputCommand {
+            seq: 0,
+            keys: vec!["w".to_string()],
+            timestamp: 0.0,
+        });
+        client.pending_inputs.push_back(InputCommand {
+            seq: 1,
+            keys: vec!["a".to_string()],
+            timestamp: 0.016,
+        });
+        client.pending_inputs.push_back(InputCommand {
+            seq: 2,
+            keys: vec!["d".to_string()],
+            timestamp: 0.032,
+        });
+
+        // 模拟服务器确认到 seq=1
+        let server_state = PlayerState {
+            id: "player-1".to_string(),
+            x: 100.0,
+            y: 200.0,
+            angle: 1.5,
+            vel_x: 10.0,
+            vel_y: 5.0,
+            lives: 3,
+            score: 100,
+            alive: true,
+        };
+
+        let remaining = client.reconcile(1, &server_state);
+
+        // seq 0 和 1 应该被移除，只剩 seq 2
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].seq, 2);
+        assert_eq!(remaining[0].keys, vec!["d"]);
+
+        // 确认状态应该被保存
+        assert!(client.last_confirmed_state.is_some());
+        let confirmed = client.last_confirmed_state.as_ref().unwrap();
+        assert_eq!(confirmed.x, 100.0);
+        assert_eq!(confirmed.y, 200.0);
+    }
+
+    #[test]
+    fn test_reset_prediction_state() {
+        let mut client = NetworkClient::new("wss://example.com/ws".to_string());
+
+        // 模拟一些状态
+        client.input_seq = 42;
+        client.pending_inputs.push_back(InputCommand {
+            seq: 41,
+            keys: vec!["w".to_string()],
+            timestamp: 0.0,
+        });
+        client.last_confirmed_state = Some(PlayerState {
+            id: "test".to_string(),
+            x: 0.0,
+            y: 0.0,
+            angle: 0.0,
+            vel_x: 0.0,
+            vel_y: 0.0,
+            lives: 3,
+            score: 0,
+            alive: true,
+        });
+
+        // 重置
+        client.reset_prediction_state();
+
+        assert_eq!(client.input_seq, 0);
+        assert!(client.pending_inputs.is_empty());
+        assert!(client.last_confirmed_state.is_none());
     }
 }

@@ -1420,8 +1420,8 @@ async fn main() {
                 }
             }
 
-            // 每帧发送输入到服务器（包括空列表，以清除服务器端的输入状态）
-            network_client.send(network::ClientMessage::GameInput { keys: keys_pressed });
+            // 每帧发送输入到服务器（使用 send_input 支持客户端预测）
+            network_client.send_input(keys_pressed, get_time());
 
             // 接收服务器的游戏状态更新
             while let Some(message) = network_client.receive() {
