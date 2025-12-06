@@ -29,6 +29,7 @@ mod font;
 mod input;
 mod network;
 mod particle;
+mod performance;
 mod player;
 mod powerup;
 mod quadtree;
@@ -47,6 +48,7 @@ mod wasm_input;
 use achievement::{AchievementId, AchievementManager};
 use asteroid::{Asteroid, spawn_wave_with_speed};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
+use clap::Parser;
 use duel::{DUEL_BULLET_RADIUS, DuelState};
 use effects::{ScreenShake, SlowMotion};
 use font::FontSystem;
@@ -67,6 +69,31 @@ use crate::constants::{defaults, gameplay, shake, slow_motion, timing};
 const ASTEROID_COUNT: usize = gameplay::INITIAL_ASTEROID_COUNT;
 const ASTEROID_WAVE_INCREMENT: usize = gameplay::ASTEROID_WAVE_INCREMENT;
 const VICTORY_PAUSE_DURATION: f64 = timing::VICTORY_PAUSE;
+
+/// 命令行参数
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// 运行指定帧数后退出（用于性能测试）
+    #[arg(long)]
+    frames: Option<u64>,
+
+    /// 导出性能指标到文件
+    #[arg(long)]
+    dump_metrics: Option<String>,
+
+    /// 生成指定数量的实体进行压力测试
+    #[arg(long)]
+    entities: Option<usize>,
+
+    /// 启用网络测试模式
+    #[arg(long)]
+    network_test: bool,
+
+    /// 禁用图形界面（仅用于CI）
+    #[arg(long)]
+    headless: bool,
+}
 
 /// 字体选项
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -478,6 +505,9 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    // 解析命令行参数
+    let args = Args::parse();
+
     let start_time = get_time();
     let mut settings = GameSettings::default(); // 先初始化设置
     let mut players = init_players(start_time, settings.starting_lives, settings.player_count);
@@ -514,6 +544,13 @@ async fn main() {
 
     // 在线模式的子弹（从服务器同步）
     let mut online_bullets: Vec<OnlineBullet> = Vec::new();
+
+    // 性能监控器
+    let mut performance_monitor = if let Some(path) = &args.dump_metrics {
+        crate::performance::PerformanceMonitor::new().with_export_path(path.clone())
+    } else {
+        crate::performance::PerformanceMonitor::new()
+    };
 
     let mut state = GameState::ModeSelection {
         selection: GameMode::Survival,
@@ -1401,14 +1438,17 @@ async fn main() {
                         // 在线模式下，players[0] 是本地玩家，需要用 player_id 找到对应的服务器数据
                         if let Some(my_id) = &network_client.player_id {
                             // 找到服务器返回的本玩家数据并更新本地玩家
-                            if let Some(my_server_data) = server_players.iter().find(|p| &p.id == my_id)
+                            if let Some(my_server_data) =
+                                server_players.iter().find(|p| &p.id == my_id)
                                 && !players.is_empty()
                             {
                                 let local_player = &mut players[0];
                                 // 更新玩家位置和状态（权威服务器）
-                                local_player.ship.pos = Vec2::new(my_server_data.x, my_server_data.y);
+                                local_player.ship.pos =
+                                    Vec2::new(my_server_data.x, my_server_data.y);
                                 local_player.ship.rot = my_server_data.angle;
-                                local_player.ship.vel = Vec2::new(my_server_data.vel_x, my_server_data.vel_y);
+                                local_player.ship.vel =
+                                    Vec2::new(my_server_data.vel_x, my_server_data.vel_y);
                                 local_player.lives = my_server_data.lives;
 
                                 // 分数同步
@@ -1456,9 +1496,11 @@ async fn main() {
                                     // 更新对手位置
                                     if players.len() > 1 {
                                         let opponent = &mut players[1];
-                                        opponent.ship.pos = Vec2::new(server_player.x, server_player.y);
+                                        opponent.ship.pos =
+                                            Vec2::new(server_player.x, server_player.y);
                                         opponent.ship.rot = server_player.angle;
-                                        opponent.ship.vel = Vec2::new(server_player.vel_x, server_player.vel_y);
+                                        opponent.ship.vel =
+                                            Vec2::new(server_player.vel_x, server_player.vel_y);
                                         opponent.lives = server_player.lives;
                                         if opponent.score.value() != server_player.score {
                                             opponent.score.reset();
@@ -2298,6 +2340,34 @@ async fn main() {
                 fonts.get_best(settings.font_choice),
             );
         }
+
+        // 更新性能监控
+        performance_monitor.update((
+            players.len() + ufos.len(),
+            players.iter().map(|p| p.bullets.len()).sum::<usize>()
+                + enemy_bullets.len()
+                + online_bullets.len(),
+            asteroids.len(),
+            particles.count(),
+        ));
+
+        // 绘制性能覆盖层
+        if show_debug {
+            performance_monitor.draw_overlay(fonts.get_best(settings.font_choice));
+        }
+
+        // 检查帧数限制（用于性能测试）
+        if let Some(max_frames) = args.frames
+            && performance_monitor.metrics.total_frames >= max_frames
+        {
+            // 导出性能指标
+            if let Err(e) = performance_monitor.export_metrics() {
+                eprintln!("Failed to export metrics: {}", e);
+            }
+            println!("Performance test completed after {} frames", max_frames);
+            break;
+        }
+
         next_frame().await;
     }
 }

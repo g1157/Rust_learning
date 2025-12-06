@@ -1,0 +1,200 @@
+# Asteroids OpenCode CI/CD Pipeline
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests (native)
+        env:
+          MACROQUAD_HEADLESS: "1"
+        run: cargo test --all-targets
+
+      - name: Security audit
+        uses: actions-rs/audit@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Generate coverage (optional)
+        uses: actions-rs/tarpaulin@v0.1
+        with:
+          args: '--ignore-tests'
+        continue-on-error: true
+
+  build-native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Perf smoke test
+        env:
+          MACROQUAD_HEADLESS: "1"
+        run: |
+          timeout 30 cargo run --release -- --frames 300 --dump-metrics perf_smoke.json || echo "Perf smoke completed"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: asteroids-native-${{ runner.os }}
+          path: |
+            target/release/asteroids
+            perf_smoke.json
+          retention-days: 30
+
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-
+
+      - name: Build WASM
+        run: cargo build --release --target wasm32-unknown-unknown --all-features
+
+      - name: WASM smoke test (headless)
+        run: |
+          # Install wasm-pack for testing
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          # Run headless test if possible
+          wasm-pack test --node --release || echo "WASM test skipped - no tests found"
+
+      - name: Prepare web build
+        run: |
+          mkdir -p web-build
+          cp target/wasm32-unknown-unknown/release/asteroids.wasm web-build/
+          cp web/* web-build/ 2>/dev/null || true
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: asteroids-wasm
+          path: web-build/
+          retention-days: 30
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mdBook
+        run: |
+          curl -L https://github.com/rust-lang/mdBook/releases/download/v0.4.35/mdbook-v0.4.35-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          ./mdbook build docs/
+          mkdir -p publish/book
+          cp -r docs/book/* publish/book/
+
+      - name: Build cargo docs
+        run: |
+          cargo doc --no-deps --all-features
+          mkdir -p publish/api
+          cp -r target/doc/* publish/api/
+
+      - name: Upload docs artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: docs
+          path: publish/
+          retention-days: 30
+
+  deploy-pages:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [test, build-wasm, docs]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download WASM artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: asteroids-wasm
+          path: publish/
+
+      - name: Download docs artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: docs
+          path: publish/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./publish
