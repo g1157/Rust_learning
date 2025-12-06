@@ -27,6 +27,7 @@ mod duel;
 mod effects;
 mod font;
 mod input;
+mod interpolation;
 mod network;
 mod particle;
 mod performance;
@@ -544,6 +545,13 @@ async fn main() {
 
     // 在线模式的子弹（从服务器同步）
     let mut online_bullets: Vec<OnlineBullet> = Vec::new();
+
+    // 实体插值管理器（平滑远程实体渲染）
+    let mut interp_manager =
+        interpolation::InterpolationManager::new(interpolation::InterpConfig {
+            render_delay_ms: 100.0, // 100ms 渲染延迟，平衡平滑度和响应性
+            history_secs: 1.5,      // 保留 1.5 秒历史用于插值和回溯
+        });
 
     // 性能监控器
     let mut performance_monitor = if let Some(path) = &args.dump_metrics {
@@ -1444,8 +1452,19 @@ async fn main() {
                         vortices: server_vortices,
                         powerups: server_powerups,
                         last_input_seqs,
-                        ..
+                        timestamp,
                     } => {
+                        // === 插值系统：记录服务器快照 ===
+                        // 校准时钟（首次）并记录快照用于远程实体插值
+                        interp_manager.align_clock(timestamp, frame_t);
+                        interp_manager.record_server_snapshot(
+                            timestamp,
+                            &server_players,
+                            &server_asteroids,
+                            &server_bullets,
+                            network_client.player_id.as_deref(),
+                        );
+
                         // 按玩家ID更新本地玩家状态（避免HashMap顺序不稳定导致的错位）
                         // 在线模式下，players[0] 是本地玩家，需要用 player_id 找到对应的服务器数据
                         if let Some(my_id) = network_client.player_id.clone() {
@@ -2340,6 +2359,26 @@ async fn main() {
         update_achievements(&mut achievements, &players, current_mode, frame_t, 0);
 
         let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
+
+        // === 在线模式：应用实体插值 ===
+        // 在渲染前，用插值后的状态更新远程玩家位置，实现平滑渲染
+        if is_online_mode && players.len() > 1 {
+            let sampled = interp_manager.sample_world(frame_t);
+            // 更新远程玩家（players[1..] 是远程玩家）
+            for remote_player in sampled.remote_players.iter() {
+                // 查找对应的本地 Player 对象
+                for player in players.iter_mut().skip(1) {
+                    // 注意：当前实现只支持一个对手，未来可以通过 ID 匹配
+                    if player.alive || remote_player.alive {
+                        player.ship.pos = remote_player.pos;
+                        player.ship.rot = remote_player.rot;
+                        player.ship.vel = remote_player.vel;
+                        // 生死状态和分数仍从服务器直接同步（在 GameState 处理中）
+                        break;
+                    }
+                }
+            }
+        }
 
         // 计算性能统计
         let entity_count = asteroids.len() + players.iter().map(|p| p.bullets.len()).sum::<usize>();
