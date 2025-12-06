@@ -64,6 +64,30 @@ pub mod killstreak {
     pub const SPEED_BONUS: f32 = 30.0;
 }
 
+/// 相位闪现（Phase Dash）参数
+///
+/// 与普通冲刺系统独立，是瞬移技能而非速度加速
+pub mod phase_dash {
+    /// 瞬移距离（像素，沿飞船朝向）
+    pub const DISTANCE: f32 = 150.0;
+    /// 冷却时间（秒）
+    pub const COOLDOWN: f64 = 3.0;
+    /// 无敌窗口时长（秒），用于穿透障碍
+    pub const INVULNERABLE_WINDOW: f64 = 0.25;
+    /// 残影可见时长（秒）
+    pub const TRAIL_LIFETIME: f64 = 1.0;
+    /// 延迟爆裂触发延时（秒）
+    pub const EXPLOSION_DELAY: f64 = 1.0;
+    /// 爆炸半径（像素）
+    pub const EXPLOSION_RADIUS: f32 = 70.0;
+    /// 爆炸伤害值（对小行星造成的伤害）
+    pub const EXPLOSION_DAMAGE: u32 = 1;
+    /// 残影采样步长（像素）
+    pub const TRAIL_SAMPLE_STEP: f32 = 25.0;
+    /// 相位半透明 alpha 值（闪现瞬间的透明度）
+    pub const PHASE_ALPHA: f32 = 0.4;
+}
+
 /// Timing and pacing constants.
 pub mod timing {
     /// Post-victory pause before next wave (seconds).
@@ -221,4 +245,29 @@ pub mod homing {
     pub const TRACKING_RANGE: f32 = 500.0;
     /// Missile visual radius.
     pub const RADIUS: f32 = 5.0;
+}
+
+/// Chain ion shot parameters (链式离子炮).
+pub mod chain_ion {
+    /// Maximum total hits including the initial impact.
+    pub const MAX_JUMPS: usize = 3;
+    /// Maximum search distance per hop (pixels).
+    pub const RANGE: f32 = 260.0;
+    /// Damage ratios per hop (1st/2nd/3rd hit).
+    /// First hit is 100%, second is 70%, third is 50%.
+    pub const DAMAGE_RATIOS: [f32; 3] = [1.0, 0.7, 0.5];
+    /// Lifetime of a chain arc visual effect (seconds).
+    pub const ARC_LIFETIME: f32 = 0.35;
+    /// Flash duration on struck targets (seconds).
+    pub const FLASH_DURATION: f32 = 0.28;
+    /// Visual jitter steps for the lightning line.
+    pub const JITTER_STEPS: usize = 10;
+    /// Maximum perpendicular jitter amplitude (pixels).
+    pub const JITTER_AMPLITUDE: f32 = 12.0;
+    /// Base line width for the arc.
+    pub const LINE_WIDTH: f32 = 3.0;
+    /// Cooldown between chain ion shots (seconds).
+    pub const COOLDOWN: f64 = 0.4;
+    /// Bullet lifetime multiplier (slightly longer than normal).
+    pub const LIFETIME_MULTIPLIER: f64 = 1.2;
 }

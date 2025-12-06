@@ -10,7 +10,7 @@
 
 use macroquad::prelude::*;
 
-use crate::constants::homing;
+use crate::constants::{chain_ion, homing};
 
 pub const BULLET_SPEED: f32 = 1500.0; // 像素/秒
 pub const BULLET_LIFETIME: f64 = 1.5; // 秒
@@ -23,6 +23,7 @@ pub enum WeaponType {
     Spread,      // 散弹（3发扇形）
     Penetrating, // 穿透弹（可击穿多个目标）
     Homing,      // 追踪导弹（自动追踪最近目标）
+    ChainIon,    // 链式离子炮（命中后链式传导攻击附近目标）
 }
 
 pub struct Bullet {
@@ -110,6 +111,7 @@ impl Bullet {
     pub fn lifetime(&self) -> f64 {
         match self.weapon_type {
             WeaponType::Homing => homing::LIFETIME,
+            WeaponType::ChainIon => BULLET_LIFETIME * chain_ion::LIFETIME_MULTIPLIER,
             _ => BULLET_LIFETIME,
         }
     }

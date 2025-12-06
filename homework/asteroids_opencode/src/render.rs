@@ -7,11 +7,15 @@
 //! - 子弹发光效果
 //! - 追踪导弹详细渲染
 //! - 引擎火焰动画
+//! - 乐观命中提示效果
+
+#![allow(dead_code)] // 乐观命中渲染正在集成中
 
 use macroquad::prelude::*;
 
-use crate::bullet::{BULLET_RADIUS, Bullet, WeaponType};
+use crate::bullet::{Bullet, WeaponType, BULLET_RADIUS};
 use crate::constants::homing;
+use crate::effects::{PendingHit, PendingHitKind, PendingHitState, CONFIRM_GRACE, DENIED_FLASH};
 use crate::ship::{SHIP_BASE, SHIP_HEIGHT};
 
 /// 绘制增强版飞船
@@ -191,6 +195,7 @@ pub fn draw_bullet(bullet: &Bullet, offset: Vec2, player_color: Color, time: f32
         WeaponType::Spread => draw_spread_bullet(pos, player_color, time),
         WeaponType::Penetrating => draw_penetrating_bullet(pos, bullet.vel, player_color, time),
         WeaponType::Homing => draw_homing_missile(pos, bullet.vel, player_color, time),
+        WeaponType::ChainIon => draw_chain_ion_bullet(pos, player_color, time),
     }
 }
 
@@ -341,6 +346,67 @@ fn draw_homing_missile(pos: Vec2, vel: Vec2, player_color: Color, time: f32) {
     draw_triangle(inner_left, inner_right, inner_tip, inner_flame);
 }
 
+/// 链式离子炮弹：蓝白色能量球，带电弧环
+fn draw_chain_ion_bullet(pos: Vec2, player_color: Color, time: f32) {
+    let pulse = 1.0 + 0.25 * (time * 18.0).sin();
+    let size = BULLET_RADIUS * 1.4 * pulse;
+
+    // 蓝白色调，混合玩家颜色
+    let ion_color = Color::new(
+        player_color.r * 0.3 + 0.4,
+        player_color.g * 0.4 + 0.5,
+        1.0, // 高蓝色分量
+        1.0,
+    );
+
+    // 外发光层（大范围淡蓝）
+    let glow_outer = Color::new(0.3, 0.6, 1.0, 0.2);
+    draw_circle(pos.x, pos.y, size * 3.5, glow_outer);
+
+    // 中发光层
+    let glow_mid = Color::new(0.5, 0.8, 1.0, 0.35);
+    draw_circle(pos.x, pos.y, size * 2.2, glow_mid);
+
+    // 主体能量球
+    draw_circle(pos.x, pos.y, size, ion_color);
+
+    // 核心高亮（白色）
+    let core_color = Color::new(1.0, 1.0, 1.0, 0.9);
+    draw_circle(pos.x, pos.y, size * 0.4, core_color);
+
+    // 绘制电弧环（旋转的小弧线）
+    let arc_count = 4;
+    let arc_radius = size * 2.0;
+    for i in 0..arc_count {
+        let base_angle = (i as f32 / arc_count as f32) * std::f32::consts::TAU;
+        let rotation = time * 6.0; // 旋转速度
+        let angle = base_angle + rotation;
+
+        // 每个弧线由几个点组成
+        let arc_len = 0.4; // 弧长（弧度）
+        let segments = 4;
+        for j in 0..segments {
+            let t0 = j as f32 / segments as f32;
+            let t1 = (j + 1) as f32 / segments as f32;
+            let a0 = angle + t0 * arc_len;
+            let a1 = angle + t1 * arc_len;
+
+            let p0 = pos + Vec2::new(a0.cos(), a0.sin()) * arc_radius;
+            let p1 = pos + Vec2::new(a1.cos(), a1.sin()) * arc_radius;
+
+            // 电弧抖动
+            let jitter = (time * 25.0 + i as f32 * 2.0 + j as f32).sin() * 2.0;
+            let normal = Vec2::new(-(a0 + a1).sin() * 0.5, (a0 + a1).cos() * 0.5);
+            let p0_j = p0 + normal * jitter;
+            let p1_j = p1 + normal * jitter;
+
+            let arc_alpha = 0.5 + 0.3 * (time * 12.0 + i as f32).sin().abs();
+            let arc_color = Color::new(0.6, 0.9, 1.0, arc_alpha);
+            draw_line(p0_j.x, p0_j.y, p1_j.x, p1_j.y, 1.8, arc_color);
+        }
+    }
+}
+
 /// 绘制护盾效果
 pub fn draw_shield(pos: Vec2, time: f32, remaining_ratio: f32) {
     let radius = SHIP_HEIGHT * 1.2;
@@ -483,4 +549,70 @@ pub fn draw_hyperspace_indicator(pos: Vec2, cooldown_ratio: f32) {
         bar_height,
         hyperspace_color,
     );
+}
+
+// ============================================================================
+// 乐观命中提示渲染 (Phase 4C)
+// ============================================================================
+
+/// 绘制乐观命中提示效果
+///
+/// 根据命中状态显示不同的视觉反馈：
+/// - Pending: 黄色/橙色脉冲环，表示等待确认
+/// - Confirmed: 绿色扩散淡出，表示命中成功
+/// - Denied: 红色闪烁，表示命中无效
+pub fn draw_pending_hit(hit: &PendingHit, now: f32) {
+    let elapsed = (now - hit.created_at).max(0.0);
+
+    // 根据目标类型设置基础半径
+    let base_radius = match hit.kind {
+        PendingHitKind::Asteroid => 18.0,
+        PendingHitKind::Ufo => 22.0,
+    };
+
+    match hit.state {
+        PendingHitState::Pending => {
+            // 黄色/橙色脉冲环，表示等待确认
+            let pulse = (elapsed * 8.0).sin().abs();
+            let radius = base_radius + 6.0 * pulse;
+            let alpha = 0.35 + 0.25 * pulse;
+
+            // 外环（黄色）
+            let ring_color = Color::new(1.0, 0.8, 0.2, alpha);
+            draw_circle_lines(hit.pos.x, hit.pos.y, radius, 3.0, ring_color);
+
+            // 内部发光（橙色）
+            let glow_color = Color::new(1.0, 0.5, 0.1, alpha * 0.6);
+            draw_circle(hit.pos.x, hit.pos.y, radius * 0.35, glow_color);
+        }
+        PendingHitState::Confirmed => {
+            // 绿色扩散淡出，表示命中成功
+            let t = ((now - hit.state_changed_at) / CONFIRM_GRACE).clamp(0.0, 1.0);
+            let radius = base_radius + 10.0 * (1.0 - t);
+            let alpha = (1.0 - t) * 0.9;
+
+            // 外环（绿色）
+            let ring_color = Color::new(0.3, 1.0, 0.5, alpha);
+            draw_circle_lines(hit.pos.x, hit.pos.y, radius, 4.0, ring_color);
+
+            // 内部发光（淡绿）
+            let glow_color = Color::new(0.5, 1.0, 0.7, alpha * 0.6);
+            draw_circle(hit.pos.x, hit.pos.y, radius * 0.4, glow_color);
+        }
+        PendingHitState::Denied => {
+            // 红色闪烁，表示命中无效
+            let phase = ((now - hit.state_changed_at) / DENIED_FLASH).clamp(0.0, 1.0);
+            let blink = (now * 30.0).sin().abs();
+            let alpha = (1.0 - phase) * (0.4 + 0.4 * blink);
+            let radius = base_radius + 4.0;
+
+            // 外环（红色）
+            let ring_color = Color::new(1.0, 0.2, 0.2, alpha);
+            draw_circle_lines(hit.pos.x, hit.pos.y, radius, 3.5, ring_color);
+
+            // 内部发光（淡红）
+            let glow_color = Color::new(1.0, 0.4, 0.3, alpha * 0.8);
+            draw_circle(hit.pos.x, hit.pos.y, radius * 0.25, glow_color);
+        }
+    }
 }

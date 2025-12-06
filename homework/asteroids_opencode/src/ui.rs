@@ -58,6 +58,7 @@ pub fn draw_players_hud(players: &[Player], mode: HudMode, font: Option<&Font>) 
             WeaponType::Spread => "Spread",
             WeaponType::Penetrating => "Penetrating",
             WeaponType::Homing => "Homing",
+            WeaponType::ChainIon => "Chain Ion",
         };
 
         let text = format!(

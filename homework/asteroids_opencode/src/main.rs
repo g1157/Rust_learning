@@ -21,8 +21,11 @@
 mod achievement;
 mod asteroid;
 mod background;
+mod battle_draft;
 mod bullet;
+mod chain_lightning;
 mod constants;
+mod dash_trail;
 mod duel;
 mod effects;
 mod font;
@@ -50,8 +53,8 @@ use achievement::{AchievementId, AchievementManager};
 use asteroid::{Asteroid, spawn_wave_with_speed};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
 use clap::Parser;
-use duel::{DUEL_BULLET_RADIUS, DuelState};
-use effects::{ScreenShake, SlowMotion};
+use duel::{DuelState, DUEL_BULLET_RADIUS};
+use effects::{PendingHitKind, PendingHitManager, ScreenShake, SlowMotion};
 use font::FontSystem;
 use macroquad::prelude::*;
 use particle::ParticleSystem;
@@ -536,6 +539,8 @@ async fn main() {
     let mut achievements_scroll: f32 = 0.0; // 成就界面滚动偏移
     let mut settings_scroll: f32 = 0.0; // 设置界面滚动偏移
     let mut vortex_manager = VortexManager::new(timing::VORTEX_SPAWN_INTERVAL); // 漩涡生成间隔
+    let mut pending_hits = PendingHitManager::new(); // 客户端乐观命中提示（Phase 4C）
+    let mut chain_lightnings = chain_lightning::ChainLightningManager::new(); // 链式闪电效果管理器
 
     // 在线多人网络客户端
     let mut network_client = network::NetworkClient::new("ws://127.0.0.1:9001".to_string());
@@ -1085,6 +1090,7 @@ async fn main() {
                     &starfield,
                     is_online_mode,
                     &online_bullets,
+                    &chain_lightnings,
                 );
                 if matches!(current_mode, GameMode::Survival) {
                     ui::draw_survival_record(
@@ -1166,6 +1172,7 @@ async fn main() {
                     &starfield,
                     is_online_mode,
                     &online_bullets,
+                    &chain_lightnings,
                 );
                 ui::draw_victory_pause_overlay(
                     (started_at + VICTORY_PAUSE_DURATION - frame_t).max(0.0),
@@ -1210,6 +1217,7 @@ async fn main() {
                     &starfield,
                     is_online_mode,
                     &online_bullets,
+                    &chain_lightnings,
                 );
                 ui::draw_round_end(
                     winner_idx,
@@ -1360,6 +1368,7 @@ async fn main() {
                             println!("游戏开始!");
                             is_online_mode = true;
                             online_bullets.clear();
+                            pending_hits.clear(); // 重置乐观命中提示
 
                             // 清空本地玩家的子弹（避免残留本地子弹渲染）
                             for player in players.iter_mut() {
@@ -1664,6 +1673,35 @@ async fn main() {
                                 powerup_type,
                             });
                         }
+
+                        // === 乐观命中确认 (Phase 4C) ===
+                        // 检查待确认的命中是否已被服务器确认（目标消失）
+                        let server_asteroid_positions: Vec<Vec2> = server_asteroids
+                            .iter()
+                            .map(|a| Vec2::new(a.x, a.y))
+                            .collect();
+                        let server_ufo_positions: Vec<Vec2> = ufos.iter().map(|u| u.pos).collect();
+
+                        // 遍历所有待确认命中，检查目标是否仍存在
+                        for hit in pending_hits.get_all().to_vec() {
+                            if hit.state != effects::PendingHitState::Pending {
+                                continue;
+                            }
+
+                            let target_still_exists = match hit.kind {
+                                PendingHitKind::Asteroid => server_asteroid_positions
+                                    .iter()
+                                    .any(|pos| (*pos - hit.pos).length() < 30.0),
+                                PendingHitKind::Ufo => server_ufo_positions
+                                    .iter()
+                                    .any(|pos| (*pos - hit.pos).length() < 35.0),
+                            };
+
+                            // 如果目标已消失，确认命中
+                            if !target_still_exists {
+                                pending_hits.confirm(hit.id, frame_t as f32);
+                            }
+                        }
                     }
                     network::ServerMessage::GameOver { winner, scores } => {
                         println!("游戏结束! 胜者: {:?}, 分数: {:?}", winner, scores);
@@ -1803,7 +1841,8 @@ async fn main() {
                         WeaponType::Normal => WeaponType::Spread,
                         WeaponType::Spread => WeaponType::Penetrating,
                         WeaponType::Penetrating => WeaponType::Homing,
-                        WeaponType::Homing => WeaponType::Normal,
+                        WeaponType::Homing => WeaponType::ChainIon,
+                        WeaponType::ChainIon => WeaponType::Normal,
                     };
                     // 追踪武器使用统计
                     let weapon_name = format!("{:?}", player.weapon_type);
@@ -1820,6 +1859,9 @@ async fn main() {
         }
 
         particles.update(dt, frame_t as f32);
+
+        // 更新链式闪电效果
+        chain_lightnings.update(frame_t as f32);
 
         // 重置并重用 QuadTree（避免每帧分配新内存）
         quadtree.reset(Bounds::new(0.0, 0.0, screen_width(), screen_height()));
@@ -1926,8 +1968,9 @@ async fn main() {
         }
 
         // 子弹与小行星碰撞检测（使用 QuadTree）
-        // 收集小行星击杀信息：(player_idx, asteroid_idx, score_value, asteroid_pos, asteroid_size, player_color, bullet_vel)
-        let mut asteroid_hits: Vec<(usize, usize, u32, Vec2, f32, Color, Vec2)> = Vec::new();
+        // 收集小行星击杀信息：(player_idx, asteroid_idx, score_value, asteroid_pos, asteroid_size, player_color, bullet_vel, is_chain_hit)
+        #[allow(clippy::type_complexity)]
+        let mut asteroid_hits: Vec<(usize, usize, u32, Vec2, f32, Color, Vec2, bool)> = Vec::new();
 
         for (player_idx, player) in players.iter_mut().enumerate() {
             for bullet in player.bullets.iter_mut() {
@@ -1940,21 +1983,42 @@ async fn main() {
                 quadtree.query(bullet.pos, BULLET_RADIUS * 3.0, &mut bullet_query);
 
                 for obj in bullet_query.iter() {
-                    let asteroid = &mut asteroids[obj.index];
-                    if asteroid.collided {
+                    // 先检查碰撞条件（只读访问）
+                    let hit_asteroid_idx = obj.index;
+                    let asteroid_collided = asteroids[hit_asteroid_idx].collided;
+                    let asteroid_pos = asteroids[hit_asteroid_idx].pos;
+                    let asteroid_size = asteroids[hit_asteroid_idx].size;
+
+                    if asteroid_collided {
                         continue;
                     }
 
-                    if (asteroid.pos - bullet.pos).length() < asteroid.size {
+                    if (asteroid_pos - bullet.pos).length() < asteroid_size {
+                        // === 链式离子炮：先查找链式目标（需要不可变借用） ===
+                        let chain_targets = if bullet.weapon_type == WeaponType::ChainIon {
+                            chain_lightning::find_chain_asteroid_targets(
+                                asteroid_pos,
+                                hit_asteroid_idx,
+                                &asteroids,
+                                constants::chain_ion::MAX_JUMPS - 1,
+                                constants::chain_ion::RANGE,
+                            )
+                        } else {
+                            Vec::new()
+                        };
+
+                        // 现在可以安全地进行可变借用
+                        let asteroid = &mut asteroids[hit_asteroid_idx];
                         asteroid.collided = true;
                         asteroid_hits.push((
                             player_idx,
-                            obj.index,
+                            hit_asteroid_idx,
                             asteroid.score_value(),
                             asteroid.pos,
                             asteroid.size,
                             player.color,
                             bullet.vel,
+                            false, // 非链式命中
                         ));
 
                         // 记录击杀（仅在 Duel 模式下）
@@ -1964,6 +2028,58 @@ async fn main() {
 
                         if let Some(split) = asteroid.split(bullet.vel) {
                             new_asteroids.extend(split);
+                        }
+
+                        // === 处理链式攻击目标 ===
+                        if !chain_targets.is_empty() {
+                            // 收集链式路径节点（用于视觉效果）
+                            let mut chain_nodes = vec![asteroid_pos];
+
+                            for (hop, &target_idx) in chain_targets.iter().enumerate() {
+                                let target_asteroid = &mut asteroids[target_idx];
+                                if target_asteroid.collided {
+                                    continue;
+                                }
+
+                                // 计算链式伤害比例
+                                let damage_ratio = chain_lightning::damage_ratio(hop);
+                                let chain_score =
+                                    (target_asteroid.score_value() as f32 * damage_ratio) as u32;
+
+                                target_asteroid.collided = true;
+                                chain_nodes.push(target_asteroid.pos);
+
+                                // 记录链式命中
+                                asteroid_hits.push((
+                                    player_idx,
+                                    target_idx,
+                                    chain_score,
+                                    target_asteroid.pos,
+                                    target_asteroid.size,
+                                    player.color,
+                                    bullet.vel,
+                                    true, // 链式命中
+                                ));
+
+                                // Duel 模式记录击杀
+                                if matches!(current_mode, GameMode::Duel) {
+                                    player_kills[player_idx] += 1;
+                                }
+
+                                // 分裂小行星
+                                if let Some(split) = target_asteroid.split(bullet.vel) {
+                                    new_asteroids.extend(split);
+                                }
+                            }
+
+                            // 生成链式闪电视觉效果
+                            if chain_nodes.len() > 1 {
+                                chain_lightnings.spawn_path(
+                                    chain_nodes,
+                                    frame_t as f32,
+                                    player.color,
+                                );
+                            }
                         }
 
                         // 尝试穿透，如果失败则标记碰撞
@@ -1984,6 +2100,7 @@ async fn main() {
             asteroid_size,
             player_color,
             _bullet_vel,
+            _is_chain_hit,
         ) in asteroid_hits
         {
             if players[player_idx].add_score(score_value) {
@@ -2446,6 +2563,7 @@ async fn main() {
             &starfield,
             is_online_mode,
             &online_bullets,
+            &chain_lightnings,
         );
         if matches!(current_mode, GameMode::Survival) {
             ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
@@ -2839,6 +2957,7 @@ fn render_scene(
     starfield: &background::Starfield,
     is_online_mode: bool,
     online_bullets: &[OnlineBullet],
+    chain_lightnings: &chain_lightning::ChainLightningManager,
 ) {
     // 应用屏幕震动偏移
     let shake_offset = screen_shake
@@ -2861,6 +2980,9 @@ fn render_scene(
             render::draw_bullet(bullet, shake_offset, player.color, frame_t as f32);
         }
     }
+
+    // 绘制链式闪电效果
+    chain_lightnings.draw(shake_offset, frame_t as f32);
 
     // 绘制在线模式的子弹（服务器同步）
     if is_online_mode {

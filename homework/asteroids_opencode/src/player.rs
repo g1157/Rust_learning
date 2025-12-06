@@ -14,9 +14,11 @@
 use macroquad::prelude::*;
 
 use crate::bullet::{Bullet, WeaponType};
-use crate::constants::{homing, killstreak};
+use crate::constants::{chain_ion, homing, killstreak, phase_dash};
+use crate::dash_trail::{PhaseExplosion, PhaseTrail};
 use crate::score::Score;
 use crate::ship::Ship;
+use crate::utils::wrap_around;
 
 pub const INVULNERABLE_DURATION: f64 = 3.0; // 秒
 pub const HIT_INVULNERABLE_DURATION: f64 = 1.0; // 秒
@@ -114,6 +116,11 @@ pub struct Player {
     pub dash_invuln_until: f64,            // 冲刺无敌结束时间
     pub dash_direction: Vec2,              // 冲刺方向
     pub dash_trail: Vec<(Vec2, f32, f64)>, // 残影轨迹 (位置, 角度, 时间)
+    // 相位闪现系统（瞬移+延迟爆裂尾迹）
+    pub phase_cooldown_until: f64, // 相位闪现冷却结束时间
+    pub phase_invuln_until: f64,   // 相位闪现无敌结束时间
+    pub phase_visual_until: f64,   // 相位半透明结束时间
+    pub phase_trail: PhaseTrail,   // 延迟爆裂尾迹
     // 成就追踪
     pub took_damage_this_life: bool, // 当前生命是否受伤（用于无伤成就判定）
     // 超空间跳跃系统
@@ -158,6 +165,10 @@ impl Player {
             dash_invuln_until: now,
             dash_direction: Vec2::ZERO,
             dash_trail: Vec::new(),
+            phase_cooldown_until: now,
+            phase_invuln_until: now,
+            phase_visual_until: now,
+            phase_trail: PhaseTrail::new(),
             took_damage_this_life: false,
             hyperspace_cooldown_until: now,
             hyperspace_active: false,
@@ -188,6 +199,10 @@ impl Player {
         self.dash_invuln_until = now;
         self.dash_direction = Vec2::ZERO;
         self.dash_trail.clear();
+        self.phase_cooldown_until = now;
+        self.phase_invuln_until = now;
+        self.phase_visual_until = now;
+        self.phase_trail.clear();
         self.took_damage_this_life = false;
         self.hyperspace_cooldown_until = now;
         self.hyperspace_active = false;
@@ -289,6 +304,16 @@ impl Player {
                 ));
                 1
             }
+            WeaponType::ChainIon => {
+                // 链式离子炮：命中后链式传导攻击附近目标
+                self.bullets.push(Bullet::with_weapon_type(
+                    position,
+                    direction,
+                    now,
+                    WeaponType::ChainIon,
+                ));
+                1
+            }
         }
     }
 
@@ -363,7 +388,9 @@ impl Player {
     }
 
     pub fn is_invulnerable(&self, time: f64) -> bool {
-        time < self.invulnerable_until || time < self.dash_invuln_until
+        time < self.invulnerable_until
+            || time < self.dash_invuln_until
+            || time < self.phase_invuln_until
     }
 
     /// 检查是否可以冲刺（冷却结束且没有在冲刺中）
@@ -383,6 +410,74 @@ impl Player {
         self.dash_invuln_until = time + DASH_INVULN_DURATION;
         self.dash_direction = direction.normalize_or_zero();
         self.dash_trail.clear();
+    }
+
+    // -------------------------------------------------------------------------
+    // 相位闪现（瞬移+尾迹爆裂）
+    // -------------------------------------------------------------------------
+
+    /// 检查是否可以进行相位闪现（Shift 触发，与速度冲刺独立）
+    #[allow(dead_code)] // 相位闪现功能正在集成中
+    pub fn can_phase_dash(&self, time: f64) -> bool {
+        self.alive && time >= self.phase_cooldown_until
+    }
+
+    /// 执行相位闪现：瞬移固定距离，期间无敌并留下延迟爆裂尾迹
+    ///
+    /// 返回值：(起点, 终点)，便于上层生成粒子/音效
+    #[allow(dead_code)] // 相位闪现功能正在集成中
+    pub fn start_phase_dash(&mut self, time: f64) -> (Vec2, Vec2) {
+        let start_pos = self.ship.pos;
+        let target = self.ship.phase_destination(phase_dash::DISTANCE);
+
+        self.phase_cooldown_until = time + phase_dash::COOLDOWN;
+        self.phase_invuln_until = time + phase_dash::INVULNERABLE_WINDOW;
+        self.phase_visual_until = time + phase_dash::TRAIL_LIFETIME;
+
+        self.phase_trail
+            .seed_path(start_pos, target, self.ship.rot, time);
+
+        // 瞬移并清空速度，避免继承旧速度
+        self.ship.teleport_to(wrap_around(&target));
+
+        (start_pos, target)
+    }
+
+    /// 更新相位尾迹的可见与爆炸状态
+    #[allow(dead_code)] // 相位闪现功能正在集成中
+    pub fn update_phase_trail(&mut self, time: f64) {
+        self.phase_trail.cull_expired(time);
+    }
+
+    /// 收集已到爆炸时间的尾迹节点，用于上层造成范围伤害
+    #[allow(dead_code)] // 相位闪现功能正在集成中
+    pub fn drain_phase_explosions(&mut self, time: f64) -> Vec<PhaseExplosion> {
+        self.phase_trail.take_ready_explosions(time)
+    }
+
+    /// 获取相位闪现冷却剩余时间
+    #[allow(dead_code)] // 相位闪现功能正在集成中
+    pub fn phase_cooldown_remaining(&self, time: f64) -> f64 {
+        if time < self.phase_cooldown_until {
+            self.phase_cooldown_until - time
+        } else {
+            0.0
+        }
+    }
+
+    /// 是否处于相位半透明期（用于渲染层淡化）
+    #[allow(dead_code)] // 相位闪现功能正在集成中
+    pub fn is_phase_cloaked(&self, time: f64) -> bool {
+        time < self.phase_visual_until
+    }
+
+    /// 转换相位尾迹为可直接复用现有 dash 残影绘制的三元组
+    #[allow(dead_code)] // 相位闪现功能正在集成中
+    pub fn phase_trail_tuples(&self, time: f64) -> Vec<(Vec2, f32, f64)> {
+        self.phase_trail
+            .active_segments(time)
+            .map(|seg| (seg.pos, seg.rot, seg.spawned_at))
+            .collect()
     }
 
     /// 更新冲刺残影轨迹
@@ -487,6 +582,7 @@ impl Player {
     pub fn shoot_cooldown(&self) -> f64 {
         let base_cooldown = match self.weapon_type {
             WeaponType::Homing => homing::COOLDOWN,
+            WeaponType::ChainIon => chain_ion::COOLDOWN,
             _ => SHOOT_COOLDOWN,
         };
         let bonus_multiplier = 1.0 - (self.killstreak.min(3) as f64 * KILLSTREAK_FIRE_RATE_BONUS);
