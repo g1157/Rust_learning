@@ -197,6 +197,8 @@ pub struct InputCommand {
     pub keys: Vec<String>,
     /// 本地时间戳
     pub timestamp: f64,
+    /// 输入对应的模拟步长（用于重播）
+    pub dt: f32,
 }
 
 /// 预测状态快照（用于服务器协调后的重播）
@@ -214,6 +216,27 @@ pub struct PredictedSnapshot {
     pub vel_x: f32,
     /// 玩家速度 y
     pub vel_y: f32,
+}
+
+/// 预测输入状态（解析后的按键状态）
+#[derive(Debug, Clone, Default)]
+pub struct ParsedInput {
+    pub thrust: bool,
+    pub left: bool,
+    pub right: bool,
+    pub shoot: bool,
+}
+
+impl ParsedInput {
+    /// 从按键字符串列表解析输入状态
+    pub fn from_keys(keys: &[String]) -> Self {
+        Self {
+            thrust: keys.iter().any(|k| k == "thrust"),
+            left: keys.iter().any(|k| k == "left"),
+            right: keys.iter().any(|k| k == "right"),
+            shoot: keys.iter().any(|k| k == "shoot"),
+        }
+    }
 }
 
 // ============================================================================
@@ -461,15 +484,21 @@ impl NetworkClient {
     ///
     /// 调用方应在发送后立即在本地应用该输入进行预测模拟。
     /// 当收到服务器状态时，调用 `reconcile` 进行协调。
-    pub fn send_input(&mut self, keys: Vec<String>, timestamp: f64) {
+    ///
+    /// # 参数
+    /// - `keys`: 当前按下的按键列表
+    /// - `timestamp`: 输入时间戳
+    /// - `dt`: 当前帧的模拟步长（用于重播时保持一致）
+    pub fn send_input(&mut self, keys: Vec<String>, timestamp: f64, dt: f32) {
         let seq = self.input_seq;
         self.input_seq = self.input_seq.wrapping_add(1);
 
-        // 记录输入到待确认队列
+        // 记录输入到待确认队列（包含 dt 用于重播）
         let cmd = InputCommand {
             seq,
             keys: keys.clone(),
             timestamp,
+            dt,
         };
         self.pending_inputs.push_back(cmd);
 
@@ -720,10 +749,12 @@ mod tests {
             seq: 10,
             keys: vec!["w".to_string()],
             timestamp: 1.5,
+            dt: 0.016,
         };
         assert_eq!(cmd.seq, 10);
         assert_eq!(cmd.keys, vec!["w"]);
         assert!((cmd.timestamp - 1.5).abs() < f64::EPSILON);
+        assert!((cmd.dt - 0.016).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -735,16 +766,19 @@ mod tests {
             seq: 0,
             keys: vec!["w".to_string()],
             timestamp: 0.0,
+            dt: 0.016,
         });
         client.pending_inputs.push_back(InputCommand {
             seq: 1,
             keys: vec!["a".to_string()],
             timestamp: 0.016,
+            dt: 0.016,
         });
         client.pending_inputs.push_back(InputCommand {
             seq: 2,
             keys: vec!["d".to_string()],
             timestamp: 0.032,
+            dt: 0.016,
         });
 
         // 模拟服务器确认到 seq=1
@@ -784,6 +818,7 @@ mod tests {
             seq: 41,
             keys: vec!["w".to_string()],
             timestamp: 0.0,
+            dt: 0.016,
         });
         client.last_confirmed_state = Some(PlayerState {
             id: "test".to_string(),

@@ -1397,7 +1397,7 @@ async fn main() {
             }
         }
 
-        // ========== 在线模式：输入同步 ==========
+        // ========== 在线模式：输入同步与客户端预测 ==========
         if is_online_mode && matches!(state, GameState::Playing) {
             // 收集当前按键状态
             let mut keys_pressed = Vec::new();
@@ -1420,8 +1420,19 @@ async fn main() {
                 }
             }
 
-            // 每帧发送输入到服务器（使用 send_input 支持客户端预测）
-            network_client.send_input(keys_pressed, get_time());
+            // 发送输入到服务器（使用 send_input 支持客户端预测）
+            // 记录当前帧的 dt，用于重播时保持物理一致性
+            let input_timestamp = get_time();
+            network_client.send_input(keys_pressed.clone(), input_timestamp, dt);
+
+            // === 客户端预测：本地立即应用输入 ===
+            // 在等待服务器响应期间，先在本地应用输入，减少感知延迟
+            if let Some(local_player) = players.get_mut(0)
+                && local_player.alive
+            {
+                let parsed_input = network::ParsedInput::from_keys(&keys_pressed);
+                apply_predicted_input(local_player, &parsed_input, dt);
+            }
 
             // 接收服务器的游戏状态更新
             while let Some(message) = network_client.receive() {
@@ -1432,43 +1443,75 @@ async fn main() {
                         bullets: server_bullets,
                         vortices: server_vortices,
                         powerups: server_powerups,
+                        last_input_seqs,
                         ..
                     } => {
                         // 按玩家ID更新本地玩家状态（避免HashMap顺序不稳定导致的错位）
                         // 在线模式下，players[0] 是本地玩家，需要用 player_id 找到对应的服务器数据
-                        if let Some(my_id) = &network_client.player_id {
-                            // 找到服务器返回的本玩家数据并更新本地玩家
+                        if let Some(my_id) = network_client.player_id.clone() {
+                            // 找到服务器返回的本玩家数据
                             if let Some(my_server_data) =
-                                server_players.iter().find(|p| &p.id == my_id)
-                                && !players.is_empty()
+                                server_players.iter().find(|p| p.id == my_id)
                             {
-                                let local_player = &mut players[0];
-                                // 更新玩家位置和状态（权威服务器）
-                                local_player.ship.pos =
-                                    Vec2::new(my_server_data.x, my_server_data.y);
-                                local_player.ship.rot = my_server_data.angle;
-                                local_player.ship.vel =
-                                    Vec2::new(my_server_data.vel_x, my_server_data.vel_y);
-                                local_player.lives = my_server_data.lives;
+                                // === 服务器协调：获取未确认的输入 ===
+                                // 如果服务器尚未开始处理输入（last_input_seqs 无本玩家），
+                                // 则不进行 reconcile，直接使用服务器状态
+                                let replay_inputs =
+                                    if let Some(&server_seq) = last_input_seqs.get(&my_id) {
+                                        network_client.reconcile(server_seq, my_server_data)
+                                    } else {
+                                        // 服务器尚未确认任何输入，清空待确认队列避免累积
+                                        // 这通常发生在刚加入游戏或服务器重启时
+                                        network_client.reset_prediction_state();
+                                        Vec::new()
+                                    };
 
-                                // 分数同步
-                                if local_player.score.value() != my_server_data.score {
-                                    local_player.score.reset();
-                                    local_player.score.add_points(my_server_data.score);
-                                }
+                                if !players.is_empty() {
+                                    let local_player = &mut players[0];
 
-                                // 检查玩家是否存活
-                                if !my_server_data.alive && local_player.alive {
-                                    local_player.mark_dead(frame_t);
-                                } else if my_server_data.alive && !local_player.alive {
-                                    local_player.alive = true;
+                                    // 应用服务器权威状态作为基准
+                                    local_player.ship.pos =
+                                        Vec2::new(my_server_data.x, my_server_data.y);
+                                    local_player.ship.rot = my_server_data.angle;
+                                    local_player.ship.vel =
+                                        Vec2::new(my_server_data.vel_x, my_server_data.vel_y);
+                                    local_player.lives = my_server_data.lives;
+
+                                    // 分数同步
+                                    if local_player.score.value() != my_server_data.score {
+                                        local_player.score.reset();
+                                        local_player.score.add_points(my_server_data.score);
+                                    }
+
+                                    // 检查玩家是否存活
+                                    if !my_server_data.alive && local_player.alive {
+                                        local_player.mark_dead(frame_t);
+                                    } else if my_server_data.alive && !local_player.alive {
+                                        local_player.alive = true;
+                                    }
+
+                                    // === 重播未确认输入，生成新的预测状态 ===
+                                    // 这确保了本地状态与服务器状态一致，同时应用了服务器尚未处理的输入
+                                    // 使用输入记录时的 dt 来保持物理一致性
+                                    if !replay_inputs.is_empty() && local_player.alive {
+                                        for cmd in replay_inputs.iter() {
+                                            let parsed = network::ParsedInput::from_keys(&cmd.keys);
+                                            // 使用记录的 dt，如果无效则回退到当前帧 dt
+                                            let replay_dt = if cmd.dt > 0.0 && cmd.dt < 0.1 {
+                                                cmd.dt
+                                            } else {
+                                                dt
+                                            };
+                                            apply_predicted_input(local_player, &parsed, replay_dt);
+                                        }
+                                    }
                                 }
                             }
 
                             // 同步其他玩家（对手）用于渲染
                             // 如果 players 只有一个本地玩家，需要添加对手
                             for server_player in server_players.iter() {
-                                if &server_player.id != my_id {
+                                if server_player.id != my_id {
                                     // 这是对手玩家，确保有对应的本地 Player 对象
                                     if players.len() < 2 {
                                         // 添加对手玩家用于渲染
@@ -2370,6 +2413,49 @@ async fn main() {
 
         next_frame().await;
     }
+}
+
+// ============================================================================
+// 客户端预测辅助函数
+// ============================================================================
+
+/// 应用预测输入到玩家状态（用于本地预测和服务器协调后重播）
+///
+/// 此函数模拟单帧的物理更新，基于给定的输入状态。
+/// 用于：
+/// 1. 本地输入即时应用（减少感知延迟）
+/// 2. 服务器状态协调后重播未确认的输入
+fn apply_predicted_input(player: &mut Player, input: &network::ParsedInput, dt: f32) {
+    // 阻尼减速
+    let mut acc = -player.ship.vel * SHIP_DAMPING;
+
+    // 推进加速
+    player.is_thrusting = input.thrust;
+    if input.thrust {
+        acc += player.ship.forward_vector() * SHIP_THRUST;
+    }
+
+    // 旋转
+    if input.right {
+        player.ship.rot += SHIP_ROTATION_STEP * dt;
+    } else if input.left {
+        player.ship.rot -= SHIP_ROTATION_STEP * dt;
+    }
+
+    // 更新速度
+    player.ship.vel += acc * dt;
+
+    // 限制最大速度
+    let max_speed = player.max_speed();
+    if player.ship.vel.length() > max_speed {
+        player.ship.vel = player.ship.vel.normalize() * max_speed;
+    }
+
+    // 更新位置
+    player.ship.pos += player.ship.vel * dt;
+
+    // 边界环绕
+    player.ship.pos = wrap_around(&player.ship.pos);
 }
 
 struct RoundState<'a> {
