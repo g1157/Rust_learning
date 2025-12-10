@@ -13,6 +13,7 @@
 
 use macroquad::prelude::*;
 
+use crate::battle_draft::{Card, PlayerModifiers};
 use crate::bullet::{Bullet, WeaponType};
 use crate::constants::{chain_ion, homing, killstreak, phase_dash};
 use crate::dash_trail::{PhaseExplosion, PhaseTrail};
@@ -62,8 +63,9 @@ pub struct Controls {
     pub shoot_alt: Option<KeyCode>,
     pub weapon_switch: KeyCode,
     pub weapon_switch_alt: Option<KeyCode>,
-    pub dash: KeyCode,       // 冲刺键
-    pub hyperspace: KeyCode, // 超空间跳跃键
+    pub dash: KeyCode,        // 冲刺键
+    pub hyperspace: KeyCode,  // 超空间跳跃键
+    pub phase_dash: KeyCode,  // 相位闪现键
 }
 
 impl Controls {
@@ -94,7 +96,8 @@ pub struct Player {
     pub score: Score,
     pub alive: bool,
     pub lives: u32,
-    next_extra_life_at: u32, // 下一个额外生命的分数阈值
+    pub modifiers: PlayerModifiers, // 选卡系统属性修改器
+    next_extra_life_at: u32,        // 下一个额外生命的分数阈值
     survival_start: f64,
     survival_end: Option<f64>,
     invulnerable_until: f64,
@@ -148,6 +151,7 @@ impl Player {
             score: Score::new(),
             alive: true,
             lives: starting_lives,
+            modifiers: PlayerModifiers::new(),
             next_extra_life_at: EXTRA_LIFE_THRESHOLD,
             survival_start: now + INVULNERABLE_DURATION,
             survival_end: None,
@@ -181,6 +185,7 @@ impl Player {
         self.bullets.clear();
         self.last_shot = now - 1.0;
         self.score.reset();
+        self.modifiers.reset();
         self.next_extra_life_at = EXTRA_LIFE_THRESHOLD;
         self.alive = true;
         self.lives = starting_lives;
@@ -234,6 +239,18 @@ impl Player {
         }
 
         awarded
+    }
+
+    /// 应用选卡系统的卡牌效果
+    ///
+    /// 如果是 ExtraLife 卡牌，除了记录到 modifiers 外，还会立即增加生命值
+    pub fn apply_draft_card(&mut self, card: Card) {
+        self.modifiers.apply_card(card);
+
+        // ExtraLife 需要立即增加生命值
+        if matches!(card, Card::ExtraLife) {
+            self.lives = self.lives.saturating_add(1);
+        }
     }
 
     pub fn can_shoot(&self, now: f64) -> bool {
@@ -578,20 +595,26 @@ impl Player {
         }
     }
 
-    /// 获取当前射击冷却时间（考虑连击加成和武器类型）
+    /// 获取当前射击冷却时间（考虑卡牌加成、连击加成和武器类型）
     pub fn shoot_cooldown(&self) -> f64 {
         let base_cooldown = match self.weapon_type {
             WeaponType::Homing => homing::COOLDOWN,
             WeaponType::ChainIon => chain_ion::COOLDOWN,
             _ => SHOOT_COOLDOWN,
         };
+        // 先应用卡牌加成
+        let modified_cooldown = self.modifiers.modified_shoot_cooldown(base_cooldown);
+        // 再应用连击加成
         let bonus_multiplier = 1.0 - (self.killstreak.min(3) as f64 * KILLSTREAK_FIRE_RATE_BONUS);
-        base_cooldown * bonus_multiplier
+        modified_cooldown * bonus_multiplier
     }
 
-    /// 获取当前最大速度（考虑连击加成）
+    /// 获取当前最大速度（考虑卡牌加成和连击加成）
     pub fn max_speed(&self) -> f32 {
-        crate::ship::SHIP_MAX_SPEED + (self.killstreak.min(3) as f32 * KILLSTREAK_SPEED_BONUS)
+        // 先应用卡牌加成到基础速度
+        let base_speed = self.modifiers.modified_max_speed(crate::ship::SHIP_MAX_SPEED);
+        // 再叠加连击加成
+        base_speed + (self.killstreak.min(3) as f32 * KILLSTREAK_SPEED_BONUS)
     }
 
     /// 获取连击等级描述
@@ -675,6 +698,7 @@ mod tests {
             weapon_switch_alt: None,
             dash: KeyCode::LeftShift,
             hyperspace: KeyCode::H,
+            phase_dash: KeyCode::LeftControl,
         }
     }
 
