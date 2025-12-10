@@ -174,11 +174,11 @@ impl QuadTree {
         // 如果有子节点，尝试插入子节点
         if self.children.is_some() {
             let index = self.get_child_index(&obj);
-            if let Some(idx) = index
-                && let Some(ref mut children) = self.children
-            {
-                children[idx].insert(obj);
-                return;
+            if let Some(idx) = index {
+                if let Some(ref mut children) = self.children {
+                    children[idx].insert(obj);
+                    return;
+                }
             }
         }
 

@@ -73,33 +73,33 @@ impl Bullet {
 
     pub fn update(&mut self, dt: f32) {
         // 追踪导弹特殊更新逻辑
-        if self.weapon_type == WeaponType::Homing
-            && let Some(target) = self.target_pos
-        {
-            // 计算目标方向
-            let to_target = target - self.pos;
-            let distance = to_target.length();
+        if self.weapon_type == WeaponType::Homing {
+            if let Some(target) = self.target_pos {
+                // 计算目标方向
+                let to_target = target - self.pos;
+                let distance = to_target.length();
 
-            if distance > 0.1 {
-                let target_dir = to_target.normalize();
-                let current_dir = self.vel.normalize();
+                if distance > 0.1 {
+                    let target_dir = to_target.normalize();
+                    let current_dir = self.vel.normalize();
 
-                // 计算需要转向的角度
-                let cross = current_dir.x * target_dir.y - current_dir.y * target_dir.x;
+                    // 计算需要转向的角度
+                    let cross = current_dir.x * target_dir.y - current_dir.y * target_dir.x;
 
-                // 限制转向速率
-                let max_turn = homing::TURN_RATE * dt;
-                let turn_amount = cross.clamp(-max_turn, max_turn);
+                    // 限制转向速率
+                    let max_turn = homing::TURN_RATE * dt;
+                    let turn_amount = cross.clamp(-max_turn, max_turn);
 
-                // 旋转速度向量
-                let cos_a = turn_amount.cos();
-                let sin_a = turn_amount.sin();
-                let new_dir = Vec2::new(
-                    current_dir.x * cos_a - current_dir.y * sin_a,
-                    current_dir.x * sin_a + current_dir.y * cos_a,
-                );
+                    // 旋转速度向量
+                    let cos_a = turn_amount.cos();
+                    let sin_a = turn_amount.sin();
+                    let new_dir = Vec2::new(
+                        current_dir.x * cos_a - current_dir.y * sin_a,
+                        current_dir.x * sin_a + current_dir.y * cos_a,
+                    );
 
-                self.vel = new_dir * homing::SPEED;
+                    self.vel = new_dir * homing::SPEED;
+                }
             }
         }
 

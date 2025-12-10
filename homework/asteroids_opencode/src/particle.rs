@@ -84,9 +84,20 @@ impl ParticleSystem {
         }
     }
 
+    /// 确保有足够空间容纳新粒子，超出 MAX_PARTICLES 时移除最老的粒子
+    fn make_room(&mut self, needed: usize) {
+        let available = particles::MAX_PARTICLES.saturating_sub(self.particles.len());
+        if needed > available {
+            let to_remove = needed - available;
+            // 移除最老的粒子（Vec 头部）
+            self.particles.drain(0..to_remove.min(self.particles.len()));
+        }
+    }
+
     /// 创建爆炸效果
     pub fn spawn_explosion(&mut self, pos: Vec2, size: f32, color: Color, now: f32) {
         let count = (EXPLOSION_PARTICLE_COUNT as f32 * (size / 20.0).min(3.0)) as usize;
+        self.make_room(count);
         let (speed_min, speed_max) = particles::EXPLOSION_SPEED_RANGE;
         let (size_min, size_max) = particles::EXPLOSION_SIZE_RANGE;
         let (life_min, life_max) = particles::EXPLOSION_LIFETIME_RANGE;
@@ -112,6 +123,7 @@ impl ParticleSystem {
             return;
         }
         self.last_thruster_time = now;
+        self.make_room(THRUSTER_PARTICLE_COUNT);
 
         let (spread_min, spread_max) = particles::THRUSTER_SPREAD_RANGE;
         let (speed_min, speed_max) = particles::THRUSTER_SPEED_RANGE;
@@ -151,6 +163,7 @@ impl ParticleSystem {
         }
 
         self.last_bullet_trail_time = now;
+        self.make_room(1);
 
         let particle_vel = vel * 0.2;
         let size = rand::gen_range(0.8, 1.5);

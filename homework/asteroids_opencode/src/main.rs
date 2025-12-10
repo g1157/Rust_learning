@@ -2162,25 +2162,25 @@ async fn main() {
 
                 // 检查击杀胜利（最后一人存活）
                 let alive = players.iter().filter(|player| player.alive).count();
-                if alive <= 1
-                    && let Some(winner_idx) = players.iter().position(|player| player.alive)
-                {
-                    duel_state.record_round_winner(winner_idx);
-                    duel_state.last_winner = Some(winner_idx);
+                if alive <= 1 {
+                    if let Some(winner_idx) = players.iter().position(|player| player.alive) {
+                        duel_state.record_round_winner(winner_idx);
+                        duel_state.last_winner = Some(winner_idx);
 
-                    // 检查是否赢得整场比赛
-                    if duel_state.check_match_winner().is_some() {
-                        // 保存成就和统计数据
-                        achievements.save();
-                        state = GameState::GameOver {
-                            victory: true,
-                            end_time: frame_t,
-                        };
-                    } else {
-                        // 只是赢得了当前回合
-                        state = GameState::RoundEnd { winner_idx };
+                        // 检查是否赢得整场比赛
+                        if duel_state.check_match_winner().is_some() {
+                            // 保存成就和统计数据
+                            achievements.save();
+                            state = GameState::GameOver {
+                                victory: true,
+                                end_time: frame_t,
+                            };
+                        } else {
+                            // 只是赢得了当前回合
+                            state = GameState::RoundEnd { winner_idx };
+                        }
+                        continue;
                     }
-                    continue;
                 }
             }
             GameMode::Settings => unreachable!("Settings is not a playable mode"),
@@ -2654,10 +2654,10 @@ fn render_scene(
         }
     }
 
-    if let Some(state) = duel_state
-        && let Some(flag) = &state.flag
-    {
-        duel::draw_flag(flag, flag_radius);
+    if let Some(state) = duel_state {
+        if let Some(flag) = &state.flag {
+            duel::draw_flag(flag, flag_radius);
+        }
     }
 
     ui::draw_players_hud(players, HudMode::Active { time: frame_t }, font);
@@ -2682,13 +2682,13 @@ fn render_scene(
     // 显示成就解锁提示
     let recent_unlocks = achievements.get_recent_unlocks(6.0, frame_t);
     for (i, id) in recent_unlocks.iter().enumerate() {
-        if let Some(progress) = achievements.get_progress(*id)
-            && let Some(unlock_time) = progress.unlock_time
-        {
-            let time_since = (frame_t - unlock_time) as f32;
-            // 每个提示稍微偏移一点，避免重叠
-            let offset_y = i as f32 * 110.0;
-            ui_achievements::draw_achievement_unlock_toast_offset(*id, time_since, offset_y, font);
+        if let Some(progress) = achievements.get_progress(*id) {
+            if let Some(unlock_time) = progress.unlock_time {
+                let time_since = (frame_t - unlock_time) as f32;
+                // 每个提示稍微偏移一点，避免重叠
+                let offset_y = i as f32 * 110.0;
+                ui_achievements::draw_achievement_unlock_toast_offset(*id, time_since, offset_y, font);
+            }
         }
     }
 }

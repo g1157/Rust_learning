@@ -12,6 +12,9 @@ use macroquad::time::get_time;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
+/// 消息队列最大容量，防止未消费消息无限堆积
+const MAX_MESSAGE_QUEUE: usize = 256;
+
 // ============================================================================
 // 网络专用游戏模式（仅包含服务器支持的模式）
 // ============================================================================
@@ -370,6 +373,10 @@ impl NetworkClient {
                         eprintln!("[网络] 服务器错误: {}", message);
                     }
                     _ => {}
+                }
+                // 队列容量保护：超出上限时移除最老的消息
+                while self.message_queue.len() >= MAX_MESSAGE_QUEUE {
+                    self.message_queue.pop_front();
                 }
                 self.message_queue.push_back(message);
             }
