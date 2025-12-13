@@ -62,6 +62,36 @@ pub mod killstreak {
     pub const FIRE_RATE_BONUS: f64 = 0.15;
     /// Per-kill speed bonus in pixels/second.
     pub const SPEED_BONUS: f32 = 30.0;
+
+    // === 连击倍分系统 ===
+    /// 每次连击增加的得分倍数（0.1 = 10%）
+    pub const SCORE_MULTIPLIER_PER_KILL: f32 = 0.1;
+    /// 最大得分倍数
+    pub const MAX_SCORE_MULTIPLIER: f32 = 3.0;
+    /// 连击等级阈值：[普通, 双杀, 三连, 狂暴, 超神]
+    pub const STREAK_THRESHOLDS: [u32; 5] = [0, 2, 3, 5, 10];
+
+    // === 连击视觉反馈 ===
+    /// 触发飞船发光的连击阈值
+    pub const GLOW_THRESHOLD: u32 = 3;
+    /// 触发屏幕边缘特效的连击阈值
+    pub const VIGNETTE_THRESHOLD: u32 = 5;
+    /// 飞船发光强度（每层连击增加）
+    pub const GLOW_INTENSITY_PER_LEVEL: f32 = 0.15;
+    /// 屏幕边缘特效最大强度
+    pub const VIGNETTE_MAX_INTENSITY: f32 = 0.4;
+}
+
+/// 难度节奏系统参数
+pub mod difficulty {
+    /// 难度波动周期（每 N 波为一个周期）
+    pub const WAVE_CYCLE: u32 = 3;
+    /// 周期内的难度倍数曲线 [峰值, 谷底, 上升]
+    pub const CYCLE_MULTIPLIERS: [f32; 3] = [1.2, 0.8, 1.0];
+    /// 基础难度每周期增长率
+    pub const BASE_DIFFICULTY_GROWTH: f32 = 0.15;
+    /// 最大难度倍数上限
+    pub const MAX_DIFFICULTY_MULTIPLIER: f32 = 2.5;
 }
 
 /// 相位闪现（Phase Dash）参数
@@ -233,8 +263,8 @@ pub mod quadtree {
 
 /// Homing missile parameters.
 pub mod homing {
-    /// Missile speed in pixels/second (slower than normal bullets).
-    pub const SPEED: f32 = 600.0;
+    /// Missile speed in pixels/second (increased for better tracking).
+    pub const SPEED: f32 = 900.0;
     /// Maximum turn rate in radians/second.
     pub const TURN_RATE: f32 = 4.0;
     /// Missile lifetime in seconds (longer than normal bullets).
@@ -249,8 +279,8 @@ pub mod homing {
 
 /// Chain ion shot parameters (链式离子炮).
 pub mod chain_ion {
-    /// Maximum total hits including the initial impact.
-    pub const MAX_JUMPS: usize = 3;
+    /// Maximum total hits including the initial impact (reduced for balance).
+    pub const MAX_JUMPS: usize = 2;
     /// Maximum search distance per hop (pixels).
     pub const RANGE: f32 = 260.0;
     /// Damage ratios per hop (1st/2nd/3rd hit).

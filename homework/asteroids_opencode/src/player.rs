@@ -130,6 +130,13 @@ pub struct Player {
     pub hyperspace_cooldown_until: f64, // 超空间跳跃冷却结束时间
     pub hyperspace_active: bool,        // 是否正在超空间跳跃中（消失状态）
     pub hyperspace_appear_at: f64,      // 出现时间点
+    // 新道具效果系统
+    pub rapid_fire_until: f64,      // 快速射击结束时间
+    pub piercing_until: f64,        // 穿透弹结束时间
+    pub temp_shield_hits: u32,      // 临时护盾剩余次数
+    pub ghost_mode_until: f64,      // 幽灵模式结束时间
+    pub overdrive_until: f64,       // 超速模式结束时间
+    pub teleport_charge_until: f64, // 传送充能结束时间
 }
 
 impl Player {
@@ -177,6 +184,13 @@ impl Player {
             hyperspace_cooldown_until: now,
             hyperspace_active: false,
             hyperspace_appear_at: now,
+            // 新道具效果
+            rapid_fire_until: now,
+            piercing_until: now,
+            temp_shield_hits: 0,
+            ghost_mode_until: now,
+            overdrive_until: now,
+            teleport_charge_until: now,
         }
     }
 
@@ -212,6 +226,13 @@ impl Player {
         self.hyperspace_cooldown_until = now;
         self.hyperspace_active = false;
         self.hyperspace_appear_at = now;
+        // 重置新道具效果
+        self.rapid_fire_until = now;
+        self.piercing_until = now;
+        self.temp_shield_hits = 0;
+        self.ghost_mode_until = now;
+        self.overdrive_until = now;
+        self.teleport_charge_until = now;
     }
 
     /// 增加分数，并在达到阈值时奖励额外生命
@@ -254,7 +275,7 @@ impl Player {
     }
 
     pub fn can_shoot(&self, now: f64) -> bool {
-        now - self.last_shot > self.shoot_cooldown()
+        now - self.last_shot > self.shoot_cooldown(now)
     }
 
     pub fn record_shot(&mut self, position: Vec2, direction: Vec2, now: f64) -> u32 {
@@ -265,31 +286,45 @@ impl Player {
             self.weapon_powerup = WeaponPowerUp::None;
         }
 
+        // 应用子弹速度修改器
+        let modified_direction = direction * self.modifiers.bullet_speed_mult;
+
         // 如果有武器道具，使用道具射击
         if self.weapon_powerup != WeaponPowerUp::None {
-            return self.record_powerup_shot(position, direction, now);
+            return self.record_powerup_shot(position, modified_direction, now);
         }
 
         // 否则使用普通武器
+        // 穿透弹道具：将普通子弹改为穿透类型
+        let use_piercing = self.piercing_active(now);
         match self.weapon_type {
             WeaponType::Normal => {
-                self.bullets.push(Bullet::new(position, direction, now));
+                if use_piercing {
+                    self.bullets.push(Bullet::with_weapon_type(
+                        position,
+                        modified_direction,
+                        now,
+                        WeaponType::Penetrating,
+                    ));
+                } else {
+                    self.bullets.push(Bullet::new(position, modified_direction, now));
+                }
                 1
             }
             WeaponType::Spread => {
-                // 散弹：3 发，扇形 30 度
+                // 散弹：3 发，扇形 45 度
                 use std::f32::consts::PI;
-                let spread_angle = PI / 6.0; // 30 度
+                let spread_angle = PI / 4.0; // 45 度（增强）
 
                 for i in -1..=1 {
                     let angle = (i as f32) * spread_angle;
                     let cos_a = angle.cos();
                     let sin_a = angle.sin();
 
-                    // 旋转向量
+                    // 旋转向量（使用修改后的速度）
                     let spread_dir = Vec2::new(
-                        direction.x * cos_a - direction.y * sin_a,
-                        direction.x * sin_a + direction.y * cos_a,
+                        modified_direction.x * cos_a - modified_direction.y * sin_a,
+                        modified_direction.x * sin_a + modified_direction.y * cos_a,
                     );
 
                     self.bullets.push(Bullet::with_weapon_type(
@@ -304,15 +339,15 @@ impl Player {
             WeaponType::Penetrating => {
                 self.bullets.push(Bullet::with_weapon_type(
                     position,
-                    direction,
+                    modified_direction,
                     now,
                     WeaponType::Penetrating,
                 ));
                 1
             }
             WeaponType::Homing => {
-                // 追踪导弹：速度较慢，但会追踪目标
-                let missile_vel = direction.normalize() * homing::SPEED;
+                // 追踪导弹：速度较慢，但会追踪目标（也受子弹速度加成影响）
+                let missile_vel = direction.normalize() * homing::SPEED * self.modifiers.bullet_speed_mult;
                 self.bullets.push(Bullet::with_weapon_type(
                     position,
                     missile_vel,
@@ -325,7 +360,7 @@ impl Player {
                 // 链式离子炮：命中后链式传导攻击附近目标
                 self.bullets.push(Bullet::with_weapon_type(
                     position,
-                    direction,
+                    modified_direction,
                     now,
                     WeaponType::ChainIon,
                 ));
@@ -371,9 +406,25 @@ impl Player {
             return;
         }
 
+        // 检查护盾道具（原有护盾）
         if self.consume_shield(time) {
             return;
         }
+
+        // 检查临时护盾（新道具：可抵挡3次伤害）
+        if self.consume_temp_shield() {
+            return;
+        }
+
+        // 检查幽灵模式（50%闪避几率）
+        if self.ghost_mode_active(time) {
+            if rand::gen_range(0.0f32, 1.0) < 0.5 {
+                return; // 闪避成功
+            }
+        }
+
+        // 标记本条命受伤
+        self.took_damage_this_life = true;
 
         // 扣除一条生命
         if self.lives > 0 {
@@ -386,8 +437,9 @@ impl Player {
             self.survival_end = Some(time);
             // 注意：took_damage_this_life 保持当前值（用于记录这条命是否受伤）
         } else {
-            // 复活：开始新的一条命
-            self.invulnerable_until = time + HIT_INVULNERABLE_DURATION;
+            // 复活：开始新的一条命（应用无敌时间修改器）
+            let invuln_duration = self.modifiers.modified_invuln_duration(HIT_INVULNERABLE_DURATION);
+            self.invulnerable_until = time + invuln_duration;
             // 重置受伤标记，因为这是新的一条命
             self.took_damage_this_life = false;
         }
@@ -422,9 +474,17 @@ impl Player {
 
     /// 开始冲刺
     pub fn start_dash(&mut self, time: f64, direction: Vec2) {
-        self.dash_cooldown_until = time + DASH_COOLDOWN;
+        // 应用技能冷却修改器，再应用传送充能道具（-50%）和连击加成
+        let mut cooldown = self.modifiers.modified_cooldown(DASH_COOLDOWN);
+        if self.teleport_charge_active(time) {
+            cooldown *= 0.5;
+        }
+        cooldown *= self.killstreak_cooldown_multiplier(); // 连击冷却加成
+        self.dash_cooldown_until = time + cooldown;
         self.dash_active_until = time + DASH_DURATION;
-        self.dash_invuln_until = time + DASH_INVULN_DURATION;
+        // 应用连击无敌时间加成
+        let invuln_duration = DASH_INVULN_DURATION * self.killstreak_invuln_multiplier();
+        self.dash_invuln_until = time + invuln_duration;
         self.dash_direction = direction.normalize_or_zero();
         self.dash_trail.clear();
     }
@@ -434,7 +494,6 @@ impl Player {
     // -------------------------------------------------------------------------
 
     /// 检查是否可以进行相位闪现（Shift 触发，与速度冲刺独立）
-    #[allow(dead_code)] // 相位闪现功能正在集成中
     pub fn can_phase_dash(&self, time: f64) -> bool {
         self.alive && time >= self.phase_cooldown_until
     }
@@ -442,13 +501,20 @@ impl Player {
     /// 执行相位闪现：瞬移固定距离，期间无敌并留下延迟爆裂尾迹
     ///
     /// 返回值：(起点, 终点)，便于上层生成粒子/音效
-    #[allow(dead_code)] // 相位闪现功能正在集成中
     pub fn start_phase_dash(&mut self, time: f64) -> (Vec2, Vec2) {
         let start_pos = self.ship.pos;
         let target = self.ship.phase_destination(phase_dash::DISTANCE);
 
-        self.phase_cooldown_until = time + phase_dash::COOLDOWN;
-        self.phase_invuln_until = time + phase_dash::INVULNERABLE_WINDOW;
+        // 应用技能冷却修改器，再应用传送充能道具（-50%）和连击加成
+        let mut cooldown = self.modifiers.modified_cooldown(phase_dash::COOLDOWN);
+        if self.teleport_charge_active(time) {
+            cooldown *= 0.5;
+        }
+        cooldown *= self.killstreak_cooldown_multiplier(); // 连击冷却加成
+        self.phase_cooldown_until = time + cooldown;
+        // 应用连击无敌时间加成
+        let invuln_duration = phase_dash::INVULNERABLE_WINDOW * self.killstreak_invuln_multiplier();
+        self.phase_invuln_until = time + invuln_duration;
         self.phase_visual_until = time + phase_dash::TRAIL_LIFETIME;
 
         self.phase_trail
@@ -461,7 +527,6 @@ impl Player {
     }
 
     /// 更新相位尾迹的可见与爆炸状态
-    #[allow(dead_code)] // 相位闪现功能正在集成中
     pub fn update_phase_trail(&mut self, time: f64) {
         self.phase_trail.cull_expired(time);
     }
@@ -489,7 +554,6 @@ impl Player {
     }
 
     /// 转换相位尾迹为可直接复用现有 dash 残影绘制的三元组
-    #[allow(dead_code)] // 相位闪现功能正在集成中
     pub fn phase_trail_tuples(&self, time: f64) -> Vec<(Vec2, f32, f64)> {
         self.phase_trail
             .active_segments(time)
@@ -526,7 +590,9 @@ impl Player {
 
     pub fn grant_shield(&mut self, time: f64) {
         self.shield_ready = true;
-        self.shield_until = time + SHIELD_DURATION;
+        // 应用护盾持续时间修改器
+        let duration = self.modifiers.modified_shield_duration(SHIELD_DURATION);
+        self.shield_until = time + duration;
     }
 
     pub fn grant_dual_shot(&mut self, time: f64) {
@@ -537,6 +603,76 @@ impl Player {
     pub fn grant_triple_shot(&mut self, time: f64) {
         self.weapon_powerup = WeaponPowerUp::TripleShot;
         self.weapon_powerup_until = time + WEAPON_POWERUP_DURATION;
+    }
+
+    // -------------------------------------------------------------------------
+    // 新道具效果
+    // -------------------------------------------------------------------------
+
+    /// 快速射击：射速+50%，持续6秒
+    pub fn grant_rapid_fire(&mut self, time: f64) {
+        self.rapid_fire_until = time + 6.0;
+    }
+
+    /// 穿透弹：子弹获得3次穿透能力，持续8秒
+    pub fn grant_piercing_rounds(&mut self, time: f64) {
+        self.piercing_until = time + 8.0;
+    }
+
+    /// 临时护盾：可抵挡3次伤害
+    pub fn grant_temp_shield(&mut self) {
+        self.temp_shield_hits = 3;
+    }
+
+    /// 幽灵模式：50%闪避几率，持续5秒
+    pub fn grant_ghost_mode(&mut self, time: f64) {
+        self.ghost_mode_until = time + 5.0;
+    }
+
+    /// 超速模式：速度+80%，转向+60%，持续7秒
+    pub fn grant_overdrive(&mut self, time: f64) {
+        self.overdrive_until = time + 7.0;
+    }
+
+    /// 传送充能：技能冷却-50%，持续10秒
+    pub fn grant_teleport_charge(&mut self, time: f64) {
+        self.teleport_charge_until = time + 10.0;
+    }
+
+    /// 检查快速射击是否激活
+    pub fn rapid_fire_active(&self, time: f64) -> bool {
+        time < self.rapid_fire_until
+    }
+
+    /// 检查穿透弹是否激活
+    pub fn piercing_active(&self, time: f64) -> bool {
+        time < self.piercing_until
+    }
+
+    /// 检查幽灵模式是否激活
+    pub fn ghost_mode_active(&self, time: f64) -> bool {
+        time < self.ghost_mode_until
+    }
+
+    /// 检查超速模式是否激活
+    pub fn overdrive_active(&self, time: f64) -> bool {
+        time < self.overdrive_until
+    }
+
+    /// 检查传送充能是否激活
+    pub fn teleport_charge_active(&self, time: f64) -> bool {
+        time < self.teleport_charge_until
+    }
+
+    /// 消耗临时护盾（被击中时调用）
+    /// 返回 true 表示护盾吸收了伤害
+    pub fn consume_temp_shield(&mut self) -> bool {
+        if self.temp_shield_hits > 0 {
+            self.temp_shield_hits -= 1;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn shield_active(&self, time: f64) -> bool {
@@ -595,8 +731,13 @@ impl Player {
         }
     }
 
-    /// 获取当前射击冷却时间（考虑卡牌加成、连击加成和武器类型）
-    pub fn shoot_cooldown(&self) -> f64 {
+    /// 获取上次击杀时间（用于UI显示连击剩余时间）
+    pub fn get_last_kill_time(&self) -> f64 {
+        self.last_kill_time
+    }
+
+    /// 获取当前射击冷却时间（考虑卡牌加成、连击加成、武器类型和道具效果）
+    pub fn shoot_cooldown(&self, time: f64) -> f64 {
         let base_cooldown = match self.weapon_type {
             WeaponType::Homing => homing::COOLDOWN,
             WeaponType::ChainIon => chain_ion::COOLDOWN,
@@ -606,15 +747,38 @@ impl Player {
         let modified_cooldown = self.modifiers.modified_shoot_cooldown(base_cooldown);
         // 再应用连击加成
         let bonus_multiplier = 1.0 - (self.killstreak.min(3) as f64 * KILLSTREAK_FIRE_RATE_BONUS);
-        modified_cooldown * bonus_multiplier
+        let killstreak_cooldown = modified_cooldown * bonus_multiplier;
+        // 最后应用快速射击道具（射速+50% = 冷却-33%）
+        if self.rapid_fire_active(time) {
+            killstreak_cooldown * 0.5
+        } else {
+            killstreak_cooldown
+        }
     }
 
-    /// 获取当前最大速度（考虑卡牌加成和连击加成）
-    pub fn max_speed(&self) -> f32 {
+    /// 获取当前最大速度（考虑卡牌加成、连击加成和道具加成）
+    pub fn max_speed(&self, time: f64) -> f32 {
         // 先应用卡牌加成到基础速度
         let base_speed = self.modifiers.modified_max_speed(crate::ship::SHIP_MAX_SPEED);
         // 再叠加连击加成
-        base_speed + (self.killstreak.min(3) as f32 * KILLSTREAK_SPEED_BONUS)
+        let killstreak_speed = base_speed + (self.killstreak.min(3) as f32 * KILLSTREAK_SPEED_BONUS);
+        // 最后应用超速模式（速度+80%）
+        if self.overdrive_active(time) {
+            killstreak_speed * 1.8
+        } else {
+            killstreak_speed
+        }
+    }
+
+    /// 获取当前转向速率（考虑超速模式加成）
+    pub fn turn_rate(&self, time: f64) -> f32 {
+        let base_turn = crate::ship::SHIP_ROTATION_STEP;
+        // 超速模式：转向+60%
+        if self.overdrive_active(time) {
+            base_turn * 1.6
+        } else {
+            base_turn
+        }
     }
 
     /// 获取连击等级描述
@@ -625,6 +789,64 @@ impl Player {
             4..=5 => Some("Triple Kill!"),
             6..=9 => Some("Mega Kill!"),
             _ => Some("UNSTOPPABLE!"),
+        }
+    }
+
+    /// 获取当前连击的分数倍数
+    ///
+    /// 倍数公式：1.0 + min(连击数 * 0.1, 最大倍数 - 1.0)
+    /// 例如：3连击 = 1.3x，10连击 = 2.0x（假设最大3.0x）
+    pub fn score_multiplier(&self) -> f32 {
+        let bonus = self.killstreak as f32 * killstreak::SCORE_MULTIPLIER_PER_KILL;
+        (1.0 + bonus).min(killstreak::MAX_SCORE_MULTIPLIER)
+    }
+
+    /// 获取连击视觉等级（用于渲染效果强度）
+    ///
+    /// 返回 0-4 的等级：0=无，1=微光，2=发光，3=强光，4=极光
+    pub fn killstreak_visual_level(&self) -> u32 {
+        if self.killstreak >= killstreak::STREAK_THRESHOLDS[4] {
+            4
+        } else if self.killstreak >= killstreak::STREAK_THRESHOLDS[3] {
+            3
+        } else if self.killstreak >= killstreak::STREAK_THRESHOLDS[2] {
+            2
+        } else if self.killstreak >= killstreak::STREAK_THRESHOLDS[1] {
+            1
+        } else {
+            0
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 连击技能联动系统
+    // -------------------------------------------------------------------------
+
+    /// 获取连击对技能冷却的加成倍数
+    ///
+    /// - 3连击: 冷却时间 -20%（返回 0.8）
+    /// - 10连击: 冷却时间 -50%（翻倍效果，返回 0.5）
+    fn killstreak_cooldown_multiplier(&self) -> f64 {
+        if self.killstreak >= 10 {
+            0.5 // 10连击：技能效果翻倍，冷却减半
+        } else if self.killstreak >= 3 {
+            0.8 // 3连击：冷却-20%
+        } else {
+            1.0
+        }
+    }
+
+    /// 获取连击对技能无敌时间的加成倍数
+    ///
+    /// - 5连击: 无敌时间 +50%（返回 1.5）
+    /// - 10连击: 无敌时间 +100%（翻倍效果，返回 2.0）
+    fn killstreak_invuln_multiplier(&self) -> f64 {
+        if self.killstreak >= 10 {
+            2.0 // 10连击：技能效果翻倍
+        } else if self.killstreak >= 5 {
+            1.5 // 5连击：无敌+50%
+        } else {
+            1.0
         }
     }
 
@@ -640,7 +862,13 @@ impl Player {
     /// 开始超空间跳跃（进入消失状态）
     pub fn start_hyperspace(&mut self, time: f64) {
         self.hyperspace_active = true;
-        self.hyperspace_cooldown_until = time + HYPERSPACE_COOLDOWN;
+        // 应用技能冷却修改器，再应用传送充能道具（-50%）和连击加成
+        let mut cooldown = self.modifiers.modified_cooldown(HYPERSPACE_COOLDOWN);
+        if self.teleport_charge_active(time) {
+            cooldown *= 0.5;
+        }
+        cooldown *= self.killstreak_cooldown_multiplier(); // 连击冷却加成
+        self.hyperspace_cooldown_until = time + cooldown;
         self.hyperspace_appear_at = time + HYPERSPACE_VANISH_DURATION;
         // 消失期间无敌
         self.invulnerable_until = self.invulnerable_until.max(self.hyperspace_appear_at);
@@ -656,8 +884,9 @@ impl Player {
         self.ship.pos = new_pos;
         self.ship.vel = Vec2::ZERO; // 传送后速度归零
         self.hyperspace_active = false;
-        // 出现后给予短暂无敌
-        self.invulnerable_until = time + HYPERSPACE_APPEAR_INVULN;
+        // 出现后给予短暂无敌（应用连击加成）
+        let invuln_duration = HYPERSPACE_APPEAR_INVULN * self.killstreak_invuln_multiplier();
+        self.invulnerable_until = time + invuln_duration;
     }
 
     /// 超空间跳跃失败（传送到危险位置导致死亡）
@@ -736,14 +965,14 @@ mod tests {
         assert!(!player.can_shoot(0.2));
 
         // 冷却结束后可以射击
-        let ready_at = 0.2 + player.shoot_cooldown() + 0.01;
+        let ready_at = 0.2 + player.shoot_cooldown(0.2) + 0.01;
         assert!(player.can_shoot(ready_at));
 
         // 连击加成减少射击冷却
         player.record_kill(1.0);
         player.record_kill(1.1);
         player.record_kill(1.2);
-        assert!(player.shoot_cooldown() < SHOOT_COOLDOWN);
+        assert!(player.shoot_cooldown(1.2) < SHOOT_COOLDOWN);
     }
 
     #[test]
@@ -931,10 +1160,10 @@ mod tests {
     #[test]
     fn max_speed_increases_with_killstreak() {
         let mut player = make_player(0.0, 3);
-        let base_speed = player.max_speed();
+        let base_speed = player.max_speed(0.0);
 
         player.killstreak = 3;
-        let boosted_speed = player.max_speed();
+        let boosted_speed = player.max_speed(0.0);
 
         assert!(boosted_speed > base_speed);
     }

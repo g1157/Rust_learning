@@ -2029,3 +2029,304 @@ pub fn draw_online_waiting(
         font,
     );
 }
+
+// ============================================================================
+// 玩家状态效果图标栏
+// ============================================================================
+
+/// 激活的buff/道具效果信息
+#[allow(dead_code)] // name 字段保留用于未来的 tooltip 功能
+pub struct ActiveBuff {
+    pub name: &'static str,
+    pub icon_char: String,
+    pub color: Color,
+    pub remaining: f64,
+    pub max_duration: f64,
+}
+
+/// 绘制玩家状态效果图标栏（显示当前激活的道具/buff）
+pub fn draw_player_buffs(players: &[Player], time: f64, font: Option<&Font>) {
+    for (idx, player) in players.iter().enumerate() {
+        if !player.alive {
+            continue;
+        }
+
+        let buffs = collect_active_buffs(player, time);
+        if buffs.is_empty() {
+            continue;
+        }
+
+        // 根据玩家索引决定显示位置
+        let base_x = if idx == 0 {
+            20.0
+        } else {
+            screen_width() - 20.0 - (buffs.len() as f32 * 50.0)
+        };
+        let base_y = 80.0 + idx as f32 * 40.0;
+
+        // 绘制每个buff图标
+        for (i, buff) in buffs.iter().enumerate() {
+            let x = base_x + i as f32 * 50.0;
+            draw_buff_icon(x, base_y, buff, font);
+        }
+    }
+}
+
+/// 收集玩家当前激活的所有buff
+fn collect_active_buffs(player: &Player, time: f64) -> Vec<ActiveBuff> {
+    let mut buffs = Vec::new();
+
+    // 护盾
+    if player.shield_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Shield",
+            icon_char: "S".to_string(),
+            color: Color::new(0.2, 0.6, 1.0, 1.0),
+            remaining: player.shield_remaining(time),
+            max_duration: crate::player::SHIELD_DURATION,
+        });
+    }
+
+    // 临时护盾（次数型）
+    if player.temp_shield_hits > 0 {
+        buffs.push(ActiveBuff {
+            name: "Temp Shield",
+            icon_char: format!("{}", player.temp_shield_hits),
+            color: Color::new(0.3, 0.8, 1.0, 1.0),
+            remaining: player.temp_shield_hits as f64,
+            max_duration: 3.0, // 最大3次
+        });
+    }
+
+    // 快速射击
+    if player.rapid_fire_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Rapid Fire",
+            icon_char: "R".to_string(),
+            color: Color::new(1.0, 0.9, 0.2, 1.0),
+            remaining: player.rapid_fire_until - time,
+            max_duration: 6.0,
+        });
+    }
+
+    // 穿透弹
+    if player.piercing_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Piercing",
+            icon_char: "P".to_string(),
+            color: Color::new(0.8, 0.3, 1.0, 1.0),
+            remaining: player.piercing_until - time,
+            max_duration: 8.0,
+        });
+    }
+
+    // 幽灵模式
+    if player.ghost_mode_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Ghost",
+            icon_char: "G".to_string(),
+            color: Color::new(0.7, 0.7, 0.9, 0.8),
+            remaining: player.ghost_mode_until - time,
+            max_duration: 5.0,
+        });
+    }
+
+    // 超速模式
+    if player.overdrive_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Overdrive",
+            icon_char: "O".to_string(),
+            color: Color::new(1.0, 0.3, 0.3, 1.0),
+            remaining: player.overdrive_until - time,
+            max_duration: 7.0,
+        });
+    }
+
+    // 传送充能
+    if player.teleport_charge_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Teleport",
+            icon_char: "T".to_string(),
+            color: Color::new(0.6, 0.2, 0.9, 1.0),
+            remaining: player.teleport_charge_until - time,
+            max_duration: 10.0,
+        });
+    }
+
+    buffs
+}
+
+/// 绘制单个buff图标
+fn draw_buff_icon(x: f32, y: f32, buff: &ActiveBuff, font: Option<&Font>) {
+    let size = 40.0;
+    let progress = (buff.remaining / buff.max_duration).clamp(0.0, 1.0) as f32;
+
+    // 背景圆
+    draw_circle(x + size / 2.0, y + size / 2.0, size / 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
+
+    // 进度环（顺时针从顶部开始）
+    let segments = 32;
+    let filled_segments = (progress * segments as f32) as i32;
+    for i in 0..filled_segments {
+        let angle1 = -std::f32::consts::FRAC_PI_2 + (i as f32 / segments as f32) * std::f32::consts::TAU;
+        let angle2 = -std::f32::consts::FRAC_PI_2 + ((i + 1) as f32 / segments as f32) * std::f32::consts::TAU;
+        let cx = x + size / 2.0;
+        let cy = y + size / 2.0;
+        let r = size / 2.0 - 2.0;
+
+        draw_triangle(
+            Vec2::new(cx, cy),
+            Vec2::new(cx + angle1.cos() * r, cy + angle1.sin() * r),
+            Vec2::new(cx + angle2.cos() * r, cy + angle2.sin() * r),
+            Color::new(buff.color.r, buff.color.g, buff.color.b, 0.4),
+        );
+    }
+
+    // 边框
+    draw_circle_lines(
+        x + size / 2.0,
+        y + size / 2.0,
+        size / 2.0,
+        2.0,
+        buff.color,
+    );
+
+    // 图标字符
+    let text_width = measure_text(&buff.icon_char, font, 20, 1.0).width;
+    draw_text_ex(
+        &buff.icon_char,
+        x + size / 2.0 - text_width / 2.0,
+        y + size / 2.0 + 6.0,
+        TextParams {
+            font,
+            font_size: 20,
+            color: buff.color,
+            ..Default::default()
+        },
+    );
+
+    // 剩余时间（小字）
+    if buff.remaining > 0.0 && buff.remaining < 100.0 {
+        let time_text = format!("{:.1}", buff.remaining);
+        let time_width = measure_text(&time_text, font, 12, 1.0).width;
+        draw_text_ex(
+            &time_text,
+            x + size / 2.0 - time_width / 2.0,
+            y + size + 12.0,
+            TextParams {
+                font,
+                font_size: 12,
+                color: Color::new(0.8, 0.8, 0.8, 0.9),
+                ..Default::default()
+            },
+        );
+    }
+}
+
+// ============================================================================
+// 连击系统增强UI
+// ============================================================================
+
+/// 绘制连击计数器和分数倍率（所有模式通用）
+pub fn draw_killstreak_counter(players: &[Player], time: f64, font: Option<&Font>) {
+    for (idx, player) in players.iter().enumerate() {
+        if !player.alive || player.killstreak == 0 {
+            continue;
+        }
+
+        // 检查连击是否即将过期（闪烁警告）
+        let time_since_kill = time - player.get_last_kill_time();
+        let is_expiring = time_since_kill > crate::constants::killstreak::RESET_TIME * 0.7;
+
+        // 根据玩家索引决定显示位置
+        let x = if idx == 0 {
+            screen_width() * 0.15
+        } else {
+            screen_width() * 0.85
+        };
+        let y = screen_height() - 120.0;
+
+        // 连击数
+        let streak_text = format!("{}x", player.killstreak);
+        let multiplier_text = format!("{:.1}x Score", player.score_multiplier());
+
+        // 闪烁效果（即将过期时）
+        let alpha = if is_expiring {
+            0.5 + 0.5 * ((time * 8.0).sin().abs() as f32)
+        } else {
+            1.0
+        };
+
+        // 连击颜色（根据等级变化）
+        let streak_color = match player.killstreak_visual_level() {
+            0 => Color::new(0.8, 0.8, 0.8, alpha),
+            1 => Color::new(1.0, 1.0, 0.5, alpha),
+            2 => Color::new(1.0, 0.8, 0.2, alpha),
+            3 => Color::new(1.0, 0.5, 0.1, alpha),
+            _ => Color::new(1.0, 0.2, 0.2, alpha),
+        };
+
+        // 背景框
+        let bg_width = 100.0;
+        let bg_height = 60.0;
+        draw_rectangle(
+            x - bg_width / 2.0,
+            y - bg_height / 2.0,
+            bg_width,
+            bg_height,
+            Color::new(0.0, 0.0, 0.0, 0.5 * alpha),
+        );
+        draw_rectangle_lines(
+            x - bg_width / 2.0,
+            y - bg_height / 2.0,
+            bg_width,
+            bg_height,
+            2.0,
+            Color::new(streak_color.r, streak_color.g, streak_color.b, 0.7 * alpha),
+        );
+
+        // 连击数（大字）
+        let streak_width = measure_text(&streak_text, font, 32, 1.0).width;
+        draw_text_ex(
+            &streak_text,
+            x - streak_width / 2.0,
+            y - 5.0,
+            TextParams {
+                font,
+                font_size: 32,
+                color: streak_color,
+                ..Default::default()
+            },
+        );
+
+        // 分数倍率（小字）
+        let mult_width = measure_text(&multiplier_text, font, 16, 1.0).width;
+        draw_text_ex(
+            &multiplier_text,
+            x - mult_width / 2.0,
+            y + 18.0,
+            TextParams {
+                font,
+                font_size: 16,
+                color: Color::new(0.9, 0.9, 0.5, alpha),
+                ..Default::default()
+            },
+        );
+
+        // 过期进度条
+        let progress = 1.0 - (time_since_kill / crate::constants::killstreak::RESET_TIME) as f32;
+        let bar_width = bg_width - 10.0;
+        let bar_height = 4.0;
+        let bar_x = x - bar_width / 2.0;
+        let bar_y = y + bg_height / 2.0 - 8.0;
+
+        draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::new(0.3, 0.3, 0.3, 0.5));
+        draw_rectangle(
+            bar_x,
+            bar_y,
+            bar_width * progress.max(0.0),
+            bar_height,
+            streak_color,
+        );
+    }
+}

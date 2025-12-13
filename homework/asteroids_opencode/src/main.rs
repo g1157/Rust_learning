@@ -51,6 +51,7 @@ mod wasm_input;
 
 use achievement::{AchievementId, AchievementManager};
 use asteroid::{Asteroid, spawn_wave_with_speed};
+use battle_draft::{Card, DraftState, draw_draft_ui};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
 use clap::Parser;
 use duel::{DuelState, DUEL_BULLET_RADIUS};
@@ -464,7 +465,7 @@ impl GameMode {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 #[allow(dead_code)]
 enum GameState {
     ModeSelection { selection: GameMode },
@@ -473,6 +474,7 @@ enum GameState {
     OnlineLobby { nickname_input: bool },        // 在线大厅
     OnlineWaiting { room_id: u32 },              // 等待房间（保留供在线模式使用）
     WaitingStart,
+    DraftSelection { draft_state: DraftState },  // 选卡界面（开局或 UFO 击杀后）
     Playing,
     Paused { selection: PauseSelection },
     VictoryPause { started_at: f64 },
@@ -541,6 +543,7 @@ async fn main() {
     let mut vortex_manager = VortexManager::new(timing::VORTEX_SPAWN_INTERVAL); // 漩涡生成间隔
     let mut pending_hits = PendingHitManager::new(); // 客户端乐观命中提示（Phase 4C）
     let mut chain_lightnings = chain_lightning::ChainLightningManager::new(); // 链式闪电效果管理器
+    let mut global_draft_state = DraftState::new(); // 全局选卡状态（追踪 UFO 触发次数）
 
     // 在线多人网络客户端
     let mut network_client = network::NetworkClient::new("ws://127.0.0.1:9001".to_string());
@@ -949,8 +952,64 @@ async fn main() {
                     // 触发 FirstFlight 成就（完成第一次游戏）
                     achievements.unlock(achievement::AchievementId::FirstFlight, frame_t);
 
-                    state = GameState::Playing;
+                    // Survival/TimeAttack 模式触发开局选卡
+                    if matches!(current_mode, GameMode::Survival | GameMode::TimeAttack) {
+                        global_draft_state.reset(); // 重置选卡状态（新游戏）
+                        global_draft_state.start_draft(true); // 开局选卡
+                        state = GameState::DraftSelection { draft_state: global_draft_state.clone() };
+                    } else {
+                        state = GameState::Playing;
+                    }
                 }
+
+                next_frame().await;
+                continue;
+            }
+            GameState::DraftSelection { ref mut draft_state } => {
+                // 更新动画计时器
+                draft_state.update(raw_dt);
+
+                // 输入处理：左右键切换卡牌
+                if input_state.is_key_pressed(KeyCode::Left) || input_state.is_key_pressed(KeyCode::A)
+                {
+                    draft_state.move_selection(-1);
+                }
+                if input_state.is_key_pressed(KeyCode::Right)
+                    || input_state.is_key_pressed(KeyCode::D)
+                {
+                    draft_state.move_selection(1);
+                }
+
+                // Enter/Space 确认选择
+                if input_state.is_key_pressed(KeyCode::Enter)
+                    || input_state.is_key_pressed(KeyCode::Space)
+                {
+                    if let Some(card) = draft_state.finish_draft() {
+                        // 同步到全局状态
+                        global_draft_state.ufo_triggers_used = draft_state.ufo_triggers_used;
+
+                        // 为所有玩家应用卡牌效果
+                        for player in players.iter_mut() {
+                            player.apply_draft_card(card);
+                        }
+
+                        // 如果是 ExtraLife 卡牌，播放音效
+                        if matches!(card, Card::ExtraLife) {
+                            sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                        }
+
+                        // 进入游戏状态
+                        state = GameState::Playing;
+                    }
+                    next_frame().await;
+                    continue;
+                }
+
+                // 绘制背景（星空 + 游戏实体）
+                starfield.draw(frame_t as f32);
+
+                // 绘制选卡界面
+                draw_draft_ui(draft_state, fonts.get_best(settings.font_choice));
 
                 next_frame().await;
                 continue;
@@ -1393,6 +1452,7 @@ async fn main() {
                                         weapon_switch_alt: None,
                                         dash: KeyCode::Space,
                                         hyperspace: KeyCode::H,
+                                        phase_dash: KeyCode::E, // 相位闪现：E
                                     },
                                     now,
                                     3, // 默认生命值
@@ -1448,7 +1508,7 @@ async fn main() {
                 && local_player.alive
             {
                 let parsed_input = network::ParsedInput::from_keys(&keys_pressed);
-                apply_predicted_input(local_player, &parsed_input, dt);
+                apply_predicted_input(local_player, &parsed_input, dt, input_timestamp);
             }
 
             // 接收服务器的游戏状态更新
@@ -1530,7 +1590,7 @@ async fn main() {
                                             } else {
                                                 dt
                                             };
-                                            apply_predicted_input(local_player, &parsed, replay_dt);
+                                            apply_predicted_input(local_player, &parsed, replay_dt, cmd.timestamp);
                                         }
                                     }
                                 }
@@ -1559,6 +1619,7 @@ async fn main() {
                                                 weapon_switch_alt: None,
                                                 dash: KeyCode::Unknown,
                                                 hyperspace: KeyCode::Unknown,
+                                                phase_dash: KeyCode::Unknown,
                                             },
                                             now,
                                             server_player.lives,
@@ -2103,7 +2164,11 @@ async fn main() {
             _is_chain_hit,
         ) in asteroid_hits
         {
-            if players[player_idx].add_score(score_value) {
+            // 应用连击倍数计算最终得分
+            let multiplier = players[player_idx].score_multiplier();
+            let final_score = (score_value as f32 * multiplier) as u32;
+
+            if players[player_idx].add_score(final_score) {
                 // 获得额外生命！播放音效
                 sounds.play(SoundEffect::PowerUp, settings.sound_volume);
             }
@@ -2185,7 +2250,12 @@ async fn main() {
         // 应用 UFO 击杀奖励
         for (player_idx, ufo_idx, score_value, ufo_pos, drop_chance, player_color) in ufo_hits {
             defeated_ufo_indices.push(ufo_idx);
-            if players[player_idx].add_score(score_value) {
+
+            // 应用连击倍数计算最终得分
+            let multiplier = players[player_idx].score_multiplier();
+            let final_score = (score_value as f32 * multiplier) as u32;
+
+            if players[player_idx].add_score(final_score) {
                 // 获得额外生命！播放音效
                 sounds.play(SoundEffect::PowerUp, settings.sound_volume);
             }
@@ -2236,6 +2306,16 @@ async fn main() {
                 let mut drop = PowerUp::new(frame_t, drop_type);
                 drop.pos = ufo_pos;
                 powerups.push(drop);
+            }
+
+            // UFO 击杀触发选卡（仅限 Survival/TimeAttack 模式，且还有剩余选卡次数）
+            if matches!(current_mode, GameMode::Survival | GameMode::TimeAttack)
+                && global_draft_state.can_trigger_ufo_draft()
+            {
+                global_draft_state.start_draft(false); // UFO 选卡（非开局）
+                state = GameState::DraftSelection {
+                    draft_state: global_draft_state.clone(),
+                };
             }
         }
 
@@ -2305,11 +2385,14 @@ async fn main() {
                     &mut next_weapon_spawn,
                     settings.player_count,
                 );
-                let shields_collected =
-                    powerup::handle_pickups(&mut players, &mut powerups, frame_t);
-                if shields_collected > 0 {
-                    achievements.stats.shields_collected += shields_collected;
+                let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                if !pickups.is_empty() {
+                    achievements.stats.shields_collected += pickups.len() as u32;
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                    // 为每个拾取的道具生成粒子效果
+                    for pickup in pickups {
+                        particles.spawn_powerup_pickup(pickup.pos, pickup.color, frame_t as f32);
+                    }
                 }
                 highest_survival_score = highest_survival_score.max(total_survival_score(&players));
 
@@ -2352,11 +2435,14 @@ async fn main() {
                     );
                 }
 
-                let shields_collected =
-                    powerup::handle_pickups(&mut players, &mut powerups, frame_t);
-                if shields_collected > 0 {
-                    achievements.stats.shields_collected += shields_collected;
+                let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                if !pickups.is_empty() {
+                    achievements.stats.shields_collected += pickups.len() as u32;
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                    // 为每个拾取的道具生成粒子效果
+                    for pickup in pickups {
+                        particles.spawn_powerup_pickup(pickup.pos, pickup.color, frame_t as f32);
+                    }
                 }
 
                 highest_survival_score = highest_survival_score.max(total_survival_score(&players));
@@ -2618,7 +2704,7 @@ async fn main() {
 /// 用于：
 /// 1. 本地输入即时应用（减少感知延迟）
 /// 2. 服务器状态协调后重播未确认的输入
-fn apply_predicted_input(player: &mut Player, input: &network::ParsedInput, dt: f32) {
+fn apply_predicted_input(player: &mut Player, input: &network::ParsedInput, dt: f32, now: f64) {
     // 阻尼减速
     let mut acc = -player.ship.vel * SHIP_DAMPING;
 
@@ -2628,18 +2714,19 @@ fn apply_predicted_input(player: &mut Player, input: &network::ParsedInput, dt: 
         acc += player.ship.forward_vector() * SHIP_THRUST;
     }
 
-    // 旋转
+    // 旋转（应用超速模式加成）
+    let turn_rate = player.turn_rate(now);
     if input.right {
-        player.ship.rot += SHIP_ROTATION_STEP * dt;
+        player.ship.rot += turn_rate * dt;
     } else if input.left {
-        player.ship.rot -= SHIP_ROTATION_STEP * dt;
+        player.ship.rot -= turn_rate * dt;
     }
 
     // 更新速度
     player.ship.vel += acc * dt;
 
-    // 限制最大速度
-    let max_speed = player.max_speed();
+    // 限制最大速度（应用超速模式加成）
+    let max_speed = player.max_speed(now);
     if player.ship.vel.length() > max_speed {
         player.ship.vel = player.ship.vel.normalize() * max_speed;
     }
@@ -2728,6 +2815,15 @@ fn update_players(
             sounds.play(SoundEffect::PowerUp, sound_volume * 0.7);
         }
 
+        // 相位闪现输入检测
+        if input.is_key_pressed(player.controls.phase_dash) && player.can_phase_dash(frame_t) {
+            let (start_pos, end_pos) = player.start_phase_dash(frame_t);
+            // 起点和终点特效
+            particles.spawn_explosion(start_pos, 15.0, SKYBLUE, frame_t as f32);
+            particles.spawn_explosion(end_pos, 20.0, SKYBLUE, frame_t as f32);
+            sounds.play(SoundEffect::PowerUp, sound_volume * 0.6);
+        }
+
         // 超空间跳跃完成处理
         if player.hyperspace_active && !player.is_in_hyperspace(frame_t) {
             // 生成随机传送位置
@@ -2757,6 +2853,9 @@ fn update_players(
 
         // 更新冲刺残影
         player.update_dash_trail(frame_t);
+
+        // 更新相位闪现尾迹
+        player.update_phase_trail(frame_t);
 
         // 超空间跳跃中：跳过所有移动，只更新子弹
         if player.is_in_hyperspace(frame_t) {
@@ -2792,7 +2891,9 @@ fn update_players(
         player.is_thrusting = thrusting;
 
         if thrusting {
-            acc += player.ship.forward_vector() * SHIP_THRUST * ship_speed_multiplier;
+            // 应用加速度修改器
+            let modified_thrust = player.modifiers.modified_acceleration(SHIP_THRUST);
+            acc += player.ship.forward_vector() * modified_thrust * ship_speed_multiplier;
             // 添加推进器粒子效果
             let forward = player.ship.forward_vector();
             let thruster_pos = player.ship.pos - forward * SHIP_HEIGHT / 2.;
@@ -2805,10 +2906,15 @@ fn update_players(
             acc += vortex_force;
         }
 
+        // 应用转向速度修改器（卡牌加成 + 超速模式加成）
+        let mut modified_turn_rate = player.modifiers.modified_turn_rate(SHIP_ROTATION_STEP);
+        if player.overdrive_active(frame_t) {
+            modified_turn_rate *= 1.6; // 超速模式：转向+60%
+        }
         if input.is_key_down(player.controls.right) {
-            player.ship.rot += SHIP_ROTATION_STEP * dt * ship_speed_multiplier;
+            player.ship.rot += modified_turn_rate * dt * ship_speed_multiplier;
         } else if input.is_key_down(player.controls.left) {
-            player.ship.rot -= SHIP_ROTATION_STEP * dt * ship_speed_multiplier;
+            player.ship.rot -= modified_turn_rate * dt * ship_speed_multiplier;
         }
 
         // 更新连击状态（检查是否过期）
@@ -2826,8 +2932,8 @@ fn update_players(
         }
 
         player.ship.vel += acc * dt;
-        // 应用连击速度加成
-        let max_speed = player.max_speed();
+        // 应用连击速度加成和超速模式加成
+        let max_speed = player.max_speed(frame_t);
         if player.ship.vel.length() > max_speed {
             player.ship.vel = player.ship.vel.normalize() * max_speed;
         }
@@ -3037,6 +3143,28 @@ fn render_scene(
             render::draw_dash_trail(&player.dash_trail, player.color, frame_t);
         }
 
+        // 绘制相位闪现尾迹（使用天蓝色）
+        let phase_trail = player.phase_trail_tuples(frame_t);
+        if !phase_trail.is_empty() {
+            render::draw_dash_trail(&phase_trail, SKYBLUE, frame_t);
+        }
+
+        // 连击发光效果（在飞船下层）
+        let visual_level = player.killstreak_visual_level();
+        if visual_level > 0 {
+            render::draw_ship_glow(ship_pos, player.color, visual_level, frame_t as f32);
+        }
+
+        // 幽灵模式效果（在飞船下层）
+        if player.ghost_mode_active(frame_t) {
+            render::draw_ghost_mode_effect(ship_pos, player.ship.rot, player.color, frame_t as f32);
+        }
+
+        // 超速模式效果（在飞船下层）
+        if player.overdrive_active(frame_t) {
+            render::draw_overdrive_effect(ship_pos, player.ship.vel, frame_t as f32);
+        }
+
         // 使用增强渲染绘制飞船
         render::draw_ship(
             ship_pos,
@@ -3068,6 +3196,28 @@ fn render_scene(
         }
     }
 
+    // 连击屏幕边缘特效（取所有玩家中最高的连击等级）
+    let max_visual_level = players
+        .iter()
+        .filter(|p| p.alive)
+        .map(|p| p.killstreak_visual_level())
+        .max()
+        .unwrap_or(0);
+    if max_visual_level >= constants::killstreak::VIGNETTE_THRESHOLD {
+        // 计算强度：从阈值开始线性增加
+        let level_above_threshold =
+            (max_visual_level - constants::killstreak::VIGNETTE_THRESHOLD) as f32;
+        let intensity = (level_above_threshold * 0.3 + 0.2)
+            .min(constants::killstreak::VIGNETTE_MAX_INTENSITY);
+        // 使用第一个活着的玩家的颜色
+        let vignette_color = players
+            .iter()
+            .find(|p| p.alive && p.killstreak_visual_level() == max_visual_level)
+            .map(|p| p.color)
+            .unwrap_or(WHITE);
+        render::draw_killstreak_vignette(vignette_color, intensity, frame_t as f32);
+    }
+
     if let Some(state) = duel_state
         && let Some(flag) = &state.flag
     {
@@ -3076,7 +3226,13 @@ fn render_scene(
 
     ui::draw_players_hud(players, HudMode::Active { time: frame_t }, font);
 
-    // 在 Duel 模式下显示连击状态
+    // 绘制玩家状态效果图标栏（显示当前激活的道具/buff）
+    ui::draw_player_buffs(players, frame_t, font);
+
+    // 绘制连击计数器和分数倍率（所有模式通用）
+    ui::draw_killstreak_counter(players, frame_t, font);
+
+    // 在 Duel 模式下显示连击状态（额外的大字提示）
     if duel_state.is_some() {
         ui::draw_killstreak(players, font);
     }
@@ -3126,11 +3282,30 @@ fn spawn_survival_wave(asteroids: &mut Vec<Asteroid>, wave: u32, player_count: P
         PlayerCount::One => ((ASTEROID_WAVE_INCREMENT as f32) * 0.8) as usize,
         PlayerCount::Two => ASTEROID_WAVE_INCREMENT,
     };
-    let asteroid_count = base_count + wave_index * increment;
 
-    // 难度递增：每波速度增加，最多到最大倍数
-    let speed_multiplier = (1.0 + wave_index as f32 * gameplay::WAVE_SPEED_INCREMENT)
-        .min(gameplay::WAVE_SPEED_MAX_MULTIPLIER);
+    // === 波动式难度系统 ===
+    // 计算当前周期和周期内位置
+    let cycle = wave_index as u32 / constants::difficulty::WAVE_CYCLE;
+    let position_in_cycle = wave_index as u32 % constants::difficulty::WAVE_CYCLE;
+
+    // 基础难度随周期增长
+    let base_difficulty = 1.0 + cycle as f32 * constants::difficulty::BASE_DIFFICULTY_GROWTH;
+
+    // 周期内的难度波动：[峰值, 谷底, 上升]
+    let cycle_modifier = constants::difficulty::CYCLE_MULTIPLIERS[position_in_cycle as usize];
+
+    // 最终难度倍数（限制最大值）
+    let difficulty_multiplier =
+        (base_difficulty * cycle_modifier).min(constants::difficulty::MAX_DIFFICULTY_MULTIPLIER);
+
+    // 应用难度倍数到小行星数量
+    let base_asteroid_count = base_count + wave_index * increment;
+    let asteroid_count = ((base_asteroid_count as f32) * difficulty_multiplier) as usize;
+
+    // 速度也受难度影响，但波动更平缓
+    let speed_multiplier = (1.0 + wave_index as f32 * gameplay::WAVE_SPEED_INCREMENT * 0.7)
+        .min(gameplay::WAVE_SPEED_MAX_MULTIPLIER)
+        * (0.9 + cycle_modifier * 0.1); // 速度波动较小
 
     asteroids.extend(spawn_wave_with_speed(
         screen_center,
@@ -3156,6 +3331,7 @@ fn init_players(now: f64, starting_lives: u32, player_count: PlayerCount) -> Vec
             weapon_switch_alt: None,
             dash: KeyCode::Space,   // 冲刺键：空格
             hyperspace: KeyCode::H, // 超空间跳跃：H
+            phase_dash: KeyCode::E, // 相位闪现：E
         },
         now,
         starting_lives,
@@ -3174,8 +3350,9 @@ fn init_players(now: f64, starting_lives: u32, player_count: PlayerCount) -> Vec
                 shoot_alt: Some(KeyCode::Kp1),
                 weapon_switch: KeyCode::Key4,
                 weapon_switch_alt: Some(KeyCode::Kp4),
-                dash: KeyCode::Kp0,           // 冲刺键：小键盘0
-                hyperspace: KeyCode::KpEnter, // 超空间跳跃：小键盘回车
+                dash: KeyCode::Kp0,             // 冲刺键：小键盘0
+                hyperspace: KeyCode::KpEnter,   // 超空间跳跃：小键盘回车
+                phase_dash: KeyCode::KpDecimal, // 相位闪现：小键盘小数点
             },
             now,
             starting_lives,
