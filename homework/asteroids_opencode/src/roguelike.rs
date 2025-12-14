@@ -3,8 +3,13 @@
 //! 实现 Run-based 游戏循环：波次战斗 → 奖励选择 → 商店 → Boss 战
 //! 每次游玩体验不同，通过遗物和卡牌构建独特 build
 
-use macroquad::prelude::*;
 use std::collections::HashSet;
+
+use macroquad::prelude::*;
+
+use crate::asteroid::{Asteroid, AsteroidType};
+use crate::player::Player;
+use crate::utils::wrap_around;
 
 // ============================================================================
 // 区域定义
@@ -182,6 +187,156 @@ impl BossState {
             self.is_enraged = true;
         }
     }
+}
+
+// ============================================================================
+// Zone1 Boss: GiantSplitter（最小可玩实现）
+// ============================================================================
+
+/// GiantSplitter 的碰撞/渲染半径（约为普通大型小行星的 3-4 倍）
+pub const GIANT_SPLITTER_RADIUS: f32 = 140.0;
+
+const GIANT_SPLITTER_SPEED_NORMAL: f32 = 80.0;
+const GIANT_SPLITTER_SPEED_ENRAGED: f32 = 140.0;
+
+const GIANT_SPLITTER_SUMMON_INTERVAL_NORMAL: f32 = 2.5;
+const GIANT_SPLITTER_SUMMON_INTERVAL_ENRAGED: f32 = 1.2;
+
+const GIANT_SPLITTER_SUMMON_COUNT_NORMAL: usize = 2;
+const GIANT_SPLITTER_SUMMON_COUNT_ENRAGED: usize = 3;
+
+const GIANT_SPLITTER_MAX_SUMMONED_ASTEROIDS: usize = 40;
+
+/// 获取 Boss 碰撞半径
+pub fn boss_radius(boss: &BossState) -> f32 {
+    match boss.kind {
+        BossKind::GiantSplitter => GIANT_SPLITTER_RADIUS,
+        _ => 80.0,
+    }
+}
+
+/// Boss 行为更新入口
+pub fn update_boss(boss: &mut BossState, players: &[Player], asteroids: &mut Vec<Asteroid>, dt: f32) {
+    match boss.kind {
+        BossKind::GiantSplitter => update_giant_splitter(boss, players, asteroids, dt),
+        _ => {}
+    }
+}
+
+/// GiantSplitter：缓慢追踪玩家 + 周期性召唤小型小行星
+fn update_giant_splitter(
+    boss: &mut BossState,
+    players: &[Player],
+    asteroids: &mut Vec<Asteroid>,
+    dt: f32,
+) {
+    // 找到最近的存活玩家
+    let Some((_, target_pos)) = players
+        .iter()
+        .filter(|p| p.alive)
+        .map(|p| ((p.ship.pos - boss.position).length_squared(), p.ship.pos))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+    else {
+        return;
+    };
+
+    // 移动速度（狂暴时加速）
+    let speed = if boss.is_enraged {
+        GIANT_SPLITTER_SPEED_ENRAGED
+    } else {
+        GIANT_SPLITTER_SPEED_NORMAL
+    };
+
+    // 追踪玩家
+    let to_target = target_pos - boss.position;
+    let dir = to_target.normalize_or_zero();
+    boss.position += dir * speed * dt;
+    boss.position = wrap_around(&boss.position);
+
+    // 召唤计时器
+    boss.phase_timer += dt;
+    let summon_interval = if boss.is_enraged {
+        GIANT_SPLITTER_SUMMON_INTERVAL_ENRAGED
+    } else {
+        GIANT_SPLITTER_SUMMON_INTERVAL_NORMAL
+    };
+
+    // 周期性召唤小行星
+    if boss.phase_timer >= summon_interval && asteroids.len() < GIANT_SPLITTER_MAX_SUMMONED_ASTEROIDS
+    {
+        boss.phase_timer -= summon_interval;
+
+        let spawn_count = if boss.is_enraged {
+            GIANT_SPLITTER_SUMMON_COUNT_ENRAGED
+        } else {
+            GIANT_SPLITTER_SUMMON_COUNT_NORMAL
+        };
+
+        for _ in 0..spawn_count {
+            if asteroids.len() >= GIANT_SPLITTER_MAX_SUMMONED_ASTEROIDS {
+                break;
+            }
+            asteroids.push(spawn_giant_splitter_minion(boss.position, boss.is_enraged));
+        }
+    }
+}
+
+/// 生成 Boss 召唤的小型小行星
+fn spawn_giant_splitter_minion(boss_pos: Vec2, enraged: bool) -> Asteroid {
+    let dir = Vec2::new(rand::gen_range(-1.0, 1.0), rand::gen_range(-1.0, 1.0)).normalize_or_zero();
+    let size = rand::gen_range(12.0, 18.0);
+    let speed = if enraged { 320.0 } else { 220.0 };
+
+    // 在 Boss 周围生成
+    let spawn_pos = boss_pos + dir * (GIANT_SPLITTER_RADIUS + size + 6.0);
+
+    Asteroid {
+        pos: wrap_around(&spawn_pos),
+        vel: dir * speed,
+        size,
+        sides: rand::gen_range(6, 10),
+        rot: rand::gen_range(0.0, std::f32::consts::TAU),
+        rot_speed: rand::gen_range(-2.0, 2.0),
+        collided: false,
+        vertex_offsets: std::array::from_fn(|_| rand::gen_range(0.7, 1.0)),
+        // 使用 Normal 类型避免分裂导致数量膨胀
+        asteroid_type: AsteroidType::Normal,
+    }
+}
+
+/// GiantSplitter 渲染（规则多边形 + 脉动效果）
+pub fn draw_giant_splitter(boss: &BossState, offset: Vec2, time: f32) {
+    if boss.kind != BossKind::GiantSplitter {
+        return;
+    }
+
+    let center = boss.position + offset;
+    let radius = GIANT_SPLITTER_RADIUS * (0.98 + 0.02 * (time * 2.0).sin());
+    let color = if boss.is_enraged {
+        Color::new(1.0, 0.25, 0.25, 1.0) // 狂暴时红色
+    } else {
+        Color::new(0.3, 0.9, 0.4, 1.0) // 正常绿色
+    };
+
+    // 外层光晕
+    draw_circle(
+        center.x,
+        center.y,
+        radius * 0.45,
+        Color::new(color.r, color.g, color.b, 0.12),
+    );
+    // 外层多边形
+    draw_poly_lines(center.x, center.y, 14, radius, time * 0.25, 5.0, color);
+    // 内层多边形
+    draw_poly_lines(
+        center.x,
+        center.y,
+        10,
+        radius * 0.72,
+        -time * 0.18,
+        2.0,
+        DARKGRAY,
+    );
 }
 
 // ============================================================================

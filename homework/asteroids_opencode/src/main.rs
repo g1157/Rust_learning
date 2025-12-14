@@ -1336,18 +1336,63 @@ async fn main() {
                 continue;
             }
             GameState::RoguelikeBoss { ref mut run_state } => {
-                // Boss 战界面
-                roguelike::draw_run_hud(run_state);
+                // 更新 Run 时间
+                run_state.run_time += dt as f32;
+
+                // 检测玩家全灭
+                let all_dead = players.iter().all(|p| !p.alive);
+                if all_dead {
+                    run_state.defeat();
+                    state = GameState::GameOver {
+                        victory: false,
+                        end_time: frame_t,
+                    };
+                    next_frame().await;
+                    continue;
+                }
 
                 if let roguelike::RunPhase::Boss(ref mut boss) = run_state.phase {
-                    // 检查狂暴状态
+                    // 初始化 Boss 位置（首次进入时）
+                    if boss.position == Vec2::ZERO {
+                        boss.set_position(Vec2::new(screen_width() * 0.5, screen_height() * 0.25));
+                    }
+
+                    // 检查狂暴状态（在 AI 更新前，使本帧立即生效）
                     boss.check_enrage();
-                    roguelike::draw_boss_health_bar(boss);
+
+                    // Boss AI：移动追踪 + 召唤小行星
+                    roguelike::update_boss(boss, &players, &mut asteroids, dt as f32);
+
+                    // 子弹与 Boss 碰撞检测
+                    let boss_pos = boss.position;
+                    let boss_r = roguelike::boss_radius(boss);
+                    let damage_per_hit: f32 = 20.0;
+
+                    for player in players.iter_mut() {
+                        for bullet in player.bullets.iter_mut() {
+                            if bullet.collided {
+                                continue;
+                            }
+                            if (boss_pos - bullet.pos).length() < boss_r + BULLET_RADIUS {
+                                boss.health = (boss.health - damage_per_hit).max(0.0);
+                                bullet.collided = true;
+                                particles.spawn_explosion(
+                                    bullet.pos,
+                                    10.0,
+                                    player.color,
+                                    frame_t as f32,
+                                );
+                                sounds.play(SoundEffect::Hit, settings.sound_volume);
+                            }
+                        }
+                    }
 
                     // Boss 击败检测
                     if boss.health <= 0.0 {
                         // 触发遗物效果
                         run_state.trigger_boss_defeat();
+                        // 清空召唤的小行星
+                        asteroids.clear();
                         // 进入下一区域或胜利
                         run_state.advance_zone();
                         state = GameState::RoguelikeRun {
@@ -1357,10 +1402,10 @@ async fn main() {
                         continue;
                     }
 
-                    // TODO: Boss AI 行为和玩家攻击 Boss 的逻辑
-                    // 临时：按 K 键模拟对 Boss 造成伤害（测试用）
+                    // 调试：按 K 键模拟对 Boss 造成伤害（测试用）
+                    #[cfg(debug_assertions)]
                     if input_state.is_key_pressed(KeyCode::K) {
-                        boss.health -= 100.0;
+                        boss.health = (boss.health - 100.0).max(0.0);
                     }
                 }
 
@@ -2954,6 +2999,28 @@ async fn main() {
                 total_survival_score(&players),
                 fonts.get_best(settings.font_choice),
             );
+        }
+
+        // Roguelike 模式 HUD 和 Boss 渲染（必须在 render_scene 之后）
+        if matches!(current_mode, GameMode::Roguelike) {
+            let shake_offset = screen_shake
+                .filter(|s| s.is_active(frame_t as f32))
+                .map(|s| s.get_offset(frame_t as f32))
+                .unwrap_or(Vec2::ZERO);
+
+            match &state {
+                GameState::RoguelikeRun { run_state } => {
+                    roguelike::draw_run_hud(run_state);
+                }
+                GameState::RoguelikeBoss { run_state } => {
+                    roguelike::draw_run_hud(run_state);
+                    if let roguelike::RunPhase::Boss(boss) = &run_state.phase {
+                        roguelike::draw_giant_splitter(boss, shake_offset, frame_t as f32);
+                        roguelike::draw_boss_health_bar(boss);
+                    }
+                }
+                _ => {}
+            }
         }
 
         // 更新性能监控
