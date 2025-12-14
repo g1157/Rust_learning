@@ -398,6 +398,7 @@ mod tests {
             sides: 6,
             collided,
             vertex_offsets: [1.0; MAX_VERTICES],
+            asteroid_type: crate::asteroid::AsteroidType::Normal,
         }
     }
 

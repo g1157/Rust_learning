@@ -38,6 +38,7 @@ mod player;
 mod powerup;
 mod quadtree;
 mod render;
+mod roguelike;
 mod score;
 mod ship;
 mod sound;
@@ -416,6 +417,7 @@ pub enum GameMode {
     Survival,
     Duel,
     TimeAttack, // 限时挑战模式
+    Roguelike,  // Roguelike 模式：Run-based 随机构建
     Online,
     Achievements,
     Settings,
@@ -433,7 +435,8 @@ impl GameMode {
         let next = match self {
             GameMode::Survival => GameMode::Duel,
             GameMode::Duel => GameMode::TimeAttack,
-            GameMode::TimeAttack => GameMode::Online,
+            GameMode::TimeAttack => GameMode::Roguelike,
+            GameMode::Roguelike => GameMode::Online,
             GameMode::Online => GameMode::Achievements,
             GameMode::Achievements => GameMode::Settings,
             GameMode::Settings => GameMode::Survival,
@@ -452,13 +455,14 @@ impl GameMode {
             GameMode::Survival => GameMode::Settings,
             GameMode::Duel => GameMode::Survival,
             GameMode::TimeAttack => GameMode::Duel,
-            GameMode::Online => GameMode::TimeAttack,
+            GameMode::Roguelike => GameMode::TimeAttack,
+            GameMode::Online => GameMode::Roguelike,
             GameMode::Achievements => GameMode::Online,
             GameMode::Settings => GameMode::Achievements,
         };
         // Skip Online on WASM
         if prev == GameMode::Online && !Self::online_available() {
-            GameMode::TimeAttack
+            GameMode::Roguelike
         } else {
             prev
         }
@@ -476,10 +480,19 @@ enum GameState {
     WaitingStart,
     DraftSelection { draft_state: DraftState },  // 选卡界面（开局或 UFO 击杀后）
     Playing,
-    Paused { selection: PauseSelection },
+    Paused {
+        selection: PauseSelection,
+        /// Roguelike 模式暂停时保存的 Run 状态
+        roguelike_state: Option<roguelike::RunState>,
+    },
     VictoryPause { started_at: f64 },
     RoundEnd { winner_idx: usize }, // Duel 回合结束
     GameOver { victory: bool, end_time: f64 },
+    // Roguelike 模式状态
+    RoguelikeRun { run_state: roguelike::RunState },  // Roguelike 战斗中
+    RoguelikeReward { run_state: roguelike::RunState }, // 奖励选择
+    RoguelikeShop { run_state: roguelike::RunState },   // 商店
+    RoguelikeBoss { run_state: roguelike::RunState },   // Boss 战
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -843,12 +856,45 @@ async fn main() {
                             achievements.stats.modes_played.insert(mode_name);
                             state = GameState::WaitingStart;
                         }
+                        GameMode::Roguelike => {
+                            // Roguelike 模式：直接进入 Run
+                            current_mode = next_selection;
+                            let mode_name = format!("{:?}", next_selection);
+                            achievements.stats.modes_played.insert(mode_name);
+                            // 初始化玩家
+                            players = init_players(
+                                frame_t,
+                                settings.starting_lives,
+                                PlayerCount::One, // Roguelike 模式固定单人
+                            );
+                            // 创建新的 Run 状态
+                            let new_run = roguelike::RunState::new();
+                            // 使用 Run 状态的难度设置初始化小行星
+                            let asteroid_count = new_run.current_asteroid_count();
+                            let difficulty = new_run.current_difficulty();
+                            asteroids = spawn_wave_with_speed(
+                                Vec2::new(screen_width() / 2., screen_height() / 2.),
+                                screen_width().min(screen_height()),
+                                asteroid_count,
+                                difficulty * settings.asteroid_speed_multiplier,
+                            );
+                            survival_wave = 1;
+                            state = GameState::RoguelikeRun {
+                                run_state: new_run,
+                            };
+                        }
                         _ => {
                             // 进入游戏 (Survival/Duel)
                             current_mode = next_selection;
                             // 追踪模式切换统计
                             let mode_name = format!("{:?}", next_selection);
                             achievements.stats.modes_played.insert(mode_name);
+                            // 确保玩家数量正确（可能从 Roguelike 单人模式返回）
+                            players = init_players(
+                                frame_t,
+                                settings.starting_lives,
+                                settings.player_count,
+                            );
                             state = GameState::WaitingStart;
                         }
                     }
@@ -882,6 +928,7 @@ async fn main() {
                         GameMode::Survival => "Survival: press [Enter] to start",
                         GameMode::Duel => "Duel: capture the flag!",
                         GameMode::TimeAttack => "Time Attack: press [Enter] to start the clock!",
+                        GameMode::Roguelike => "Roguelike: press [Enter] to start your run!",
                         GameMode::Settings => unreachable!("Settings is not a playable mode"),
                         GameMode::Achievements => {
                             unreachable!("Achievements is not a playable mode")
@@ -1052,6 +1099,13 @@ async fn main() {
                             score
                         )
                     }
+                    GameMode::Roguelike => {
+                        if victory {
+                            "Run complete! You conquered all zones! Press [Enter] to restart".to_string()
+                        } else {
+                            "Run ended. Press [Enter] to try again".to_string()
+                        }
+                    }
                     GameMode::Settings => unreachable!("Settings is not a playable mode"),
                     GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
                     GameMode::Online => {
@@ -1121,12 +1175,211 @@ async fn main() {
                 if pause_pressed {
                     state = GameState::Paused {
                         selection: PauseSelection::Resume,
+                        roguelike_state: None,
                     };
                     next_frame().await;
                     continue;
                 }
             }
-            GameState::Paused { selection } => {
+            // Roguelike 模式状态处理
+            GameState::RoguelikeRun { ref mut run_state } => {
+                // 更新 Run 时间
+                run_state.run_time += dt as f32;
+
+                // 检测暂停键
+                let pause_pressed = input_state.is_key_pressed(KeyCode::Escape)
+                    || input_state.is_key_pressed(KeyCode::P);
+                if pause_pressed {
+                    state = GameState::Paused {
+                        selection: PauseSelection::Resume,
+                        roguelike_state: Some(run_state.clone()),
+                    };
+                    next_frame().await;
+                    continue;
+                }
+
+                // 处理区域过渡
+                if let roguelike::RunPhase::ZoneTransition { from, to, ref mut timer } = run_state.phase {
+                    *timer -= dt as f32;
+                    roguelike::draw_zone_transition(from, to, *timer);
+                    if *timer <= 0.0 {
+                        run_state.complete_zone_transition(to);
+                        // 生成新区域的小行星
+                        let asteroid_count = run_state.current_asteroid_count();
+                        let difficulty = run_state.current_difficulty();
+                        asteroids = spawn_wave_with_speed(
+                            Vec2::new(screen_width() / 2., screen_height() / 2.),
+                            screen_width().min(screen_height()),
+                            asteroid_count,
+                            difficulty,
+                        );
+                    }
+                    next_frame().await;
+                    continue;
+                }
+
+                // 处理胜利/失败
+                if matches!(run_state.phase, roguelike::RunPhase::Victory) {
+                    state = GameState::GameOver {
+                        victory: true,
+                        end_time: frame_t,
+                    };
+                    next_frame().await;
+                    continue;
+                }
+                if matches!(run_state.phase, roguelike::RunPhase::Defeat) {
+                    state = GameState::GameOver {
+                        victory: false,
+                        end_time: frame_t,
+                    };
+                    next_frame().await;
+                    continue;
+                }
+
+                // 检测玩家死亡
+                let all_dead = players.iter().all(|p| !p.alive);
+                if all_dead {
+                    run_state.defeat();
+                    next_frame().await;
+                    continue;
+                }
+
+                // 检测波次清空
+                if asteroids.is_empty() {
+                    // 触发遗物效果
+                    run_state.trigger_wave_clear();
+                    // 每波奖励 5 金币
+                    run_state.add_gold(5);
+
+                    if let roguelike::RunPhase::Combat(_) = run_state.phase {
+                        // 不提前调用 advance_wave()，保持当前波次信息
+                        // 在 Shop 结束时再决定进入下一波还是 Boss
+                        state = GameState::RoguelikeReward {
+                            run_state: run_state.clone(),
+                        };
+                        next_frame().await;
+                        continue;
+                    }
+                }
+
+                // 绘制 Roguelike HUD（在游戏逻辑之后）
+                roguelike::draw_run_hud(run_state);
+            }
+            GameState::RoguelikeReward { ref mut run_state } => {
+                // 奖励选择界面
+                roguelike::draw_run_hud(run_state);
+                // TODO: 绘制奖励选择 UI
+                draw_text(
+                    "Select your reward (1-3) - Press Enter to continue",
+                    screen_width() / 2.0 - 180.0,
+                    screen_height() / 2.0,
+                    24.0,
+                    WHITE,
+                );
+
+                // 临时：按 Enter 选择奖励并进入商店
+                if input_state.is_key_pressed(KeyCode::Enter) {
+                    state = GameState::RoguelikeShop {
+                        run_state: run_state.clone(),
+                    };
+                }
+                next_frame().await;
+                continue;
+            }
+            GameState::RoguelikeShop { ref mut run_state } => {
+                // 商店界面
+                roguelike::draw_run_hud(run_state);
+                // TODO: 绘制商店 UI
+                draw_text(
+                    "Shop - Press Enter to continue",
+                    screen_width() / 2.0 - 120.0,
+                    screen_height() / 2.0,
+                    24.0,
+                    WHITE,
+                );
+
+                if input_state.is_key_pressed(KeyCode::Enter) {
+                    // 在 Shop 结束时判断是否是最后一波
+                    if let roguelike::RunPhase::Combat(ref combat_state) = run_state.phase {
+                        let max_waves = run_state.zone.wave_count();
+                        let is_last_wave = combat_state.wave_in_zone >= max_waves;
+
+                        if is_last_wave {
+                            // 最后一波完成，进入 Boss 战
+                            run_state.advance_wave(); // 这会把 phase 设为 Boss
+                            state = GameState::RoguelikeBoss {
+                                run_state: run_state.clone(),
+                            };
+                        } else {
+                            // 还有更多波次，进入下一波
+                            run_state.advance_wave();
+                            let asteroid_count = run_state.current_asteroid_count();
+                            let difficulty = run_state.current_difficulty();
+                            asteroids = spawn_wave_with_speed(
+                                Vec2::new(screen_width() / 2., screen_height() / 2.),
+                                screen_width().min(screen_height()),
+                                asteroid_count,
+                                difficulty,
+                            );
+                            state = GameState::RoguelikeRun {
+                                run_state: run_state.clone(),
+                            };
+                        }
+                    } else {
+                        // 其他阶段（不应该发生，但作为回退）
+                        state = GameState::RoguelikeRun {
+                            run_state: run_state.clone(),
+                        };
+                    }
+                }
+                next_frame().await;
+                continue;
+            }
+            GameState::RoguelikeBoss { ref mut run_state } => {
+                // Boss 战界面
+                roguelike::draw_run_hud(run_state);
+
+                if let roguelike::RunPhase::Boss(ref mut boss) = run_state.phase {
+                    // 检查狂暴状态
+                    boss.check_enrage();
+                    roguelike::draw_boss_health_bar(boss);
+
+                    // Boss 击败检测
+                    if boss.health <= 0.0 {
+                        // 触发遗物效果
+                        run_state.trigger_boss_defeat();
+                        // 进入下一区域或胜利
+                        run_state.advance_zone();
+                        state = GameState::RoguelikeRun {
+                            run_state: run_state.clone(),
+                        };
+                        next_frame().await;
+                        continue;
+                    }
+
+                    // TODO: Boss AI 行为和玩家攻击 Boss 的逻辑
+                    // 临时：按 K 键模拟对 Boss 造成伤害（测试用）
+                    if input_state.is_key_pressed(KeyCode::K) {
+                        boss.health -= 100.0;
+                    }
+                }
+
+                // 检测暂停键
+                let pause_pressed = input_state.is_key_pressed(KeyCode::Escape)
+                    || input_state.is_key_pressed(KeyCode::P);
+                if pause_pressed {
+                    state = GameState::Paused {
+                        selection: PauseSelection::Resume,
+                        roguelike_state: Some(run_state.clone()),
+                    };
+                    next_frame().await;
+                    continue;
+                }
+            }
+            GameState::Paused {
+                selection,
+                ref roguelike_state,
+            } => {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
                 render_scene(
                     &players,
@@ -1180,7 +1433,18 @@ async fn main() {
                 {
                     match next_selection {
                         PauseSelection::Resume => {
-                            state = GameState::Playing;
+                            // 恢复到正确的状态
+                            if let Some(run_state) = roguelike_state.clone() {
+                                // 根据 RunPhase 恢复到对应的 GameState
+                                state = match run_state.phase {
+                                    roguelike::RunPhase::Boss(_) => {
+                                        GameState::RoguelikeBoss { run_state }
+                                    }
+                                    _ => GameState::RoguelikeRun { run_state },
+                                };
+                            } else {
+                                state = GameState::Playing;
+                            }
                         }
                         PauseSelection::ModeSelect => {
                             state = GameState::ModeSelection {
@@ -1194,7 +1458,18 @@ async fn main() {
 
                 // 检测 ESC 键退出暂停（在状态内部检测）
                 if input_state.is_key_pressed(KeyCode::Escape) {
-                    state = GameState::Playing;
+                    // 恢复到正确的状态
+                    if let Some(run_state) = roguelike_state.clone() {
+                        // 根据 RunPhase 恢复到对应的 GameState
+                        state = match run_state.phase {
+                            roguelike::RunPhase::Boss(_) => {
+                                GameState::RoguelikeBoss { run_state }
+                            }
+                            _ => GameState::RoguelikeRun { run_state },
+                        };
+                    } else {
+                        state = GameState::Playing;
+                    }
                     next_frame().await;
                     continue;
                 }
@@ -1202,6 +1477,7 @@ async fn main() {
                 if next_selection != selection {
                     state = GameState::Paused {
                         selection: next_selection,
+                        roguelike_state: roguelike_state.clone(),
                     };
                 }
 
@@ -1675,6 +1951,7 @@ async fn main() {
                                     sides,
                                     collided: false,
                                     vertex_offsets,
+                                    asteroid_type: asteroid::AsteroidType::Normal,
                                 };
                                 asteroids.push(asteroid);
                             }
@@ -2549,6 +2826,22 @@ async fn main() {
                         state = GameState::RoundEnd { winner_idx };
                     }
                     continue;
+                }
+            }
+            GameMode::Roguelike => {
+                // Roguelike 模式的游戏逻辑在 RoguelikeRun 状态中处理
+                // 这里处理基础的道具生成和拾取
+                powerup::spawn(
+                    frame_t,
+                    &mut powerups,
+                    &mut next_shield_spawn,
+                    &mut next_weapon_spawn,
+                    settings.player_count,
+                );
+                let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                if !pickups.is_empty() {
+                    achievements.stats.shields_collected += pickups.len() as u32;
+                    sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                 }
             }
             GameMode::Settings => unreachable!("Settings is not a playable mode"),

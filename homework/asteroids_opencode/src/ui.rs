@@ -467,11 +467,11 @@ pub fn draw_mode_selection(
         );
     }
 
-    // 4个卡片纵向排列
+    // 7个卡片纵向排列（含 Roguelike）
     let card_width = screen_width() * 0.65;
-    let card_height = 120.; // 稍微减小卡片高度以容纳更多
-    let spacing = 14.;
-    let total_height = card_height * 6. + spacing * 5.; // 改为6个卡片
+    let card_height = 100.; // 减小卡片高度以容纳7个
+    let spacing = 10.;
+    let total_height = card_height * 7. + spacing * 6.; // 7个卡片
     let start_y = (screen_height() - total_height) / 2. + 20.;
     let card_x = screen_width() / 2. - card_width / 2.;
 
@@ -538,6 +538,21 @@ pub fn draw_mode_selection(
         font,
     });
 
+    // Roguelike 卡片
+    draw_mode_card(ModeCardParams {
+        x: card_x,
+        y: start_y + (card_height + spacing) * 3.,
+        width: card_width,
+        height: card_height,
+        title: "Roguelike",
+        desc: "Run-based adventure with random builds and permanent upgrades!",
+        detail: "3 zones, unique bosses, relics, and card synergies each run.",
+        active: matches!(selection, GameMode::Roguelike),
+        accent: Color::new(0.8, 0.2, 0.6, 1.0), // 品红色
+        footer: "[Enter] Start Run",
+        font,
+    });
+
     // Online 卡片 (disabled on WASM)
     let (online_title, online_desc, online_detail, online_footer, online_accent, online_active) =
         if online_enabled {
@@ -561,7 +576,7 @@ pub fn draw_mode_selection(
         };
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 3.,
+        y: start_y + (card_height + spacing) * 4.,
         width: card_width,
         height: card_height,
         title: online_title,
@@ -578,7 +593,7 @@ pub fn draw_mode_selection(
     let achievements_summary = format!("Unlocked: {} / {} achievements", unlocked, total);
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 4.,
+        y: start_y + (card_height + spacing) * 5.,
         width: card_width,
         height: card_height,
         title: "Achievements",
@@ -597,7 +612,7 @@ pub fn draw_mode_selection(
     );
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 5.,
+        y: start_y + (card_height + spacing) * 6.,
         width: card_width,
         height: card_height,
         title: "Settings",
