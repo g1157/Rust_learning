@@ -2279,7 +2279,14 @@ async fn main() {
             for obj in player_query.iter() {
                 let asteroid = &asteroids[obj.index];
                 if circle_intersects_triangle(asteroid.pos, asteroid.size, t1, t2, t3) {
+                    let lives_before = player.lives;
                     player.mark_dead(frame_t);
+                    // Roguelike：Boss 战受伤标记（用于完美封印等遗物判定）
+                    if player.lives < lives_before {
+                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                            run_state.boss_damage_taken = true;
+                        }
+                    }
                     // 添加碰撞爆炸效果 - 使用飞船位置而不是小行星位置
                     particles.spawn_explosion(ship_center, asteroid.size, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
@@ -2309,7 +2316,14 @@ async fn main() {
 
                 // 简单的圆形-三角形碰撞检测
                 if circle_intersects_triangle(ufo.pos, UFO_RADIUS, t1, t2, t3) {
+                    let lives_before = player.lives;
                     player.mark_dead(frame_t);
+                    // Roguelike：Boss 战受伤标记
+                    if player.lives < lives_before {
+                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                            run_state.boss_damage_taken = true;
+                        }
+                    }
                     particles.spawn_explosion(ship_center, UFO_RADIUS, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {
@@ -2338,7 +2352,14 @@ async fn main() {
                 // 简单的圆形-三角形碰撞检测
                 if circle_intersects_triangle(bullet.pos, ENEMY_BULLET_RADIUS, t1, t2, t3) {
                     bullet.collided = true;
+                    let lives_before = player.lives;
                     player.mark_dead(frame_t);
+                    // Roguelike：Boss 战受伤标记
+                    if player.lives < lives_before {
+                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                            run_state.boss_damage_taken = true;
+                        }
+                    }
                     particles.spawn_explosion(ship_center, 20.0, RED, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {
@@ -2486,6 +2507,13 @@ async fn main() {
             _is_chain_hit,
         ) in asteroid_hits
         {
+            // Roguelike：击杀事件（用于连击/遗物效果）
+            if let GameState::RoguelikeRun { run_state } | GameState::RoguelikeBoss { run_state } =
+                &mut state
+            {
+                run_state.record_kill();
+            }
+
             // 应用连击倍数计算最终得分
             let multiplier = players[player_idx].score_multiplier();
             let final_score = (score_value as f32 * multiplier) as u32;
@@ -2885,6 +2913,14 @@ async fn main() {
                 );
                 let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
                 if !pickups.is_empty() {
+                    // Roguelike：拾取事件（遗物效果）
+                    if let GameState::RoguelikeRun { run_state }
+                    | GameState::RoguelikeBoss { run_state } = &mut state
+                    {
+                        for _ in 0..pickups.len() {
+                            run_state.trigger_pickup();
+                        }
+                    }
                     achievements.stats.shields_collected += pickups.len() as u32;
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                 }
