@@ -44,6 +44,7 @@ mod ship;
 mod sound;
 mod storage;
 mod ufo;
+mod tutorial;
 mod ui;
 mod ui_achievements;
 mod utils;
@@ -557,6 +558,7 @@ async fn main() {
     let mut pending_hits = PendingHitManager::new(); // 客户端乐观命中提示（Phase 4C）
     let mut chain_lightnings = chain_lightning::ChainLightningManager::new(); // 链式闪电效果管理器
     let mut global_draft_state = DraftState::new(); // 全局选卡状态（追踪 UFO 触发次数）
+    let mut tutorial_state = tutorial::TutorialState::new(); // 新手引导系统
 
     // 在线多人网络客户端
     let mut network_client = network::NetworkClient::new("ws://127.0.0.1:9001".to_string());
@@ -1266,47 +1268,87 @@ async fn main() {
                 roguelike::draw_run_hud(run_state);
             }
             GameState::RoguelikeReward { ref mut run_state } => {
-                // 奖励选择界面
-                roguelike::draw_run_hud(run_state);
-                // TODO: 绘制奖励选择 UI
-                draw_text(
-                    "Select your reward (1-3) - Press Enter to continue",
-                    screen_width() / 2.0 - 180.0,
-                    screen_height() / 2.0,
-                    24.0,
-                    WHITE,
-                );
+                // 设置引导屏幕
+                tutorial_state.set_screen(tutorial::TutorialScreen::RoguelikeReward, frame_t);
 
-                // 临时：按 Enter 选择奖励并进入商店
-                if input_state.is_key_pressed(KeyCode::Enter) {
-                    state = GameState::RoguelikeShop {
-                        run_state: run_state.clone(),
-                    };
+                // 确保奖励选项已生成
+                if !matches!(run_state.phase, roguelike::RunPhase::Reward(_)) {
+                    let options = roguelike::generate_reward_options(run_state);
+                    run_state.enter_reward_phase(options);
                 }
+
+                // 绘制奖励选择 UI
+                if let roguelike::RunPhase::Reward(ref mut reward_state) = run_state.phase {
+                    if let Some(idx) = ui::draw_reward_selection(
+                        reward_state,
+                        &input_state,
+                        fonts.get_best(settings.font_choice),
+                    ) {
+                        // 应用选中的奖励
+                        if let Some(reward) = reward_state.options.get(idx).cloned() {
+                            roguelike::apply_reward_option(run_state, &mut players, &reward);
+                            // 生成商店物品并进入商店
+                            let items = roguelike::generate_shop_items(run_state);
+                            run_state.enter_shop_phase(items);
+                            state = GameState::RoguelikeShop {
+                                run_state: run_state.clone(),
+                            };
+                        }
+                    }
+                }
+
+                // 绘制引导提示
+                tutorial_state.draw(frame_t, fonts.get_best(settings.font_choice));
                 next_frame().await;
                 continue;
             }
             GameState::RoguelikeShop { ref mut run_state } => {
-                // 商店界面
-                roguelike::draw_run_hud(run_state);
-                // TODO: 绘制商店 UI
-                draw_text(
-                    "Shop - Press Enter to continue",
-                    screen_width() / 2.0 - 120.0,
-                    screen_height() / 2.0,
-                    24.0,
-                    WHITE,
-                );
+                // 设置引导屏幕
+                tutorial_state.set_screen(tutorial::TutorialScreen::RoguelikeShop, frame_t);
 
-                if input_state.is_key_pressed(KeyCode::Enter) {
-                    // 在 Shop 结束时判断是否是最后一波
-                    if let roguelike::RunPhase::Combat(ref combat_state) = run_state.phase {
-                        let max_waves = run_state.zone.wave_count();
-                        let is_last_wave = combat_state.wave_in_zone >= max_waves;
+                // 确保商店物品已生成
+                if !matches!(run_state.phase, roguelike::RunPhase::Shop(_)) {
+                    let items = roguelike::generate_shop_items(run_state);
+                    run_state.enter_shop_phase(items);
+                }
+
+                // 获取当前金币（用于 UI 显示）
+                let current_gold = run_state.gold;
+                let max_waves = run_state.zone.wave_count();
+
+                // 绘制商店 UI 并获取操作
+                let action = if let roguelike::RunPhase::Shop(ref mut shop_state) = run_state.phase {
+                    ui::draw_shop_ui(
+                        shop_state,
+                        current_gold,
+                        roguelike::SHOP_REFRESH_COST,
+                        &input_state,
+                        fonts.get_best(settings.font_choice),
+                    )
+                } else {
+                    ui::ShopUiAction::None
+                };
+
+                // 处理操作（在借用结束后）
+                match action {
+                    ui::ShopUiAction::BuyConfirmed(idx) => {
+                        let _ = roguelike::buy_shop_item(run_state, &mut players, idx);
+                    }
+                    ui::ShopUiAction::RefreshRequested => {
+                        let _ = roguelike::refresh_shop(run_state);
+                    }
+                    ui::ShopUiAction::ExitShop => {
+                        // 从 ShopPhaseState 获取波次信息
+                        let (wave_at_enter, max_waves_at_enter) = if let roguelike::RunPhase::Shop(ref shop) = run_state.phase {
+                            (shop.wave_at_enter, shop.max_waves_at_enter)
+                        } else {
+                            (1, max_waves)
+                        };
+                        let is_last_wave = wave_at_enter >= max_waves_at_enter;
 
                         if is_last_wave {
                             // 最后一波完成，进入 Boss 战
-                            run_state.advance_wave(); // 这会把 phase 设为 Boss
+                            run_state.advance_wave();
                             state = GameState::RoguelikeBoss {
                                 run_state: run_state.clone(),
                             };
@@ -1325,13 +1367,12 @@ async fn main() {
                                 run_state: run_state.clone(),
                             };
                         }
-                    } else {
-                        // 其他阶段（不应该发生，但作为回退）
-                        state = GameState::RoguelikeRun {
-                            run_state: run_state.clone(),
-                        };
                     }
+                    ui::ShopUiAction::None => {}
                 }
+
+                // 绘制引导提示
+                tutorial_state.draw(frame_t, fonts.get_best(settings.font_choice));
                 next_frame().await;
                 continue;
             }

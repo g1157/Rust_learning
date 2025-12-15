@@ -2345,3 +2345,503 @@ pub fn draw_killstreak_counter(players: &[Player], time: f64, font: Option<&Font
         );
     }
 }
+
+// ============================================================================
+// Roguelike：奖励选择 UI
+// ============================================================================
+
+use crate::input::Input;
+use crate::roguelike;
+
+/// 绘制奖励卡片
+fn draw_reward_card(
+    rect: Rect,
+    option: &roguelike::RewardOption,
+    selected: bool,
+    hotkey: &str,
+    font: Option<&Font>,
+) {
+    let (kind, name, desc, rarity) = roguelike::reward_display_info(option);
+
+    let base = if selected {
+        Color::new(0.12, 0.14, 0.2, 0.96)
+    } else {
+        Color::new(0.08, 0.1, 0.14, 0.9)
+    };
+
+    draw_shadow_panel(rect.x, rect.y, rect.w, rect.h, base);
+    draw_rectangle_lines(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        if selected { 4.0 } else { 2.0 },
+        if selected {
+            rarity
+        } else {
+            Color::new(rarity.r, rarity.g, rarity.b, 0.65)
+        },
+    );
+
+    // 稀有度条
+    draw_rectangle(rect.x, rect.y, rect.w, 6.0, rarity);
+
+    // 快捷键标签
+    let tag = format!("[{}]", hotkey);
+    let tag_w = measure_text(&tag, font, 18, 1.0).width + 16.0;
+    draw_rectangle(
+        rect.x + rect.w - tag_w - 14.0,
+        rect.y + 14.0,
+        tag_w,
+        26.0,
+        Color::new(rarity.r, rarity.g, rarity.b, 0.18),
+    );
+    draw_text_ex(
+        &tag,
+        rect.x + rect.w - tag_w - 6.0,
+        rect.y + 33.0,
+        TextParams {
+            font,
+            font_size: 18,
+            color: rarity,
+            ..Default::default()
+        },
+    );
+
+    // 类型标签
+    draw_text_ex(
+        kind,
+        rect.x + 18.0,
+        rect.y + 34.0,
+        TextParams {
+            font,
+            font_size: 18,
+            color: Color::new(0.7, 0.75, 0.85, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 名称
+    draw_text_ex(
+        &name,
+        rect.x + 18.0,
+        rect.y + 66.0,
+        TextParams {
+            font,
+            font_size: 28,
+            color: rarity,
+            ..Default::default()
+        },
+    );
+
+    // 描述
+    draw_wrapped_text(
+        &desc,
+        rect.x + 18.0,
+        rect.y + 96.0,
+        rect.w - 36.0,
+        20,
+        Color::new(0.8, 0.84, 0.92, 1.0),
+        font,
+    );
+}
+
+/// 绘制奖励选择界面
+/// 返回选中的奖励索引（如果玩家做出选择）
+pub fn draw_reward_selection(
+    reward_state: &mut roguelike::RewardPhaseState,
+    input: &Input,
+    font: Option<&Font>,
+) -> Option<usize> {
+    // 绘制半透明背景覆盖层（不完全清除，保留 HUD 可见性）
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::new(0.04, 0.05, 0.07, 0.95),
+    );
+
+    reward_state.timer += get_frame_time();
+
+    // 标题
+    let title = "选择奖励";
+    let title_w = measure_text(title, font, 44, 1.0).width;
+    draw_text_ex(
+        title,
+        screen_width() / 2.0 - title_w / 2.0,
+        92.0,
+        TextParams {
+            font,
+            font_size: 44,
+            color: Color::new(0.85, 0.9, 0.98, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 提示
+    let hint = "按 1/2/3 或点击卡片选择";
+    let hint_w = measure_text(hint, font, 22, 1.0).width;
+    draw_text_ex(
+        hint,
+        screen_width() / 2.0 - hint_w / 2.0,
+        122.0,
+        TextParams {
+            font,
+            font_size: 22,
+            color: Color::new(0.6, 0.65, 0.78, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 获取前三个选项
+    let shown: Vec<roguelike::RewardOption> = reward_state.options.iter().take(3).cloned().collect();
+    if shown.len() < 3 {
+        draw_text_ex(
+            "奖励选项未就绪",
+            24.0,
+            screen_height() - 24.0,
+            TextParams {
+                font,
+                font_size: 20,
+                color: RED,
+                ..Default::default()
+            },
+        );
+        return None;
+    }
+
+    // 计算卡片布局
+    let card_w = (screen_width() * 0.78).min(980.0) / 3.0 - 16.0;
+    let card_h = 220.0;
+    let start_x = screen_width() / 2.0 - (card_w * 3.0 + 32.0) / 2.0;
+    let y = screen_height() / 2.0 - card_h / 2.0 + 30.0;
+
+    let mouse = vec2(mouse_position().0, mouse_position().1);
+    let mut hover: Option<usize> = None;
+    let mut rects: [Rect; 3] = [Rect::new(0.0, 0.0, 0.0, 0.0); 3];
+
+    for i in 0..3 {
+        let x = start_x + i as f32 * (card_w + 16.0);
+        let rect = Rect::new(x, y, card_w, card_h);
+        rects[i] = rect;
+        if rect.contains(mouse) {
+            hover = Some(i);
+        }
+    }
+
+    // 更新选中状态
+    if let Some(h) = hover {
+        reward_state.selected = Some(h);
+    }
+
+    // 绘制卡片（选中时有呼吸动画）
+    let pulse = 1.0 + 0.03 * ((get_time() as f32) * 7.0).sin().abs();
+    for i in 0..3 {
+        let selected = reward_state.selected == Some(i);
+        let base = rects[i];
+        let scale = if selected { pulse } else { 1.0 };
+        let cx = base.x + base.w / 2.0;
+        let cy = base.y + base.h / 2.0;
+        let rect = Rect::new(
+            cx - base.w * scale / 2.0,
+            cy - base.h * scale / 2.0,
+            base.w * scale,
+            base.h * scale,
+        );
+        draw_reward_card(rect, &shown[i], selected, &format!("{}", i + 1), font);
+    }
+
+    // 处理输入
+    let key_choice = if input.is_key_pressed(KeyCode::Key1) || input.is_key_pressed(KeyCode::Kp1) {
+        Some(0)
+    } else if input.is_key_pressed(KeyCode::Key2) || input.is_key_pressed(KeyCode::Kp2) {
+        Some(1)
+    } else if input.is_key_pressed(KeyCode::Key3) || input.is_key_pressed(KeyCode::Kp3) {
+        Some(2)
+    } else {
+        None
+    };
+
+    if let Some(i) = key_choice {
+        reward_state.selected = Some(i);
+        return Some(i);
+    }
+
+    if is_mouse_button_pressed(MouseButton::Left) {
+        if let Some(i) = hover {
+            reward_state.selected = Some(i);
+            return Some(i);
+        }
+    }
+
+    None
+}
+
+// ============================================================================
+// Roguelike：商店 UI
+// ============================================================================
+
+/// 商店 UI 操作结果
+pub enum ShopUiAction {
+    /// 无操作
+    None,
+    /// 确认购买指定索引的商品
+    BuyConfirmed(usize),
+    /// 请求刷新商店
+    RefreshRequested,
+    /// 退出商店
+    ExitShop,
+}
+
+/// 绘制商店界面
+pub fn draw_shop_ui(
+    shop_state: &mut roguelike::ShopPhaseState,
+    gold: u32,
+    refresh_cost: u32,
+    input: &Input,
+    font: Option<&Font>,
+) -> ShopUiAction {
+    // 绘制半透明背景覆盖层（不完全清除，保留 HUD 可见性）
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::new(0.04, 0.05, 0.07, 0.95),
+    );
+
+    // 标题
+    let title = "商店";
+    let title_w = measure_text(title, font, 44, 1.0).width;
+    draw_text_ex(
+        title,
+        screen_width() / 2.0 - title_w / 2.0,
+        72.0,
+        TextParams {
+            font,
+            font_size: 44,
+            color: Color::new(0.85, 0.9, 0.98, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 金币显示
+    let gold_text = format!("金币: {}", gold);
+    draw_text_ex(
+        &gold_text,
+        24.0,
+        40.0,
+        TextParams {
+            font,
+            font_size: 26,
+            color: GOLD,
+            ..Default::default()
+        },
+    );
+
+    // 商品列表
+    let list_w = (screen_width() * 0.72).min(860.0);
+    let list_x = screen_width() / 2.0 - list_w / 2.0;
+    let mut y = 120.0;
+    let row_h = 72.0;
+
+    let mouse = vec2(mouse_position().0, mouse_position().1);
+    let mut hover: Option<usize> = None;
+
+    for (i, item) in shop_state.items.iter().enumerate() {
+        let rect = Rect::new(list_x, y, list_w, row_h);
+        if rect.contains(mouse) {
+            hover = Some(i);
+        }
+
+        let selected = shop_state.selected == Some(i);
+        let (kind, name, desc, color) = roguelike::reward_display_info(&item.reward);
+        let display_name = format!("{} · {}", kind, name);
+
+        // 背景
+        draw_shadow_panel(rect.x, rect.y, rect.w, rect.h, Color::new(0.08, 0.1, 0.14, 0.88));
+        draw_rectangle_lines(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            if selected { 3.5 } else { 2.0 },
+            if selected {
+                color
+            } else {
+                Color::new(color.r, color.g, color.b, 0.6)
+            },
+        );
+
+        // 编号 + 名称
+        draw_text_ex(
+            &format!("{}.", i + 1),
+            rect.x + 16.0,
+            rect.y + 28.0,
+            TextParams {
+                font,
+                font_size: 22,
+                color: Color::new(0.7, 0.75, 0.85, 1.0),
+                ..Default::default()
+            },
+        );
+        draw_text_ex(
+            &display_name,
+            rect.x + 48.0,
+            rect.y + 30.0,
+            TextParams {
+                font,
+                font_size: 24,
+                color,
+                ..Default::default()
+            },
+        );
+        draw_text_ex(
+            &desc,
+            rect.x + 48.0,
+            rect.y + 54.0,
+            TextParams {
+                font,
+                font_size: 18,
+                color: Color::new(0.75, 0.78, 0.85, 1.0),
+                ..Default::default()
+            },
+        );
+
+        // 价格/售罄
+        let right = rect.x + rect.w - 18.0;
+        if item.sold {
+            let sold = "已售";
+            let w = measure_text(sold, font, 22, 1.0).width;
+            draw_text_ex(
+                sold,
+                right - w,
+                rect.y + 44.0,
+                TextParams {
+                    font,
+                    font_size: 22,
+                    color: Color::new(1.0, 0.4, 0.4, 1.0),
+                    ..Default::default()
+                },
+            );
+        } else {
+            let price = format!("{}g", item.price);
+            let w = measure_text(&price, font, 24, 1.0).width;
+            let affordable = gold >= item.price;
+            draw_text_ex(
+                &price,
+                right - w,
+                rect.y + 44.0,
+                TextParams {
+                    font,
+                    font_size: 24,
+                    color: if affordable {
+                        GOLD
+                    } else {
+                        Color::new(0.9, 0.5, 0.5, 1.0)
+                    },
+                    ..Default::default()
+                },
+            );
+        }
+
+        y += row_h + 10.0;
+    }
+
+    // 更新选中状态
+    if let Some(h) = hover {
+        shop_state.selected = Some(h);
+    }
+
+    // 刷新按钮
+    let btn_w = 280.0;
+    let btn_h = 44.0;
+    let btn_x = screen_width() / 2.0 - btn_w / 2.0;
+    let btn_y = screen_height() - 110.0;
+    let refresh_rect = Rect::new(btn_x, btn_y, btn_w, btn_h);
+    let refresh_hover = refresh_rect.contains(mouse);
+
+    draw_shadow_panel(btn_x, btn_y, btn_w, btn_h, Color::new(0.08, 0.1, 0.14, 0.9));
+    draw_rectangle_lines(
+        btn_x,
+        btn_y,
+        btn_w,
+        btn_h,
+        if refresh_hover { 3.0 } else { 2.0 },
+        Color::new(0.3, 0.55, 0.9, if refresh_hover { 0.9 } else { 0.65 }),
+    );
+    let refresh_text = format!("刷新 [R] (-{}g)", refresh_cost);
+    let rw = measure_text(&refresh_text, font, 22, 1.0).width;
+    draw_text_ex(
+        &refresh_text,
+        screen_width() / 2.0 - rw / 2.0,
+        btn_y + 30.0,
+        TextParams {
+            font,
+            font_size: 22,
+            color: Color::new(0.85, 0.9, 0.98, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 继续按钮
+    let cont_y = screen_height() - 60.0;
+    let cont_text = "继续 [Enter]";
+    let cont_w = measure_text(cont_text, font, 20, 1.0).width;
+    draw_text_ex(
+        cont_text,
+        screen_width() / 2.0 - cont_w / 2.0,
+        cont_y,
+        TextParams {
+            font,
+            font_size: 20,
+            color: Color::new(0.6, 0.65, 0.75, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 处理输入
+    if input.is_key_pressed(KeyCode::R) || (refresh_hover && is_mouse_button_pressed(MouseButton::Left)) {
+        return ShopUiAction::RefreshRequested;
+    }
+
+    // 数字键选择
+    let key_select = if input.is_key_pressed(KeyCode::Key1) || input.is_key_pressed(KeyCode::Kp1) {
+        Some(0)
+    } else if input.is_key_pressed(KeyCode::Key2) || input.is_key_pressed(KeyCode::Kp2) {
+        Some(1)
+    } else if input.is_key_pressed(KeyCode::Key3) || input.is_key_pressed(KeyCode::Kp3) {
+        Some(2)
+    } else if input.is_key_pressed(KeyCode::Key4) || input.is_key_pressed(KeyCode::Kp4) {
+        Some(3)
+    } else if input.is_key_pressed(KeyCode::Key5) || input.is_key_pressed(KeyCode::Kp5) {
+        Some(4)
+    } else if input.is_key_pressed(KeyCode::Key6) || input.is_key_pressed(KeyCode::Kp6) {
+        Some(5)
+    } else {
+        None
+    };
+
+    if let Some(i) = key_select {
+        if i < shop_state.items.len() && !shop_state.items[i].sold {
+            return ShopUiAction::BuyConfirmed(i);
+        }
+    }
+
+    // 点击商品购买
+    if is_mouse_button_pressed(MouseButton::Left) {
+        if let Some(i) = hover {
+            if !shop_state.items[i].sold {
+                return ShopUiAction::BuyConfirmed(i);
+            }
+        }
+    }
+
+    // Enter 退出商店
+    if input.is_key_pressed(KeyCode::Enter) {
+        return ShopUiAction::ExitShop;
+    }
+
+    ShopUiAction::None
+}

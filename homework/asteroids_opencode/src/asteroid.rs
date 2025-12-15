@@ -115,14 +115,20 @@ impl AsteroidType {
     }
 }
 
+// 特殊小行星常量（用于 Roguelike 模式，暂未完全集成）
+#[allow(dead_code)]
 /// 磁性小行星的吸引半径
 pub const MAGNETIC_ATTRACT_RADIUS: f32 = 150.0;
+#[allow(dead_code)]
 /// 磁性小行星的吸引力强度
 pub const MAGNETIC_ATTRACT_FORCE: f32 = 200.0;
+#[allow(dead_code)]
 /// 爆炸小行星的爆炸半径
 pub const EXPLOSIVE_RADIUS: f32 = 80.0;
+#[allow(dead_code)]
 /// 冰冻效果持续时间
 pub const ICE_SLOW_DURATION: f64 = 3.0;
+#[allow(dead_code)]
 /// 冰冻减速比例
 pub const ICE_SLOW_FACTOR: f32 = 0.5;
 

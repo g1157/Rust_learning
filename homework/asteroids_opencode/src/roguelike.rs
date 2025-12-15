@@ -2,6 +2,10 @@
 //!
 //! 实现 Run-based 游戏循环：波次战斗 → 奖励选择 → 商店 → Boss 战
 //! 每次游玩体验不同，通过遗物和卡牌构建独特 build
+//!
+//! 注意：部分功能正在开发中，暂时允许 dead_code
+
+#![allow(dead_code)]
 
 use std::collections::HashSet;
 
@@ -474,6 +478,8 @@ pub struct RewardPhaseState {
     pub options: Vec<RewardOption>,
     pub selected: Option<usize>,
     pub timer: f32,
+    /// 进入奖励阶段时的波次（用于后续商店退出判断）
+    pub wave_at_enter: u32,
 }
 
 /// 奖励选项
@@ -494,6 +500,10 @@ pub enum RewardOption {
 pub struct ShopPhaseState {
     pub items: Vec<ShopItem>,
     pub selected: Option<usize>,
+    /// 进入商店时的波次（用于退出时判断是否进入 Boss）
+    pub wave_at_enter: u32,
+    /// 进入商店时的区域最大波次
+    pub max_waves_at_enter: u32,
 }
 
 /// 商店物品
@@ -759,18 +769,39 @@ impl RunState {
 
     /// 进入奖励阶段
     pub fn enter_reward_phase(&mut self, options: Vec<RewardOption>) {
+        // 保存当前波次信息
+        let wave_at_enter = if let RunPhase::Combat(ref cs) = self.phase {
+            cs.wave_in_zone
+        } else {
+            1
+        };
+
         self.phase = RunPhase::Reward(RewardPhaseState {
             options,
             selected: None,
             timer: 0.0,
+            wave_at_enter,
         });
     }
 
     /// 进入商店阶段
     pub fn enter_shop_phase(&mut self, items: Vec<ShopItem>) {
+        // 保存当前波次信息（用于退出商店时判断）
+        let wave_at_enter = if let RunPhase::Combat(ref cs) = self.phase {
+            cs.wave_in_zone
+        } else if let RunPhase::Reward(ref rs) = self.phase {
+            // 从奖励阶段进入商店时，使用奖励阶段保存的波次
+            rs.wave_at_enter
+        } else {
+            1
+        };
+        let max_waves_at_enter = self.zone.wave_count();
+
         self.phase = RunPhase::Shop(ShopPhaseState {
             items,
             selected: None,
+            wave_at_enter,
+            max_waves_at_enter,
         });
     }
 
@@ -955,6 +986,207 @@ pub fn draw_zone_transition(_from: ZoneId, to: ZoneId, timer: f32) {
         24.0,
         Color::new(0.7, 0.7, 0.7, alpha),
     );
+}
+
+// ============================================================================
+// 奖励/商店生成与结算
+// ============================================================================
+
+/// 商店刷新费用
+pub const SHOP_REFRESH_COST: u32 = 5;
+
+/// 所有遗物列表（用于随机生成）
+const ALL_RELICS: [RelicId; 10] = [
+    RelicId::PaycheckChip,
+    RelicId::DraftingGloves,
+    RelicId::FlawlessSeal,
+    RelicId::SalvageMagnet,
+    RelicId::CollectorLedger,
+    RelicId::ComboAmulet,
+    RelicId::ShieldBattery,
+    RelicId::PhaseAmplifier,
+    RelicId::LuckyDice,
+    RelicId::MagneticCore,
+];
+
+/// 生成奖励选项
+pub fn generate_reward_options(run: &RunState) -> Vec<RewardOption> {
+    let mut options: Vec<RewardOption> = Vec::new();
+    let target = run.reward_option_count().max(3);
+
+    while options.len() < target {
+        let roll: f32 = rand::gen_range(0.0, 1.0);
+        let option = if roll < 0.25 {
+            // 金币奖励
+            RewardOption::Gold(rand::gen_range(10u32, 26u32))
+        } else if roll < 0.45 {
+            // 生命恢复
+            RewardOption::Heal(1.0)
+        } else if roll < 0.75 {
+            // 遗物：尽量避免已拥有
+            let mut relic = ALL_RELICS[rand::gen_range(0usize, ALL_RELICS.len())];
+            for _ in 0..8 {
+                if !run.has_relic(relic) {
+                    break;
+                }
+                relic = ALL_RELICS[rand::gen_range(0usize, ALL_RELICS.len())];
+            }
+            RewardOption::Relic(relic)
+        } else {
+            // 卡牌占位：后续接 battle_draft::Card
+            let name = match rand::gen_range(0u32, 4u32) {
+                0 => "超频模块",
+                1 => "穿甲弹",
+                2 => "相位爆发",
+                _ => "离子涌流",
+            };
+            RewardOption::Card(name.to_string())
+        };
+
+        // 去重：遗物不重复
+        let is_dup_relic = matches!(&option, RewardOption::Relic(r) if
+            options.iter().any(|o| matches!(o, RewardOption::Relic(rr) if rr == r)));
+        if !is_dup_relic {
+            options.push(option);
+        }
+    }
+
+    options
+}
+
+/// 生成商店物品
+pub fn generate_shop_items(run: &RunState) -> Vec<ShopItem> {
+    let count = rand::gen_range(4usize, 7usize); // 4-6 个商品
+    let mut items: Vec<ShopItem> = Vec::with_capacity(count);
+
+    while items.len() < count {
+        let roll: f32 = rand::gen_range(0.0, 1.0);
+        let (reward, price) = if roll < 0.2 {
+            // 金币（低价）
+            (RewardOption::Gold(rand::gen_range(12u32, 26u32)), 8)
+        } else if roll < 0.4 {
+            // 生命恢复
+            (RewardOption::Heal(1.0), 18)
+        } else if roll < 0.75 {
+            // 遗物
+            let mut relic = ALL_RELICS[rand::gen_range(0usize, ALL_RELICS.len())];
+            for _ in 0..10 {
+                let already_owned = run.has_relic(relic);
+                let already_in_shop = items
+                    .iter()
+                    .any(|it| matches!(&it.reward, RewardOption::Relic(r) if *r == relic));
+                if !already_owned && !already_in_shop {
+                    break;
+                }
+                relic = ALL_RELICS[rand::gen_range(0usize, ALL_RELICS.len())];
+            }
+            (RewardOption::Relic(relic), 45)
+        } else {
+            // 卡牌
+            (RewardOption::Card("随机卡牌".to_string()), 30)
+        };
+
+        items.push(ShopItem {
+            reward,
+            price,
+            sold: false,
+        });
+    }
+
+    items
+}
+
+/// 应用奖励选项
+pub fn apply_reward_option(run: &mut RunState, players: &mut [Player], reward: &RewardOption) {
+    match reward {
+        RewardOption::Gold(amount) => run.add_gold(*amount),
+        RewardOption::Relic(relic) => run.add_relic(*relic),
+        RewardOption::Heal(amount) => {
+            let add_lives = (*amount).round().max(1.0) as u32;
+            for p in players.iter_mut() {
+                p.lives += add_lives;
+            }
+        }
+        RewardOption::Card(_name) => {
+            // 占位：后续与 battle_draft 卡牌系统对接
+        }
+    }
+}
+
+/// 购买商店物品（直接操作 RunState）
+pub fn buy_shop_item(run: &mut RunState, players: &mut [Player], idx: usize) -> bool {
+    // 先获取商品信息
+    let (price, reward) = if let RunPhase::Shop(ref shop) = run.phase {
+        if let Some(item) = shop.items.get(idx) {
+            if item.sold {
+                return false;
+            }
+            (item.price, item.reward.clone())
+        } else {
+            return false;
+        }
+    } else {
+        return false;
+    };
+
+    // 检查并扣除金币
+    if !run.spend_gold(price) {
+        return false;
+    }
+
+    // 应用奖励
+    apply_reward_option(run, players, &reward);
+
+    // 标记为已售
+    if let RunPhase::Shop(ref mut shop) = run.phase {
+        if let Some(item) = shop.items.get_mut(idx) {
+            item.sold = true;
+        }
+    }
+    true
+}
+
+/// 刷新商店（直接操作 RunState）
+pub fn refresh_shop(run: &mut RunState) -> bool {
+    if !run.spend_gold(SHOP_REFRESH_COST) {
+        return false;
+    }
+    let new_items = generate_shop_items(run);
+    if let RunPhase::Shop(ref mut shop) = run.phase {
+        shop.items = new_items;
+        shop.selected = None;
+    }
+    true
+}
+
+/// 获取奖励选项的显示信息
+pub fn reward_display_info(option: &RewardOption) -> (&'static str, String, String, Color) {
+    match option {
+        RewardOption::Relic(relic) => (
+            "遗物",
+            relic.name().to_string(),
+            relic.description().to_string(),
+            relic.rarity_color(),
+        ),
+        RewardOption::Card(name) => (
+            "卡牌",
+            name.clone(),
+            "获得一张构筑卡牌".to_string(),
+            Color::new(0.2, 0.6, 1.0, 1.0),
+        ),
+        RewardOption::Gold(amount) => (
+            "金币",
+            format!("+{} 金币", amount),
+            "立刻获得金币".to_string(),
+            GOLD,
+        ),
+        RewardOption::Heal(amount) => (
+            "修复",
+            format!("+{} 生命", (*amount).round().max(1.0) as u32),
+            "恢复生命值".to_string(),
+            Color::new(0.2, 0.9, 0.5, 1.0),
+        ),
+    }
 }
 
 // ============================================================================
