@@ -1286,6 +1286,8 @@ async fn main() {
                     ) {
                         // 应用选中的奖励
                         if let Some(reward) = reward_state.options.get(idx).cloned() {
+                            // 播放选择音效
+                            sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                             roguelike::apply_reward_option(run_state, &mut players, &reward);
                             // 生成商店物品并进入商店
                             let items = roguelike::generate_shop_items(run_state);
@@ -1332,10 +1334,16 @@ async fn main() {
                 // 处理操作（在借用结束后）
                 match action {
                     ui::ShopUiAction::BuyConfirmed(idx) => {
-                        let _ = roguelike::buy_shop_item(run_state, &mut players, idx);
+                        if roguelike::buy_shop_item(run_state, &mut players, idx) {
+                            // 购买成功，播放音效
+                            sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                        }
                     }
                     ui::ShopUiAction::RefreshRequested => {
-                        let _ = roguelike::refresh_shop(run_state);
+                        if roguelike::refresh_shop(run_state) {
+                            // 刷新成功，播放音效
+                            sounds.play(SoundEffect::Hit, settings.sound_volume * 0.5);
+                        }
                     }
                     ui::ShopUiAction::ExitShop => {
                         // 从 ShopPhaseState 获取波次信息
@@ -2409,6 +2417,32 @@ async fn main() {
                     }
                     break;
                 }
+            }
+        }
+
+        // 相位闪现爆炸伤害处理
+        for player in players.iter_mut() {
+            let phase_explosions = player.drain_phase_explosions(frame_t);
+            for explosion in phase_explosions {
+                // 检测爆炸范围内的小行星
+                for asteroid in asteroids.iter_mut() {
+                    if asteroid.collided {
+                        continue;
+                    }
+                    let dist = (asteroid.pos - explosion.pos).length();
+                    if dist <= explosion.radius + asteroid.size {
+                        asteroid.collided = true;
+                        // 生成爆炸粒子效果
+                        particles.spawn_explosion(
+                            asteroid.pos,
+                            asteroid.size,
+                            SKYBLUE,
+                            frame_t as f32,
+                        );
+                    }
+                }
+                // 生成爆炸视觉效果
+                particles.spawn_explosion(explosion.pos, explosion.radius * 0.5, SKYBLUE, frame_t as f32);
             }
         }
 

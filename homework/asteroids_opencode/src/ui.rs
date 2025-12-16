@@ -768,6 +768,66 @@ fn draw_mode_card(params: ModeCardParams) {
     );
 }
 
+/// 文本换行辅助函数（支持中文和英文）
+fn wrap_text(text: &str, max_width: f32, font_size: u16, font: Option<&Font>) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+
+    // 检查是否包含空格（英文文本）
+    let has_spaces = text.contains(' ');
+
+    if has_spaces {
+        // 英文文本：按空格分词
+        let words: Vec<&str> = text.split(' ').collect();
+        let mut current_line = String::new();
+
+        for word in words {
+            let test_line = if current_line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", current_line, word)
+            };
+
+            let width = measure_text(&test_line, font, font_size, 1.0).width;
+
+            if width <= max_width {
+                current_line = test_line;
+            } else {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                }
+                current_line = word.to_string();
+            }
+        }
+
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+    } else {
+        // 中文文本：按字符逐个测量
+        let mut current_line = String::new();
+
+        for ch in text.chars() {
+            let test_line = format!("{}{}", current_line, ch);
+            let width = measure_text(&test_line, font, font_size, 1.0).width;
+
+            if width <= max_width {
+                current_line = test_line;
+            } else {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                }
+                current_line = ch.to_string();
+            }
+        }
+
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+    }
+
+    lines
+}
+
 /// 绘制自动换行文本
 fn draw_wrapped_text(
     text: &str,
@@ -778,36 +838,7 @@ fn draw_wrapped_text(
     color: Color,
     font: Option<&Font>,
 ) {
-    let words: Vec<&str> = text.split(' ').collect();
-    let mut lines: Vec<String> = Vec::new();
-    let mut current_line = String::new();
-
-    for word in words {
-        let test_line = if current_line.is_empty() {
-            word.to_string()
-        } else {
-            format!("{} {}", current_line, word)
-        };
-
-        let width = if let Some(f) = font {
-            measure_text(&test_line, Some(f), font_size, 1.0).width
-        } else {
-            measure_text(&test_line, None, font_size, 1.0).width
-        };
-
-        if width <= max_width {
-            current_line = test_line;
-        } else {
-            if !current_line.is_empty() {
-                lines.push(current_line);
-            }
-            current_line = word.to_string();
-        }
-    }
-
-    if !current_line.is_empty() {
-        lines.push(current_line);
-    }
+    let lines = wrap_text(text, max_width, font_size, font);
 
     let line_height = font_size as f32 + 4.0; // 减小行距从 6.0 到 4.0
     for (i, line) in lines.iter().enumerate() {
