@@ -1354,6 +1354,14 @@ async fn main() {
                         };
                         let is_last_wave = wave_at_enter >= max_waves_at_enter;
 
+                        // 先将 phase 恢复为 Combat，否则 advance_wave() 不会生效
+                        run_state.phase = roguelike::RunPhase::Combat(roguelike::CombatPhaseState {
+                            wave_in_zone: wave_at_enter,
+                            enemies_remaining: 0,
+                            spawn_timer: 0.0,
+                            wave_start_time: 0.0,
+                        });
+
                         if is_last_wave {
                             // 最后一波完成，进入 Boss 战
                             run_state.advance_wave();
