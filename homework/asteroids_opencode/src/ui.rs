@@ -2510,8 +2510,12 @@ pub fn draw_reward_selection(
         },
     );
 
-    // 提示
-    let hint = "按 1/2/3 或点击卡片选择";
+    // 提示（根据选项数量动态调整）
+    let hint = if reward_state.options.len() >= 4 {
+        "按 1/2/3/4 或点击卡片选择"
+    } else {
+        "按 1/2/3 或点击卡片选择"
+    };
     let hint_w = measure_text(hint, font, 22, 1.0).width;
     draw_text_ex(
         hint,
@@ -2525,9 +2529,9 @@ pub fn draw_reward_selection(
         },
     );
 
-    // 获取前三个选项
-    let shown: Vec<roguelike::RewardOption> = reward_state.options.iter().take(3).cloned().collect();
-    if shown.len() < 3 {
+    // 获取奖励选项（支持 3-4 个，适配抽卡手套遗物）
+    let count = reward_state.options.len().clamp(3, 4);
+    if reward_state.options.is_empty() {
         draw_text_ex(
             "奖励选项未就绪",
             24.0,
@@ -2542,20 +2546,23 @@ pub fn draw_reward_selection(
         return None;
     }
 
-    // 计算卡片布局
-    let card_w = (screen_width() * 0.78).min(980.0) / 3.0 - 16.0;
+    // 计算卡片布局（动态适配 3-4 个选项，确保小屏不溢出）
+    let gap = 16.0;
+    let layout_w = (screen_width() * 0.86).min(1120.0);
+    let card_w = ((layout_w - gap * (count as f32 - 1.0)) / count as f32).clamp(160.0, 300.0);
     let card_h = 220.0;
-    let start_x = screen_width() / 2.0 - (card_w * 3.0 + 32.0) / 2.0;
+    let total_w = card_w * count as f32 + gap * (count as f32 - 1.0);
+    let start_x = screen_width() / 2.0 - total_w / 2.0;
     let y = screen_height() / 2.0 - card_h / 2.0 + 30.0;
 
     let mouse = vec2(mouse_position().0, mouse_position().1);
     let mut hover: Option<usize> = None;
-    let mut rects: [Rect; 3] = [Rect::new(0.0, 0.0, 0.0, 0.0); 3];
+    let mut rects: Vec<Rect> = Vec::with_capacity(count);
 
-    for i in 0..3 {
-        let x = start_x + i as f32 * (card_w + 16.0);
+    for i in 0..count {
+        let x = start_x + i as f32 * (card_w + gap);
         let rect = Rect::new(x, y, card_w, card_h);
-        rects[i] = rect;
+        rects.push(rect);
         if rect.contains(mouse) {
             hover = Some(i);
         }
@@ -2568,7 +2575,7 @@ pub fn draw_reward_selection(
 
     // 绘制卡片（选中时有呼吸动画）
     let pulse = 1.0 + 0.03 * ((get_time() as f32) * 7.0).sin().abs();
-    for i in 0..3 {
+    for i in 0..count {
         let selected = reward_state.selected == Some(i);
         let base = rects[i];
         let scale = if selected { pulse } else { 1.0 };
@@ -2580,23 +2587,27 @@ pub fn draw_reward_selection(
             base.w * scale,
             base.h * scale,
         );
-        draw_reward_card(rect, &shown[i], selected, &format!("{}", i + 1), font);
+        draw_reward_card(rect, &reward_state.options[i], selected, &format!("{}", i + 1), font);
     }
 
-    // 处理输入
+    // 处理输入（支持 1-4 键）
     let key_choice = if input.is_key_pressed(KeyCode::Key1) || input.is_key_pressed(KeyCode::Kp1) {
         Some(0)
     } else if input.is_key_pressed(KeyCode::Key2) || input.is_key_pressed(KeyCode::Kp2) {
         Some(1)
     } else if input.is_key_pressed(KeyCode::Key3) || input.is_key_pressed(KeyCode::Kp3) {
         Some(2)
+    } else if count >= 4 && (input.is_key_pressed(KeyCode::Key4) || input.is_key_pressed(KeyCode::Kp4)) {
+        Some(3)
     } else {
         None
     };
 
     if let Some(i) = key_choice {
-        reward_state.selected = Some(i);
-        return Some(i);
+        if i < count {
+            reward_state.selected = Some(i);
+            return Some(i);
+        }
     }
 
     if is_mouse_button_pressed(MouseButton::Left) {

@@ -10,6 +10,7 @@
 use std::collections::HashSet;
 
 use macroquad::prelude::*;
+use macroquad::text::{Font, TextParams};
 
 use crate::asteroid::{Asteroid, AsteroidType};
 use crate::player::Player;
@@ -288,7 +289,9 @@ fn update_giant_splitter(
 /// 生成 Boss 召唤的小型小行星
 fn spawn_giant_splitter_minion(boss_pos: Vec2, enraged: bool) -> Asteroid {
     let dir = Vec2::new(rand::gen_range(-1.0, 1.0), rand::gen_range(-1.0, 1.0)).normalize_or_zero();
-    let size = rand::gen_range(12.0, 18.0);
+    // Boss 召唤物不应触发分裂：Asteroid::split() 在 size < 15.0 时直接返回 None
+    // 这里将尺寸上限压到 14.0，确保不会因为分裂导致数量膨胀
+    let size = rand::gen_range(10.0, 14.0);
     let speed = if enraged { 320.0 } else { 220.0 };
 
     // 在 Boss 周围生成
@@ -303,7 +306,7 @@ fn spawn_giant_splitter_minion(boss_pos: Vec2, enraged: bool) -> Asteroid {
         rot_speed: rand::gen_range(-2.0, 2.0),
         collided: false,
         vertex_offsets: std::array::from_fn(|_| rand::gen_range(0.7, 1.0)),
-        // 使用 Normal 类型避免分裂导致数量膨胀
+        // 使用 Normal 类型避免引入额外特殊效果；不分裂由 size < 15.0 保证
         asteroid_type: AsteroidType::Normal,
     }
 }
@@ -848,36 +851,48 @@ impl RunState {
 // ============================================================================
 
 /// 绘制 Run 状态 HUD
-pub fn draw_run_hud(run: &RunState) {
+pub fn draw_run_hud(run: &RunState, font: Option<&Font>) {
     let hud_y = 10.0;
 
     // 区域信息
-    draw_text(
+    draw_text_ex(
         &format!("区域: {}", run.zone.name()),
         10.0,
         hud_y + 20.0,
-        24.0,
-        WHITE,
+        TextParams {
+            font,
+            font_size: 24,
+            color: WHITE,
+            ..Default::default()
+        },
     );
 
     // 波次信息（仅战斗阶段）
     if let RunPhase::Combat(ref state) = run.phase {
-        draw_text(
+        draw_text_ex(
             &format!("波次: {}/{}", state.wave_in_zone, run.zone.wave_count()),
             10.0,
             hud_y + 45.0,
-            20.0,
-            LIGHTGRAY,
+            TextParams {
+                font,
+                font_size: 20,
+                color: LIGHTGRAY,
+                ..Default::default()
+            },
         );
     }
 
     // 金币
-    draw_text(
+    draw_text_ex(
         &format!("金币: {}", run.gold),
         10.0,
         hud_y + 70.0,
-        20.0,
-        GOLD,
+        TextParams {
+            font,
+            font_size: 20,
+            color: GOLD,
+            ..Default::default()
+        },
     );
 
     // 连击数
@@ -889,12 +904,16 @@ pub fn draw_run_hud(run: &RunState) {
         } else {
             YELLOW
         };
-        draw_text(
+        draw_text_ex(
             &format!("连击: {}x", run.combo),
             10.0,
             hud_y + 95.0,
-            20.0,
-            combo_color,
+            TextParams {
+                font,
+                font_size: 20,
+                color: combo_color,
+                ..Default::default()
+            },
         );
     }
 
@@ -905,12 +924,16 @@ pub fn draw_run_hud(run: &RunState) {
         draw_rectangle(x, hud_y, 30.0, 30.0, relic.rarity_color());
         // 简化显示：用首字母
         let initial = relic.name().chars().next().unwrap_or('?');
-        draw_text(
+        draw_text_ex(
             &initial.to_string(),
             x + 8.0,
             hud_y + 22.0,
-            20.0,
-            WHITE,
+            TextParams {
+                font,
+                font_size: 20,
+                color: WHITE,
+                ..Default::default()
+            },
         );
     }
 }

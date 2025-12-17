@@ -1213,7 +1213,7 @@ async fn main() {
                             Vec2::new(screen_width() / 2., screen_height() / 2.),
                             screen_width().min(screen_height()),
                             asteroid_count,
-                            difficulty,
+                            difficulty * settings.asteroid_speed_multiplier,
                         );
                     }
                     next_frame().await;
@@ -1263,9 +1263,7 @@ async fn main() {
                         continue;
                     }
                 }
-
-                // 绘制 Roguelike HUD（在游戏逻辑之后）
-                roguelike::draw_run_hud(run_state);
+                // HUD 在后面的 render_scene 之后统一绘制（第 3130 行）
             }
             GameState::RoguelikeReward { ref mut run_state } => {
                 // 设置引导屏幕
@@ -1377,7 +1375,7 @@ async fn main() {
                                 Vec2::new(screen_width() / 2., screen_height() / 2.),
                                 screen_width().min(screen_height()),
                                 asteroid_count,
-                                difficulty,
+                                difficulty * settings.asteroid_speed_multiplier,
                             );
                             state = GameState::RoguelikeRun {
                                 run_state: run_state.clone(),
@@ -3129,10 +3127,10 @@ async fn main() {
 
             match &state {
                 GameState::RoguelikeRun { run_state } => {
-                    roguelike::draw_run_hud(run_state);
+                    roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
                 }
                 GameState::RoguelikeBoss { run_state } => {
-                    roguelike::draw_run_hud(run_state);
+                    roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
                     if let roguelike::RunPhase::Boss(boss) = &run_state.phase {
                         roguelike::draw_giant_splitter(boss, shake_offset, frame_t as f32);
                         roguelike::draw_boss_health_bar(boss);
