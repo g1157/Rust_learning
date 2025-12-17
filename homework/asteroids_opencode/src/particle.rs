@@ -210,6 +210,56 @@ impl ParticleSystem {
     pub fn count(&self) -> usize {
         self.particles.len()
     }
+
+    /// 创建道具拾取效果（向上飘散的光点）
+    pub fn spawn_powerup_pickup(&mut self, pos: Vec2, color: Color, now: f32) {
+        let count = 12;
+        for i in 0..count {
+            // 向上扩散的粒子
+            let angle = std::f32::consts::PI * (0.3 + 0.4 * (i as f32 / count as f32));
+            let speed = rand::gen_range(80.0, 150.0);
+            let vel = Vec2::new(
+                angle.cos() * speed * rand::gen_range(-1.0, 1.0),
+                -angle.sin() * speed, // 向上
+            );
+
+            let particle_size = rand::gen_range(2.0, 4.0);
+            let lifetime = rand::gen_range(0.4, 0.8);
+
+            // 使用道具颜色，稍微变亮
+            let bright_color = Color::new(
+                (color.r * 1.3).min(1.0),
+                (color.g * 1.3).min(1.0),
+                (color.b * 1.3).min(1.0),
+                1.0,
+            );
+
+            self.particles.push(Particle::new(
+                pos,
+                vel,
+                bright_color,
+                particle_size,
+                lifetime,
+                now,
+            ));
+        }
+
+        // 添加中心闪光
+        for _ in 0..6 {
+            let angle = rand::gen_range(0.0, std::f32::consts::TAU);
+            let speed = rand::gen_range(20.0, 60.0);
+            let vel = Vec2::new(angle.cos() * speed, angle.sin() * speed);
+
+            self.particles.push(Particle::new(
+                pos,
+                vel,
+                Color::new(1.0, 1.0, 1.0, 0.9),
+                rand::gen_range(3.0, 5.0),
+                rand::gen_range(0.2, 0.4),
+                now,
+            ));
+        }
+    }
 }
 
 impl Default for ParticleSystem {

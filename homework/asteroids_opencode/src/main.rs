@@ -21,23 +21,30 @@
 mod achievement;
 mod asteroid;
 mod background;
+mod battle_draft;
 mod bullet;
+mod chain_lightning;
 mod constants;
+mod dash_trail;
 mod duel;
 mod effects;
 mod font;
 mod input;
+mod interpolation;
 mod network;
 mod particle;
+mod performance;
 mod player;
 mod powerup;
 mod quadtree;
 mod render;
+mod roguelike;
 mod score;
 mod ship;
 mod sound;
 mod storage;
 mod ufo;
+mod tutorial;
 mod ui;
 mod ui_achievements;
 mod utils;
@@ -46,9 +53,11 @@ mod wasm_input;
 
 use achievement::{AchievementId, AchievementManager};
 use asteroid::{Asteroid, spawn_wave_with_speed};
+use battle_draft::{Card, DraftState, draw_draft_ui};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
-use duel::{DUEL_BULLET_RADIUS, DuelState};
-use effects::{ScreenShake, SlowMotion};
+use clap::Parser;
+use duel::{DuelState, DUEL_BULLET_RADIUS};
+use effects::{PendingHitKind, PendingHitManager, ScreenShake, SlowMotion};
 use font::FontSystem;
 use macroquad::prelude::*;
 use particle::ParticleSystem;
@@ -58,7 +67,7 @@ use quadtree::{Bounds, ObjectIndex, QuadTree};
 use ship::{SHIP_DAMPING, SHIP_HEIGHT, SHIP_ROTATION_STEP, SHIP_THRUST};
 use sound::{SoundEffect, SoundSystem};
 use ufo::{ENEMY_BULLET_RADIUS, EnemyBullet, UFO_RADIUS, Ufo, draw_enemy_bullet};
-use ui::{DebugStats, HudMode};
+use ui::{DebugStats, HudMode, InterpDebugStats, NetworkDebugStats};
 use utils::{circle_intersects_triangle, wrap_around};
 use vortex::VortexManager;
 
@@ -67,6 +76,31 @@ use crate::constants::{defaults, gameplay, shake, slow_motion, timing};
 const ASTEROID_COUNT: usize = gameplay::INITIAL_ASTEROID_COUNT;
 const ASTEROID_WAVE_INCREMENT: usize = gameplay::ASTEROID_WAVE_INCREMENT;
 const VICTORY_PAUSE_DURATION: f64 = timing::VICTORY_PAUSE;
+
+/// 命令行参数
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// 运行指定帧数后退出（用于性能测试）
+    #[arg(long)]
+    frames: Option<u64>,
+
+    /// 导出性能指标到文件
+    #[arg(long)]
+    dump_metrics: Option<String>,
+
+    /// 生成指定数量的实体进行压力测试
+    #[arg(long)]
+    entities: Option<usize>,
+
+    /// 启用网络测试模式
+    #[arg(long)]
+    network_test: bool,
+
+    /// 禁用图形界面（仅用于CI）
+    #[arg(long)]
+    headless: bool,
+}
 
 /// 字体选项
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -384,6 +418,7 @@ pub enum GameMode {
     Survival,
     Duel,
     TimeAttack, // 限时挑战模式
+    Roguelike,  // Roguelike 模式：Run-based 随机构建
     Online,
     Achievements,
     Settings,
@@ -401,7 +436,8 @@ impl GameMode {
         let next = match self {
             GameMode::Survival => GameMode::Duel,
             GameMode::Duel => GameMode::TimeAttack,
-            GameMode::TimeAttack => GameMode::Online,
+            GameMode::TimeAttack => GameMode::Roguelike,
+            GameMode::Roguelike => GameMode::Online,
             GameMode::Online => GameMode::Achievements,
             GameMode::Achievements => GameMode::Settings,
             GameMode::Settings => GameMode::Survival,
@@ -420,20 +456,21 @@ impl GameMode {
             GameMode::Survival => GameMode::Settings,
             GameMode::Duel => GameMode::Survival,
             GameMode::TimeAttack => GameMode::Duel,
-            GameMode::Online => GameMode::TimeAttack,
+            GameMode::Roguelike => GameMode::TimeAttack,
+            GameMode::Online => GameMode::Roguelike,
             GameMode::Achievements => GameMode::Online,
             GameMode::Settings => GameMode::Achievements,
         };
         // Skip Online on WASM
         if prev == GameMode::Online && !Self::online_available() {
-            GameMode::TimeAttack
+            GameMode::Roguelike
         } else {
             prev
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 #[allow(dead_code)]
 enum GameState {
     ModeSelection { selection: GameMode },
@@ -442,11 +479,21 @@ enum GameState {
     OnlineLobby { nickname_input: bool },        // 在线大厅
     OnlineWaiting { room_id: u32 },              // 等待房间（保留供在线模式使用）
     WaitingStart,
+    DraftSelection { draft_state: DraftState },  // 选卡界面（开局或 UFO 击杀后）
     Playing,
-    Paused { selection: PauseSelection },
+    Paused {
+        selection: PauseSelection,
+        /// Roguelike 模式暂停时保存的 Run 状态
+        roguelike_state: Option<roguelike::RunState>,
+    },
     VictoryPause { started_at: f64 },
     RoundEnd { winner_idx: usize }, // Duel 回合结束
     GameOver { victory: bool, end_time: f64 },
+    // Roguelike 模式状态
+    RoguelikeRun { run_state: roguelike::RunState },  // Roguelike 战斗中
+    RoguelikeReward { run_state: roguelike::RunState }, // 奖励选择
+    RoguelikeShop { run_state: roguelike::RunState },   // 商店
+    RoguelikeBoss { run_state: roguelike::RunState },   // Boss 战
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -478,6 +525,9 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    // 解析命令行参数
+    let args = Args::parse();
+
     let start_time = get_time();
     let mut settings = GameSettings::default(); // 先初始化设置
     let mut players = init_players(start_time, settings.starting_lives, settings.player_count);
@@ -505,6 +555,10 @@ async fn main() {
     let mut achievements_scroll: f32 = 0.0; // 成就界面滚动偏移
     let mut settings_scroll: f32 = 0.0; // 设置界面滚动偏移
     let mut vortex_manager = VortexManager::new(timing::VORTEX_SPAWN_INTERVAL); // 漩涡生成间隔
+    let mut pending_hits = PendingHitManager::new(); // 客户端乐观命中提示（Phase 4C）
+    let mut chain_lightnings = chain_lightning::ChainLightningManager::new(); // 链式闪电效果管理器
+    let mut global_draft_state = DraftState::new(); // 全局选卡状态（追踪 UFO 触发次数）
+    let mut tutorial_state = tutorial::TutorialState::new(); // 新手引导系统
 
     // 在线多人网络客户端
     let mut network_client = network::NetworkClient::new("ws://127.0.0.1:9001".to_string());
@@ -514,6 +568,20 @@ async fn main() {
 
     // 在线模式的子弹（从服务器同步）
     let mut online_bullets: Vec<OnlineBullet> = Vec::new();
+
+    // 实体插值管理器（平滑远程实体渲染）
+    let mut interp_manager =
+        interpolation::InterpolationManager::new(interpolation::InterpConfig {
+            render_delay_ms: 100.0, // 100ms 渲染延迟，平衡平滑度和响应性
+            history_secs: 1.5,      // 保留 1.5 秒历史用于插值和回溯
+        });
+
+    // 性能监控器
+    let mut performance_monitor = if let Some(path) = &args.dump_metrics {
+        crate::performance::PerformanceMonitor::new().with_export_path(path.clone())
+    } else {
+        crate::performance::PerformanceMonitor::new()
+    };
 
     let mut state = GameState::ModeSelection {
         selection: GameMode::Survival,
@@ -790,12 +858,45 @@ async fn main() {
                             achievements.stats.modes_played.insert(mode_name);
                             state = GameState::WaitingStart;
                         }
+                        GameMode::Roguelike => {
+                            // Roguelike 模式：直接进入 Run
+                            current_mode = next_selection;
+                            let mode_name = format!("{:?}", next_selection);
+                            achievements.stats.modes_played.insert(mode_name);
+                            // 初始化玩家
+                            players = init_players(
+                                frame_t,
+                                settings.starting_lives,
+                                PlayerCount::One, // Roguelike 模式固定单人
+                            );
+                            // 创建新的 Run 状态
+                            let new_run = roguelike::RunState::new();
+                            // 使用 Run 状态的难度设置初始化小行星
+                            let asteroid_count = new_run.current_asteroid_count();
+                            let difficulty = new_run.current_difficulty();
+                            asteroids = spawn_wave_with_speed(
+                                Vec2::new(screen_width() / 2., screen_height() / 2.),
+                                screen_width().min(screen_height()),
+                                asteroid_count,
+                                difficulty * settings.asteroid_speed_multiplier,
+                            );
+                            survival_wave = 1;
+                            state = GameState::RoguelikeRun {
+                                run_state: new_run,
+                            };
+                        }
                         _ => {
                             // 进入游戏 (Survival/Duel)
                             current_mode = next_selection;
                             // 追踪模式切换统计
                             let mode_name = format!("{:?}", next_selection);
                             achievements.stats.modes_played.insert(mode_name);
+                            // 确保玩家数量正确（可能从 Roguelike 单人模式返回）
+                            players = init_players(
+                                frame_t,
+                                settings.starting_lives,
+                                settings.player_count,
+                            );
                             state = GameState::WaitingStart;
                         }
                     }
@@ -829,6 +930,7 @@ async fn main() {
                         GameMode::Survival => "Survival: press [Enter] to start",
                         GameMode::Duel => "Duel: capture the flag!",
                         GameMode::TimeAttack => "Time Attack: press [Enter] to start the clock!",
+                        GameMode::Roguelike => "Roguelike: press [Enter] to start your run!",
                         GameMode::Settings => unreachable!("Settings is not a playable mode"),
                         GameMode::Achievements => {
                             unreachable!("Achievements is not a playable mode")
@@ -899,8 +1001,64 @@ async fn main() {
                     // 触发 FirstFlight 成就（完成第一次游戏）
                     achievements.unlock(achievement::AchievementId::FirstFlight, frame_t);
 
-                    state = GameState::Playing;
+                    // Survival/TimeAttack 模式触发开局选卡
+                    if matches!(current_mode, GameMode::Survival | GameMode::TimeAttack) {
+                        global_draft_state.reset(); // 重置选卡状态（新游戏）
+                        global_draft_state.start_draft(true); // 开局选卡
+                        state = GameState::DraftSelection { draft_state: global_draft_state.clone() };
+                    } else {
+                        state = GameState::Playing;
+                    }
                 }
+
+                next_frame().await;
+                continue;
+            }
+            GameState::DraftSelection { ref mut draft_state } => {
+                // 更新动画计时器
+                draft_state.update(raw_dt);
+
+                // 输入处理：左右键切换卡牌
+                if input_state.is_key_pressed(KeyCode::Left) || input_state.is_key_pressed(KeyCode::A)
+                {
+                    draft_state.move_selection(-1);
+                }
+                if input_state.is_key_pressed(KeyCode::Right)
+                    || input_state.is_key_pressed(KeyCode::D)
+                {
+                    draft_state.move_selection(1);
+                }
+
+                // Enter/Space 确认选择
+                if input_state.is_key_pressed(KeyCode::Enter)
+                    || input_state.is_key_pressed(KeyCode::Space)
+                {
+                    if let Some(card) = draft_state.finish_draft() {
+                        // 同步到全局状态
+                        global_draft_state.ufo_triggers_used = draft_state.ufo_triggers_used;
+
+                        // 为所有玩家应用卡牌效果
+                        for player in players.iter_mut() {
+                            player.apply_draft_card(card);
+                        }
+
+                        // 如果是 ExtraLife 卡牌，播放音效
+                        if matches!(card, Card::ExtraLife) {
+                            sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                        }
+
+                        // 进入游戏状态
+                        state = GameState::Playing;
+                    }
+                    next_frame().await;
+                    continue;
+                }
+
+                // 绘制背景（星空 + 游戏实体）
+                starfield.draw(frame_t as f32);
+
+                // 绘制选卡界面
+                draw_draft_ui(draft_state, fonts.get_best(settings.font_choice));
 
                 next_frame().await;
                 continue;
@@ -942,6 +1100,13 @@ async fn main() {
                             "Time's up! Final score: {} - Press [Enter] to restart",
                             score
                         )
+                    }
+                    GameMode::Roguelike => {
+                        if victory {
+                            "Run complete! You conquered all zones! Press [Enter] to restart".to_string()
+                        } else {
+                            "Run ended. Press [Enter] to try again".to_string()
+                        }
                     }
                     GameMode::Settings => unreachable!("Settings is not a playable mode"),
                     GameMode::Achievements => unreachable!("Achievements is not a playable mode"),
@@ -1012,12 +1177,309 @@ async fn main() {
                 if pause_pressed {
                     state = GameState::Paused {
                         selection: PauseSelection::Resume,
+                        roguelike_state: None,
                     };
                     next_frame().await;
                     continue;
                 }
             }
-            GameState::Paused { selection } => {
+            // Roguelike 模式状态处理
+            GameState::RoguelikeRun { ref mut run_state } => {
+                // 更新 Run 时间
+                run_state.run_time += dt as f32;
+
+                // 检测暂停键
+                let pause_pressed = input_state.is_key_pressed(KeyCode::Escape)
+                    || input_state.is_key_pressed(KeyCode::P);
+                if pause_pressed {
+                    state = GameState::Paused {
+                        selection: PauseSelection::Resume,
+                        roguelike_state: Some(run_state.clone()),
+                    };
+                    next_frame().await;
+                    continue;
+                }
+
+                // 处理区域过渡
+                if let roguelike::RunPhase::ZoneTransition { from, to, ref mut timer } = run_state.phase {
+                    *timer -= dt as f32;
+                    roguelike::draw_zone_transition(from, to, *timer);
+                    if *timer <= 0.0 {
+                        run_state.complete_zone_transition(to);
+                        // 生成新区域的小行星
+                        let asteroid_count = run_state.current_asteroid_count();
+                        let difficulty = run_state.current_difficulty();
+                        asteroids = spawn_wave_with_speed(
+                            Vec2::new(screen_width() / 2., screen_height() / 2.),
+                            screen_width().min(screen_height()),
+                            asteroid_count,
+                            difficulty * settings.asteroid_speed_multiplier,
+                        );
+                    }
+                    next_frame().await;
+                    continue;
+                }
+
+                // 处理胜利/失败
+                if matches!(run_state.phase, roguelike::RunPhase::Victory) {
+                    state = GameState::GameOver {
+                        victory: true,
+                        end_time: frame_t,
+                    };
+                    next_frame().await;
+                    continue;
+                }
+                if matches!(run_state.phase, roguelike::RunPhase::Defeat) {
+                    state = GameState::GameOver {
+                        victory: false,
+                        end_time: frame_t,
+                    };
+                    next_frame().await;
+                    continue;
+                }
+
+                // 检测玩家死亡
+                let all_dead = players.iter().all(|p| !p.alive);
+                if all_dead {
+                    run_state.defeat();
+                    next_frame().await;
+                    continue;
+                }
+
+                // 检测波次清空
+                if asteroids.is_empty() {
+                    // 触发遗物效果
+                    run_state.trigger_wave_clear();
+                    // 每波奖励 5 金币
+                    run_state.add_gold(5);
+
+                    if let roguelike::RunPhase::Combat(_) = run_state.phase {
+                        // 不提前调用 advance_wave()，保持当前波次信息
+                        // 在 Shop 结束时再决定进入下一波还是 Boss
+                        state = GameState::RoguelikeReward {
+                            run_state: run_state.clone(),
+                        };
+                        next_frame().await;
+                        continue;
+                    }
+                }
+                // HUD 在后面的 render_scene 之后统一绘制（第 3130 行）
+            }
+            GameState::RoguelikeReward { ref mut run_state } => {
+                // 设置引导屏幕
+                tutorial_state.set_screen(tutorial::TutorialScreen::RoguelikeReward, frame_t);
+
+                // 确保奖励选项已生成
+                if !matches!(run_state.phase, roguelike::RunPhase::Reward(_)) {
+                    let options = roguelike::generate_reward_options(run_state);
+                    run_state.enter_reward_phase(options);
+                }
+
+                // 绘制奖励选择 UI
+                if let roguelike::RunPhase::Reward(ref mut reward_state) = run_state.phase {
+                    if let Some(idx) = ui::draw_reward_selection(
+                        reward_state,
+                        &input_state,
+                        fonts.get_best(settings.font_choice),
+                    ) {
+                        // 应用选中的奖励
+                        if let Some(reward) = reward_state.options.get(idx).cloned() {
+                            // 播放选择音效
+                            sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                            roguelike::apply_reward_option(run_state, &mut players, &reward);
+                            // 生成商店物品并进入商店
+                            let items = roguelike::generate_shop_items(run_state);
+                            run_state.enter_shop_phase(items);
+                            state = GameState::RoguelikeShop {
+                                run_state: run_state.clone(),
+                            };
+                        }
+                    }
+                }
+
+                // 绘制引导提示
+                tutorial_state.draw(frame_t, fonts.get_best(settings.font_choice));
+                next_frame().await;
+                continue;
+            }
+            GameState::RoguelikeShop { ref mut run_state } => {
+                // 设置引导屏幕
+                tutorial_state.set_screen(tutorial::TutorialScreen::RoguelikeShop, frame_t);
+
+                // 确保商店物品已生成
+                if !matches!(run_state.phase, roguelike::RunPhase::Shop(_)) {
+                    let items = roguelike::generate_shop_items(run_state);
+                    run_state.enter_shop_phase(items);
+                }
+
+                // 获取当前金币（用于 UI 显示）
+                let current_gold = run_state.gold;
+                let max_waves = run_state.zone.wave_count();
+
+                // 绘制商店 UI 并获取操作
+                let action = if let roguelike::RunPhase::Shop(ref mut shop_state) = run_state.phase {
+                    ui::draw_shop_ui(
+                        shop_state,
+                        current_gold,
+                        roguelike::SHOP_REFRESH_COST,
+                        &input_state,
+                        fonts.get_best(settings.font_choice),
+                    )
+                } else {
+                    ui::ShopUiAction::None
+                };
+
+                // 处理操作（在借用结束后）
+                match action {
+                    ui::ShopUiAction::BuyConfirmed(idx) => {
+                        if roguelike::buy_shop_item(run_state, &mut players, idx) {
+                            // 购买成功，播放音效
+                            sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                        }
+                    }
+                    ui::ShopUiAction::RefreshRequested => {
+                        if roguelike::refresh_shop(run_state) {
+                            // 刷新成功，播放音效
+                            sounds.play(SoundEffect::Hit, settings.sound_volume * 0.5);
+                        }
+                    }
+                    ui::ShopUiAction::ExitShop => {
+                        // 从 ShopPhaseState 获取波次信息
+                        let (wave_at_enter, max_waves_at_enter) = if let roguelike::RunPhase::Shop(ref shop) = run_state.phase {
+                            (shop.wave_at_enter, shop.max_waves_at_enter)
+                        } else {
+                            (1, max_waves)
+                        };
+                        let is_last_wave = wave_at_enter >= max_waves_at_enter;
+
+                        // 先将 phase 恢复为 Combat，否则 advance_wave() 不会生效
+                        run_state.phase = roguelike::RunPhase::Combat(roguelike::CombatPhaseState {
+                            wave_in_zone: wave_at_enter,
+                            enemies_remaining: 0,
+                            spawn_timer: 0.0,
+                            wave_start_time: 0.0,
+                        });
+
+                        if is_last_wave {
+                            // 最后一波完成，进入 Boss 战
+                            run_state.advance_wave();
+                            state = GameState::RoguelikeBoss {
+                                run_state: run_state.clone(),
+                            };
+                        } else {
+                            // 还有更多波次，进入下一波
+                            run_state.advance_wave();
+                            let asteroid_count = run_state.current_asteroid_count();
+                            let difficulty = run_state.current_difficulty();
+                            asteroids = spawn_wave_with_speed(
+                                Vec2::new(screen_width() / 2., screen_height() / 2.),
+                                screen_width().min(screen_height()),
+                                asteroid_count,
+                                difficulty * settings.asteroid_speed_multiplier,
+                            );
+                            state = GameState::RoguelikeRun {
+                                run_state: run_state.clone(),
+                            };
+                        }
+                    }
+                    ui::ShopUiAction::None => {}
+                }
+
+                // 绘制引导提示
+                tutorial_state.draw(frame_t, fonts.get_best(settings.font_choice));
+                next_frame().await;
+                continue;
+            }
+            GameState::RoguelikeBoss { ref mut run_state } => {
+                // 更新 Run 时间
+                run_state.run_time += dt as f32;
+
+                // 检测玩家全灭
+                let all_dead = players.iter().all(|p| !p.alive);
+                if all_dead {
+                    run_state.defeat();
+                    state = GameState::GameOver {
+                        victory: false,
+                        end_time: frame_t,
+                    };
+                    next_frame().await;
+                    continue;
+                }
+
+                if let roguelike::RunPhase::Boss(ref mut boss) = run_state.phase {
+                    // 初始化 Boss 位置（首次进入时）
+                    if boss.position == Vec2::ZERO {
+                        boss.set_position(Vec2::new(screen_width() * 0.5, screen_height() * 0.25));
+                    }
+
+                    // 检查狂暴状态（在 AI 更新前，使本帧立即生效）
+                    boss.check_enrage();
+
+                    // Boss AI：移动追踪 + 召唤小行星
+                    roguelike::update_boss(boss, &players, &mut asteroids, dt as f32);
+
+                    // 子弹与 Boss 碰撞检测
+                    let boss_pos = boss.position;
+                    let boss_r = roguelike::boss_radius(boss);
+                    let damage_per_hit: f32 = 20.0;
+
+                    for player in players.iter_mut() {
+                        for bullet in player.bullets.iter_mut() {
+                            if bullet.collided {
+                                continue;
+                            }
+                            if (boss_pos - bullet.pos).length() < boss_r + BULLET_RADIUS {
+                                boss.health = (boss.health - damage_per_hit).max(0.0);
+                                bullet.collided = true;
+                                particles.spawn_explosion(
+                                    bullet.pos,
+                                    10.0,
+                                    player.color,
+                                    frame_t as f32,
+                                );
+                                sounds.play(SoundEffect::Hit, settings.sound_volume);
+                            }
+                        }
+                    }
+
+                    // Boss 击败检测
+                    if boss.health <= 0.0 {
+                        // 触发遗物效果
+                        run_state.trigger_boss_defeat();
+                        // 清空召唤的小行星
+                        asteroids.clear();
+                        // 进入下一区域或胜利
+                        run_state.advance_zone();
+                        state = GameState::RoguelikeRun {
+                            run_state: run_state.clone(),
+                        };
+                        next_frame().await;
+                        continue;
+                    }
+
+                    // 调试：按 K 键模拟对 Boss 造成伤害（测试用）
+                    #[cfg(debug_assertions)]
+                    if input_state.is_key_pressed(KeyCode::K) {
+                        boss.health = (boss.health - 100.0).max(0.0);
+                    }
+                }
+
+                // 检测暂停键
+                let pause_pressed = input_state.is_key_pressed(KeyCode::Escape)
+                    || input_state.is_key_pressed(KeyCode::P);
+                if pause_pressed {
+                    state = GameState::Paused {
+                        selection: PauseSelection::Resume,
+                        roguelike_state: Some(run_state.clone()),
+                    };
+                    next_frame().await;
+                    continue;
+                }
+            }
+            GameState::Paused {
+                selection,
+                ref roguelike_state,
+            } => {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
                 render_scene(
                     &players,
@@ -1040,6 +1502,7 @@ async fn main() {
                     &starfield,
                     is_online_mode,
                     &online_bullets,
+                    &chain_lightnings,
                 );
                 if matches!(current_mode, GameMode::Survival) {
                     ui::draw_survival_record(
@@ -1070,7 +1533,18 @@ async fn main() {
                 {
                     match next_selection {
                         PauseSelection::Resume => {
-                            state = GameState::Playing;
+                            // 恢复到正确的状态
+                            if let Some(run_state) = roguelike_state.clone() {
+                                // 根据 RunPhase 恢复到对应的 GameState
+                                state = match run_state.phase {
+                                    roguelike::RunPhase::Boss(_) => {
+                                        GameState::RoguelikeBoss { run_state }
+                                    }
+                                    _ => GameState::RoguelikeRun { run_state },
+                                };
+                            } else {
+                                state = GameState::Playing;
+                            }
                         }
                         PauseSelection::ModeSelect => {
                             state = GameState::ModeSelection {
@@ -1084,7 +1558,18 @@ async fn main() {
 
                 // 检测 ESC 键退出暂停（在状态内部检测）
                 if input_state.is_key_pressed(KeyCode::Escape) {
-                    state = GameState::Playing;
+                    // 恢复到正确的状态
+                    if let Some(run_state) = roguelike_state.clone() {
+                        // 根据 RunPhase 恢复到对应的 GameState
+                        state = match run_state.phase {
+                            roguelike::RunPhase::Boss(_) => {
+                                GameState::RoguelikeBoss { run_state }
+                            }
+                            _ => GameState::RoguelikeRun { run_state },
+                        };
+                    } else {
+                        state = GameState::Playing;
+                    }
                     next_frame().await;
                     continue;
                 }
@@ -1092,6 +1577,7 @@ async fn main() {
                 if next_selection != selection {
                     state = GameState::Paused {
                         selection: next_selection,
+                        roguelike_state: roguelike_state.clone(),
                     };
                 }
 
@@ -1121,6 +1607,7 @@ async fn main() {
                     &starfield,
                     is_online_mode,
                     &online_bullets,
+                    &chain_lightnings,
                 );
                 ui::draw_victory_pause_overlay(
                     (started_at + VICTORY_PAUSE_DURATION - frame_t).max(0.0),
@@ -1165,6 +1652,7 @@ async fn main() {
                     &starfield,
                     is_online_mode,
                     &online_bullets,
+                    &chain_lightnings,
                 );
                 ui::draw_round_end(
                     winner_idx,
@@ -1315,6 +1803,12 @@ async fn main() {
                             println!("游戏开始!");
                             is_online_mode = true;
                             online_bullets.clear();
+                            pending_hits.clear(); // 重置乐观命中提示
+
+                            // 清空本地玩家的子弹（避免残留本地子弹渲染）
+                            for player in players.iter_mut() {
+                                player.bullets.clear();
+                            }
 
                             // 确保有一个本地玩家用于输入处理
                             // 在线模式下，本地只需要一个玩家对象来处理输入
@@ -1334,6 +1828,7 @@ async fn main() {
                                         weapon_switch_alt: None,
                                         dash: KeyCode::Space,
                                         hyperspace: KeyCode::H,
+                                        phase_dash: KeyCode::E, // 相位闪现：E
                                     },
                                     now,
                                     3, // 默认生命值
@@ -1355,7 +1850,7 @@ async fn main() {
             }
         }
 
-        // ========== 在线模式：输入同步 ==========
+        // ========== 在线模式：输入同步与客户端预测 ==========
         if is_online_mode && matches!(state, GameState::Playing) {
             // 收集当前按键状态
             let mut keys_pressed = Vec::new();
@@ -1378,8 +1873,19 @@ async fn main() {
                 }
             }
 
-            // 每帧发送输入到服务器（包括空列表，以清除服务器端的输入状态）
-            network_client.send(network::ClientMessage::GameInput { keys: keys_pressed });
+            // 发送输入到服务器（使用 send_input 支持客户端预测）
+            // 记录当前帧的 dt，用于重播时保持物理一致性
+            let input_timestamp = get_time();
+            network_client.send_input(keys_pressed.clone(), input_timestamp, dt);
+
+            // === 客户端预测：本地立即应用输入 ===
+            // 在等待服务器响应期间，先在本地应用输入，减少感知延迟
+            if let Some(local_player) = players.get_mut(0)
+                && local_player.alive
+            {
+                let parsed_input = network::ParsedInput::from_keys(&keys_pressed);
+                apply_predicted_input(local_player, &parsed_input, dt, input_timestamp);
+            }
 
             // 接收服务器的游戏状态更新
             while let Some(message) = network_client.receive() {
@@ -1390,31 +1896,130 @@ async fn main() {
                         bullets: server_bullets,
                         vortices: server_vortices,
                         powerups: server_powerups,
-                        ..
+                        last_input_seqs,
+                        timestamp,
                     } => {
-                        // 更新玩家状态
-                        for (i, server_player) in server_players.iter().enumerate() {
-                            if i < players.len() {
-                                // 更新玩家位置和状态（权威服务器）
-                                players[i].ship.pos = Vec2::new(server_player.x, server_player.y);
-                                players[i].ship.rot = server_player.angle;
-                                players[i].ship.vel =
-                                    Vec2::new(server_player.vel_x, server_player.vel_y);
-                                players[i].lives = server_player.lives;
+                        // === 插值系统：记录服务器快照 ===
+                        // 校准时钟（首次）并记录快照用于远程实体插值
+                        interp_manager.align_clock(timestamp, frame_t);
+                        interp_manager.record_server_snapshot(
+                            timestamp,
+                            &server_players,
+                            &server_asteroids,
+                            &server_bullets,
+                            network_client.player_id.as_deref(),
+                        );
 
-                                // 注意：分数由 Score 结构管理，服务器同步分数需要特殊处理
-                                // 这里暂时跳过分数更新，或者可以通过 reset + add_points 实现
-                                if players[i].score.value() != server_player.score {
-                                    players[i].score.reset();
-                                    players[i].score.add_points(server_player.score);
+                        // 按玩家ID更新本地玩家状态（避免HashMap顺序不稳定导致的错位）
+                        // 在线模式下，players[0] 是本地玩家，需要用 player_id 找到对应的服务器数据
+                        if let Some(my_id) = network_client.player_id.clone() {
+                            // 找到服务器返回的本玩家数据
+                            if let Some(my_server_data) =
+                                server_players.iter().find(|p| p.id == my_id)
+                            {
+                                // === 服务器协调：获取未确认的输入 ===
+                                // 如果服务器尚未开始处理输入（last_input_seqs 无本玩家），
+                                // 则不进行 reconcile，直接使用服务器状态
+                                let replay_inputs =
+                                    if let Some(&server_seq) = last_input_seqs.get(&my_id) {
+                                        network_client.reconcile(server_seq, my_server_data)
+                                    } else {
+                                        // 服务器尚未确认任何输入，清空待确认队列避免累积
+                                        // 这通常发生在刚加入游戏或服务器重启时
+                                        network_client.reset_prediction_state();
+                                        Vec::new()
+                                    };
+
+                                if !players.is_empty() {
+                                    let local_player = &mut players[0];
+
+                                    // 应用服务器权威状态作为基准
+                                    local_player.ship.pos =
+                                        Vec2::new(my_server_data.x, my_server_data.y);
+                                    local_player.ship.rot = my_server_data.angle;
+                                    local_player.ship.vel =
+                                        Vec2::new(my_server_data.vel_x, my_server_data.vel_y);
+                                    local_player.lives = my_server_data.lives;
+
+                                    // 分数同步
+                                    if local_player.score.value() != my_server_data.score {
+                                        local_player.score.reset();
+                                        local_player.score.add_points(my_server_data.score);
+                                    }
+
+                                    // 检查玩家是否存活
+                                    if !my_server_data.alive && local_player.alive {
+                                        local_player.mark_dead(frame_t);
+                                    } else if my_server_data.alive && !local_player.alive {
+                                        local_player.alive = true;
+                                    }
+
+                                    // === 重播未确认输入，生成新的预测状态 ===
+                                    // 这确保了本地状态与服务器状态一致，同时应用了服务器尚未处理的输入
+                                    // 使用输入记录时的 dt 来保持物理一致性
+                                    if !replay_inputs.is_empty() && local_player.alive {
+                                        for cmd in replay_inputs.iter() {
+                                            let parsed = network::ParsedInput::from_keys(&cmd.keys);
+                                            // 使用记录的 dt，如果无效则回退到当前帧 dt
+                                            let replay_dt = if cmd.dt > 0.0 && cmd.dt < 0.1 {
+                                                cmd.dt
+                                            } else {
+                                                dt
+                                            };
+                                            apply_predicted_input(local_player, &parsed, replay_dt, cmd.timestamp);
+                                        }
+                                    }
                                 }
+                            }
 
-                                // 检查玩家是否存活
-                                if !server_player.alive && players[i].alive {
-                                    players[i].mark_dead(frame_t);
-                                } else if server_player.alive && !players[i].alive {
-                                    // 玩家复活
-                                    players[i].alive = true;
+                            // 同步其他玩家（对手）用于渲染
+                            // 如果 players 只有一个本地玩家，需要添加对手
+                            for server_player in server_players.iter() {
+                                if server_player.id != my_id {
+                                    // 这是对手玩家，确保有对应的本地 Player 对象
+                                    if players.len() < 2 {
+                                        // 添加对手玩家用于渲染
+                                        let now = get_time();
+                                        players.push(Player::new(
+                                            "Opponent",
+                                            RED, // 对手用红色
+                                            Vec2::new(server_player.x, server_player.y),
+                                            Controls {
+                                                // 对手不需要本地控制
+                                                thrust: KeyCode::Unknown,
+                                                left: KeyCode::Unknown,
+                                                right: KeyCode::Unknown,
+                                                shoot_primary: KeyCode::Unknown,
+                                                shoot_alt: None,
+                                                weapon_switch: KeyCode::Unknown,
+                                                weapon_switch_alt: None,
+                                                dash: KeyCode::Unknown,
+                                                hyperspace: KeyCode::Unknown,
+                                                phase_dash: KeyCode::Unknown,
+                                            },
+                                            now,
+                                            server_player.lives,
+                                        ));
+                                    }
+                                    // 更新对手位置
+                                    if players.len() > 1 {
+                                        let opponent = &mut players[1];
+                                        opponent.ship.pos =
+                                            Vec2::new(server_player.x, server_player.y);
+                                        opponent.ship.rot = server_player.angle;
+                                        opponent.ship.vel =
+                                            Vec2::new(server_player.vel_x, server_player.vel_y);
+                                        opponent.lives = server_player.lives;
+                                        if opponent.score.value() != server_player.score {
+                                            opponent.score.reset();
+                                            opponent.score.add_points(server_player.score);
+                                        }
+                                        if !server_player.alive && opponent.alive {
+                                            opponent.mark_dead(frame_t);
+                                        } else if server_player.alive && !opponent.alive {
+                                            opponent.alive = true;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1446,6 +2051,7 @@ async fn main() {
                                     sides,
                                     collided: false,
                                     vertex_offsets,
+                                    asteroid_type: asteroid::AsteroidType::Normal,
                                 };
                                 asteroids.push(asteroid);
                             }
@@ -1505,6 +2111,35 @@ async fn main() {
                                 powerup_type,
                             });
                         }
+
+                        // === 乐观命中确认 (Phase 4C) ===
+                        // 检查待确认的命中是否已被服务器确认（目标消失）
+                        let server_asteroid_positions: Vec<Vec2> = server_asteroids
+                            .iter()
+                            .map(|a| Vec2::new(a.x, a.y))
+                            .collect();
+                        let server_ufo_positions: Vec<Vec2> = ufos.iter().map(|u| u.pos).collect();
+
+                        // 遍历所有待确认命中，检查目标是否仍存在
+                        for hit in pending_hits.get_all().to_vec() {
+                            if hit.state != effects::PendingHitState::Pending {
+                                continue;
+                            }
+
+                            let target_still_exists = match hit.kind {
+                                PendingHitKind::Asteroid => server_asteroid_positions
+                                    .iter()
+                                    .any(|pos| (*pos - hit.pos).length() < 30.0),
+                                PendingHitKind::Ufo => server_ufo_positions
+                                    .iter()
+                                    .any(|pos| (*pos - hit.pos).length() < 35.0),
+                            };
+
+                            // 如果目标已消失，确认命中
+                            if !target_still_exists {
+                                pending_hits.confirm(hit.id, frame_t as f32);
+                            }
+                        }
                     }
                     network::ServerMessage::GameOver { winner, scores } => {
                         println!("游戏结束! 胜者: {:?}, 分数: {:?}", winner, scores);
@@ -1522,19 +2157,25 @@ async fn main() {
             }
         }
 
-        let bullets_fired = update_players(
-            &mut players,
-            &mut particles,
-            &sounds,
-            frame_t,
-            dt,
-            settings.ship_speed_multiplier,
-            settings.sound_volume,
-            &input_state,
-            &vortex_manager,
-            current_mode,
-            &asteroids,
-        );
+        // 在线模式下跳过本地物理更新，由服务器权威控制
+        // 本地只负责渲染服务器同步过来的状态
+        let bullets_fired = if is_online_mode {
+            0 // 在线模式不产生本地子弹
+        } else {
+            update_players(
+                &mut players,
+                &mut particles,
+                &sounds,
+                frame_t,
+                dt,
+                settings.ship_speed_multiplier,
+                settings.sound_volume,
+                &input_state,
+                &vortex_manager,
+                current_mode,
+                &asteroids,
+            )
+        };
 
         // 更新追踪导弹的目标（寻找最近的小行星）
         update_homing_missiles(&mut players, &asteroids);
@@ -1638,7 +2279,8 @@ async fn main() {
                         WeaponType::Normal => WeaponType::Spread,
                         WeaponType::Spread => WeaponType::Penetrating,
                         WeaponType::Penetrating => WeaponType::Homing,
-                        WeaponType::Homing => WeaponType::Normal,
+                        WeaponType::Homing => WeaponType::ChainIon,
+                        WeaponType::ChainIon => WeaponType::Normal,
                     };
                     // 追踪武器使用统计
                     let weapon_name = format!("{:?}", player.weapon_type);
@@ -1655,6 +2297,9 @@ async fn main() {
         }
 
         particles.update(dt, frame_t as f32);
+
+        // 更新链式闪电效果
+        chain_lightnings.update(frame_t as f32);
 
         // 重置并重用 QuadTree（避免每帧分配新内存）
         quadtree.reset(Bounds::new(0.0, 0.0, screen_width(), screen_height()));
@@ -1689,7 +2334,14 @@ async fn main() {
             for obj in player_query.iter() {
                 let asteroid = &asteroids[obj.index];
                 if circle_intersects_triangle(asteroid.pos, asteroid.size, t1, t2, t3) {
+                    let lives_before = player.lives;
                     player.mark_dead(frame_t);
+                    // Roguelike：Boss 战受伤标记（用于完美封印等遗物判定）
+                    if player.lives < lives_before {
+                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                            run_state.boss_damage_taken = true;
+                        }
+                    }
                     // 添加碰撞爆炸效果 - 使用飞船位置而不是小行星位置
                     particles.spawn_explosion(ship_center, asteroid.size, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
@@ -1719,7 +2371,14 @@ async fn main() {
 
                 // 简单的圆形-三角形碰撞检测
                 if circle_intersects_triangle(ufo.pos, UFO_RADIUS, t1, t2, t3) {
+                    let lives_before = player.lives;
                     player.mark_dead(frame_t);
+                    // Roguelike：Boss 战受伤标记
+                    if player.lives < lives_before {
+                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                            run_state.boss_damage_taken = true;
+                        }
+                    }
                     particles.spawn_explosion(ship_center, UFO_RADIUS, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {
@@ -1748,7 +2407,14 @@ async fn main() {
                 // 简单的圆形-三角形碰撞检测
                 if circle_intersects_triangle(bullet.pos, ENEMY_BULLET_RADIUS, t1, t2, t3) {
                     bullet.collided = true;
+                    let lives_before = player.lives;
                     player.mark_dead(frame_t);
+                    // Roguelike：Boss 战受伤标记
+                    if player.lives < lives_before {
+                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                            run_state.boss_damage_taken = true;
+                        }
+                    }
                     particles.spawn_explosion(ship_center, 20.0, RED, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {
@@ -1760,9 +2426,36 @@ async fn main() {
             }
         }
 
+        // 相位闪现爆炸伤害处理
+        for player in players.iter_mut() {
+            let phase_explosions = player.drain_phase_explosions(frame_t);
+            for explosion in phase_explosions {
+                // 检测爆炸范围内的小行星
+                for asteroid in asteroids.iter_mut() {
+                    if asteroid.collided {
+                        continue;
+                    }
+                    let dist = (asteroid.pos - explosion.pos).length();
+                    if dist <= explosion.radius + asteroid.size {
+                        asteroid.collided = true;
+                        // 生成爆炸粒子效果
+                        particles.spawn_explosion(
+                            asteroid.pos,
+                            asteroid.size,
+                            SKYBLUE,
+                            frame_t as f32,
+                        );
+                    }
+                }
+                // 生成爆炸视觉效果
+                particles.spawn_explosion(explosion.pos, explosion.radius * 0.5, SKYBLUE, frame_t as f32);
+            }
+        }
+
         // 子弹与小行星碰撞检测（使用 QuadTree）
-        // 收集小行星击杀信息：(player_idx, asteroid_idx, score_value, asteroid_pos, asteroid_size, player_color, bullet_vel)
-        let mut asteroid_hits: Vec<(usize, usize, u32, Vec2, f32, Color, Vec2)> = Vec::new();
+        // 收集小行星击杀信息：(player_idx, asteroid_idx, score_value, asteroid_pos, asteroid_size, player_color, bullet_vel, is_chain_hit)
+        #[allow(clippy::type_complexity)]
+        let mut asteroid_hits: Vec<(usize, usize, u32, Vec2, f32, Color, Vec2, bool)> = Vec::new();
 
         for (player_idx, player) in players.iter_mut().enumerate() {
             for bullet in player.bullets.iter_mut() {
@@ -1775,21 +2468,42 @@ async fn main() {
                 quadtree.query(bullet.pos, BULLET_RADIUS * 3.0, &mut bullet_query);
 
                 for obj in bullet_query.iter() {
-                    let asteroid = &mut asteroids[obj.index];
-                    if asteroid.collided {
+                    // 先检查碰撞条件（只读访问）
+                    let hit_asteroid_idx = obj.index;
+                    let asteroid_collided = asteroids[hit_asteroid_idx].collided;
+                    let asteroid_pos = asteroids[hit_asteroid_idx].pos;
+                    let asteroid_size = asteroids[hit_asteroid_idx].size;
+
+                    if asteroid_collided {
                         continue;
                     }
 
-                    if (asteroid.pos - bullet.pos).length() < asteroid.size {
+                    if (asteroid_pos - bullet.pos).length() < asteroid_size {
+                        // === 链式离子炮：先查找链式目标（需要不可变借用） ===
+                        let chain_targets = if bullet.weapon_type == WeaponType::ChainIon {
+                            chain_lightning::find_chain_asteroid_targets(
+                                asteroid_pos,
+                                hit_asteroid_idx,
+                                &asteroids,
+                                constants::chain_ion::MAX_JUMPS - 1,
+                                constants::chain_ion::RANGE,
+                            )
+                        } else {
+                            Vec::new()
+                        };
+
+                        // 现在可以安全地进行可变借用
+                        let asteroid = &mut asteroids[hit_asteroid_idx];
                         asteroid.collided = true;
                         asteroid_hits.push((
                             player_idx,
-                            obj.index,
+                            hit_asteroid_idx,
                             asteroid.score_value(),
                             asteroid.pos,
                             asteroid.size,
                             player.color,
                             bullet.vel,
+                            false, // 非链式命中
                         ));
 
                         // 记录击杀（仅在 Duel 模式下）
@@ -1799,6 +2513,58 @@ async fn main() {
 
                         if let Some(split) = asteroid.split(bullet.vel) {
                             new_asteroids.extend(split);
+                        }
+
+                        // === 处理链式攻击目标 ===
+                        if !chain_targets.is_empty() {
+                            // 收集链式路径节点（用于视觉效果）
+                            let mut chain_nodes = vec![asteroid_pos];
+
+                            for (hop, &target_idx) in chain_targets.iter().enumerate() {
+                                let target_asteroid = &mut asteroids[target_idx];
+                                if target_asteroid.collided {
+                                    continue;
+                                }
+
+                                // 计算链式伤害比例
+                                let damage_ratio = chain_lightning::damage_ratio(hop);
+                                let chain_score =
+                                    (target_asteroid.score_value() as f32 * damage_ratio) as u32;
+
+                                target_asteroid.collided = true;
+                                chain_nodes.push(target_asteroid.pos);
+
+                                // 记录链式命中
+                                asteroid_hits.push((
+                                    player_idx,
+                                    target_idx,
+                                    chain_score,
+                                    target_asteroid.pos,
+                                    target_asteroid.size,
+                                    player.color,
+                                    bullet.vel,
+                                    true, // 链式命中
+                                ));
+
+                                // Duel 模式记录击杀
+                                if matches!(current_mode, GameMode::Duel) {
+                                    player_kills[player_idx] += 1;
+                                }
+
+                                // 分裂小行星
+                                if let Some(split) = target_asteroid.split(bullet.vel) {
+                                    new_asteroids.extend(split);
+                                }
+                            }
+
+                            // 生成链式闪电视觉效果
+                            if chain_nodes.len() > 1 {
+                                chain_lightnings.spawn_path(
+                                    chain_nodes,
+                                    frame_t as f32,
+                                    player.color,
+                                );
+                            }
                         }
 
                         // 尝试穿透，如果失败则标记碰撞
@@ -1819,9 +2585,21 @@ async fn main() {
             asteroid_size,
             player_color,
             _bullet_vel,
+            _is_chain_hit,
         ) in asteroid_hits
         {
-            if players[player_idx].add_score(score_value) {
+            // Roguelike：击杀事件（用于连击/遗物效果）
+            if let GameState::RoguelikeRun { run_state } | GameState::RoguelikeBoss { run_state } =
+                &mut state
+            {
+                run_state.record_kill();
+            }
+
+            // 应用连击倍数计算最终得分
+            let multiplier = players[player_idx].score_multiplier();
+            let final_score = (score_value as f32 * multiplier) as u32;
+
+            if players[player_idx].add_score(final_score) {
                 // 获得额外生命！播放音效
                 sounds.play(SoundEffect::PowerUp, settings.sound_volume);
             }
@@ -1903,7 +2681,12 @@ async fn main() {
         // 应用 UFO 击杀奖励
         for (player_idx, ufo_idx, score_value, ufo_pos, drop_chance, player_color) in ufo_hits {
             defeated_ufo_indices.push(ufo_idx);
-            if players[player_idx].add_score(score_value) {
+
+            // 应用连击倍数计算最终得分
+            let multiplier = players[player_idx].score_multiplier();
+            let final_score = (score_value as f32 * multiplier) as u32;
+
+            if players[player_idx].add_score(final_score) {
                 // 获得额外生命！播放音效
                 sounds.play(SoundEffect::PowerUp, settings.sound_volume);
             }
@@ -1954,6 +2737,16 @@ async fn main() {
                 let mut drop = PowerUp::new(frame_t, drop_type);
                 drop.pos = ufo_pos;
                 powerups.push(drop);
+            }
+
+            // UFO 击杀触发选卡（仅限 Survival/TimeAttack 模式，且还有剩余选卡次数）
+            if matches!(current_mode, GameMode::Survival | GameMode::TimeAttack)
+                && global_draft_state.can_trigger_ufo_draft()
+            {
+                global_draft_state.start_draft(false); // UFO 选卡（非开局）
+                state = GameState::DraftSelection {
+                    draft_state: global_draft_state.clone(),
+                };
             }
         }
 
@@ -2023,11 +2816,14 @@ async fn main() {
                     &mut next_weapon_spawn,
                     settings.player_count,
                 );
-                let shields_collected =
-                    powerup::handle_pickups(&mut players, &mut powerups, frame_t);
-                if shields_collected > 0 {
-                    achievements.stats.shields_collected += shields_collected;
+                let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                if !pickups.is_empty() {
+                    achievements.stats.shields_collected += pickups.len() as u32;
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                    // 为每个拾取的道具生成粒子效果
+                    for pickup in pickups {
+                        particles.spawn_powerup_pickup(pickup.pos, pickup.color, frame_t as f32);
+                    }
                 }
                 highest_survival_score = highest_survival_score.max(total_survival_score(&players));
 
@@ -2070,11 +2866,14 @@ async fn main() {
                     );
                 }
 
-                let shields_collected =
-                    powerup::handle_pickups(&mut players, &mut powerups, frame_t);
-                if shields_collected > 0 {
-                    achievements.stats.shields_collected += shields_collected;
+                let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                if !pickups.is_empty() {
+                    achievements.stats.shields_collected += pickups.len() as u32;
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                    // 为每个拾取的道具生成粒子效果
+                    for pickup in pickups {
+                        particles.spawn_powerup_pickup(pickup.pos, pickup.color, frame_t as f32);
+                    }
                 }
 
                 highest_survival_score = highest_survival_score.max(total_survival_score(&players));
@@ -2162,25 +2961,49 @@ async fn main() {
 
                 // 检查击杀胜利（最后一人存活）
                 let alive = players.iter().filter(|player| player.alive).count();
-                if alive <= 1 {
-                    if let Some(winner_idx) = players.iter().position(|player| player.alive) {
-                        duel_state.record_round_winner(winner_idx);
-                        duel_state.last_winner = Some(winner_idx);
+                if alive <= 1
+                    && let Some(winner_idx) = players.iter().position(|player| player.alive)
+                {
+                    duel_state.record_round_winner(winner_idx);
+                    duel_state.last_winner = Some(winner_idx);
 
-                        // 检查是否赢得整场比赛
-                        if duel_state.check_match_winner().is_some() {
-                            // 保存成就和统计数据
-                            achievements.save();
-                            state = GameState::GameOver {
-                                victory: true,
-                                end_time: frame_t,
-                            };
-                        } else {
-                            // 只是赢得了当前回合
-                            state = GameState::RoundEnd { winner_idx };
-                        }
-                        continue;
+                    // 检查是否赢得整场比赛
+                    if duel_state.check_match_winner().is_some() {
+                        // 保存成就和统计数据
+                        achievements.save();
+                        state = GameState::GameOver {
+                            victory: true,
+                            end_time: frame_t,
+                        };
+                    } else {
+                        // 只是赢得了当前回合
+                        state = GameState::RoundEnd { winner_idx };
                     }
+                    continue;
+                }
+            }
+            GameMode::Roguelike => {
+                // Roguelike 模式的游戏逻辑在 RoguelikeRun 状态中处理
+                // 这里处理基础的道具生成和拾取
+                powerup::spawn(
+                    frame_t,
+                    &mut powerups,
+                    &mut next_shield_spawn,
+                    &mut next_weapon_spawn,
+                    settings.player_count,
+                );
+                let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
+                if !pickups.is_empty() {
+                    // Roguelike：拾取事件（遗物效果）
+                    if let GameState::RoguelikeRun { run_state }
+                    | GameState::RoguelikeBoss { run_state } = &mut state
+                    {
+                        for _ in 0..pickups.len() {
+                            run_state.trigger_pickup();
+                        }
+                    }
+                    achievements.stats.shields_collected += pickups.len() as u32;
+                    sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                 }
             }
             GameMode::Settings => unreachable!("Settings is not a playable mode"),
@@ -2195,13 +3018,69 @@ async fn main() {
 
         let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
 
+        // === 在线模式：应用实体插值 ===
+        // 在渲染前，用插值后的状态更新远程实体，实现平滑渲染
+        if is_online_mode {
+            let sampled = interp_manager.sample_world(frame_t);
+
+            // 更新远程玩家（players[1..] 是远程玩家）
+            if players.len() > 1 {
+                for remote_player in sampled.remote_players.iter() {
+                    // 查找对应的本地 Player 对象
+                    for player in players.iter_mut().skip(1) {
+                        // 注意：当前实现只支持一个对手，未来可以通过 ID 匹配
+                        if player.alive || remote_player.alive {
+                            player.ship.pos = remote_player.pos;
+                            player.ship.rot = remote_player.rot;
+                            player.ship.vel = remote_player.vel;
+                            // 生死状态和分数仍从服务器直接同步（在 GameState 处理中）
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 使用插值后的子弹替换在线子弹列表（平滑子弹渲染）
+            online_bullets.clear();
+            for bullet in sampled.bullets.iter() {
+                online_bullets.push(OnlineBullet {
+                    x: bullet.pos.x,
+                    y: bullet.pos.y,
+                    vx: bullet.vel.x,
+                    vy: bullet.vel.y,
+                });
+            }
+        }
+
         // 计算性能统计
         let entity_count = asteroids.len() + players.iter().map(|p| p.bullets.len()).sum::<usize>();
+
+        // 网络调试信息（仅在线模式）
+        let network_debug = if is_online_mode {
+            let interp_debug = interp_manager.debug_info().map(|info| InterpDebugStats {
+                player_buffers: info.player_buffers,
+                asteroid_buffers: info.asteroid_buffers,
+                bullet_buffers: info.bullet_buffers,
+                avg_player_snapshots: info.avg_player_snapshots,
+                avg_bullet_snapshots: info.avg_bullet_snapshots,
+                render_delay_ms: info.render_delay_ms,
+            });
+
+            Some(NetworkDebugStats {
+                rtt_ms: network_client.latency_ms,
+                pending_inputs: network_client.pending_input_count(),
+                interp: interp_debug,
+            })
+        } else {
+            None
+        };
+
         let debug_stats = DebugStats {
             fps: 1.0 / raw_dt, // 使用原始 dt 计算真实 FPS
             entity_count,
             quadtree_depth: quadtree.max_depth(),
             particle_count: particles.count(),
+            network: network_debug,
         };
 
         render_scene(
@@ -2225,6 +3104,7 @@ async fn main() {
             &starfield,
             is_online_mode,
             &online_bullets,
+            &chain_lightnings,
         );
         if matches!(current_mode, GameMode::Survival) {
             ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
@@ -2237,8 +3117,102 @@ async fn main() {
                 fonts.get_best(settings.font_choice),
             );
         }
+
+        // Roguelike 模式 HUD 和 Boss 渲染（必须在 render_scene 之后）
+        if matches!(current_mode, GameMode::Roguelike) {
+            let shake_offset = screen_shake
+                .filter(|s| s.is_active(frame_t as f32))
+                .map(|s| s.get_offset(frame_t as f32))
+                .unwrap_or(Vec2::ZERO);
+
+            match &state {
+                GameState::RoguelikeRun { run_state } => {
+                    roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
+                }
+                GameState::RoguelikeBoss { run_state } => {
+                    roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
+                    if let roguelike::RunPhase::Boss(boss) = &run_state.phase {
+                        roguelike::draw_giant_splitter(boss, shake_offset, frame_t as f32);
+                        roguelike::draw_boss_health_bar(boss);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 更新性能监控
+        performance_monitor.update((
+            players.len() + ufos.len(),
+            players.iter().map(|p| p.bullets.len()).sum::<usize>()
+                + enemy_bullets.len()
+                + online_bullets.len(),
+            asteroids.len(),
+            particles.count(),
+        ));
+
+        // 绘制性能覆盖层
+        if show_debug {
+            performance_monitor.draw_overlay(fonts.get_best(settings.font_choice));
+        }
+
+        // 检查帧数限制（用于性能测试）
+        if let Some(max_frames) = args.frames
+            && performance_monitor.metrics.total_frames >= max_frames
+        {
+            // 导出性能指标
+            if let Err(e) = performance_monitor.export_metrics() {
+                eprintln!("Failed to export metrics: {}", e);
+            }
+            println!("Performance test completed after {} frames", max_frames);
+            break;
+        }
+
         next_frame().await;
     }
+}
+
+// ============================================================================
+// 客户端预测辅助函数
+// ============================================================================
+
+/// 应用预测输入到玩家状态（用于本地预测和服务器协调后重播）
+///
+/// 此函数模拟单帧的物理更新，基于给定的输入状态。
+/// 用于：
+/// 1. 本地输入即时应用（减少感知延迟）
+/// 2. 服务器状态协调后重播未确认的输入
+fn apply_predicted_input(player: &mut Player, input: &network::ParsedInput, dt: f32, now: f64) {
+    // 阻尼减速
+    let mut acc = -player.ship.vel * SHIP_DAMPING;
+
+    // 推进加速
+    player.is_thrusting = input.thrust;
+    if input.thrust {
+        acc += player.ship.forward_vector() * SHIP_THRUST;
+    }
+
+    // 旋转（应用超速模式加成）
+    let turn_rate = player.turn_rate(now);
+    if input.right {
+        player.ship.rot += turn_rate * dt;
+    } else if input.left {
+        player.ship.rot -= turn_rate * dt;
+    }
+
+    // 更新速度
+    player.ship.vel += acc * dt;
+
+    // 限制最大速度（应用超速模式加成）
+    let max_speed = player.max_speed(now);
+    if player.ship.vel.length() > max_speed {
+        player.ship.vel = player.ship.vel.normalize() * max_speed;
+    }
+
+    // 更新位置
+    player.ship.pos += player.ship.vel * dt;
+
+    // 边界环绕
+    player.ship.pos = wrap_around(&player.ship.pos);
 }
 
 struct RoundState<'a> {
@@ -2318,6 +3292,15 @@ fn update_players(
             sounds.play(SoundEffect::PowerUp, sound_volume * 0.7);
         }
 
+        // 相位闪现输入检测
+        if input.is_key_pressed(player.controls.phase_dash) && player.can_phase_dash(frame_t) {
+            let (start_pos, end_pos) = player.start_phase_dash(frame_t);
+            // 起点和终点特效
+            particles.spawn_explosion(start_pos, 15.0, SKYBLUE, frame_t as f32);
+            particles.spawn_explosion(end_pos, 20.0, SKYBLUE, frame_t as f32);
+            sounds.play(SoundEffect::PowerUp, sound_volume * 0.6);
+        }
+
         // 超空间跳跃完成处理
         if player.hyperspace_active && !player.is_in_hyperspace(frame_t) {
             // 生成随机传送位置
@@ -2347,6 +3330,9 @@ fn update_players(
 
         // 更新冲刺残影
         player.update_dash_trail(frame_t);
+
+        // 更新相位闪现尾迹
+        player.update_phase_trail(frame_t);
 
         // 超空间跳跃中：跳过所有移动，只更新子弹
         if player.is_in_hyperspace(frame_t) {
@@ -2382,7 +3368,9 @@ fn update_players(
         player.is_thrusting = thrusting;
 
         if thrusting {
-            acc += player.ship.forward_vector() * SHIP_THRUST * ship_speed_multiplier;
+            // 应用加速度修改器
+            let modified_thrust = player.modifiers.modified_acceleration(SHIP_THRUST);
+            acc += player.ship.forward_vector() * modified_thrust * ship_speed_multiplier;
             // 添加推进器粒子效果
             let forward = player.ship.forward_vector();
             let thruster_pos = player.ship.pos - forward * SHIP_HEIGHT / 2.;
@@ -2395,10 +3383,15 @@ fn update_players(
             acc += vortex_force;
         }
 
+        // 应用转向速度修改器（卡牌加成 + 超速模式加成）
+        let mut modified_turn_rate = player.modifiers.modified_turn_rate(SHIP_ROTATION_STEP);
+        if player.overdrive_active(frame_t) {
+            modified_turn_rate *= 1.6; // 超速模式：转向+60%
+        }
         if input.is_key_down(player.controls.right) {
-            player.ship.rot += SHIP_ROTATION_STEP * dt * ship_speed_multiplier;
+            player.ship.rot += modified_turn_rate * dt * ship_speed_multiplier;
         } else if input.is_key_down(player.controls.left) {
-            player.ship.rot -= SHIP_ROTATION_STEP * dt * ship_speed_multiplier;
+            player.ship.rot -= modified_turn_rate * dt * ship_speed_multiplier;
         }
 
         // 更新连击状态（检查是否过期）
@@ -2416,8 +3409,8 @@ fn update_players(
         }
 
         player.ship.vel += acc * dt;
-        // 应用连击速度加成
-        let max_speed = player.max_speed();
+        // 应用连击速度加成和超速模式加成
+        let max_speed = player.max_speed(frame_t);
         if player.ship.vel.length() > max_speed {
             player.ship.vel = player.ship.vel.normalize() * max_speed;
         }
@@ -2547,6 +3540,7 @@ fn render_scene(
     starfield: &background::Starfield,
     is_online_mode: bool,
     online_bullets: &[OnlineBullet],
+    chain_lightnings: &chain_lightning::ChainLightningManager,
 ) {
     // 应用屏幕震动偏移
     let shake_offset = screen_shake
@@ -2569,6 +3563,9 @@ fn render_scene(
             render::draw_bullet(bullet, shake_offset, player.color, frame_t as f32);
         }
     }
+
+    // 绘制链式闪电效果
+    chain_lightnings.draw(shake_offset, frame_t as f32);
 
     // 绘制在线模式的子弹（服务器同步）
     if is_online_mode {
@@ -2623,6 +3620,28 @@ fn render_scene(
             render::draw_dash_trail(&player.dash_trail, player.color, frame_t);
         }
 
+        // 绘制相位闪现尾迹（使用天蓝色）
+        let phase_trail = player.phase_trail_tuples(frame_t);
+        if !phase_trail.is_empty() {
+            render::draw_dash_trail(&phase_trail, SKYBLUE, frame_t);
+        }
+
+        // 连击发光效果（在飞船下层）
+        let visual_level = player.killstreak_visual_level();
+        if visual_level > 0 {
+            render::draw_ship_glow(ship_pos, player.color, visual_level, frame_t as f32);
+        }
+
+        // 幽灵模式效果（在飞船下层）
+        if player.ghost_mode_active(frame_t) {
+            render::draw_ghost_mode_effect(ship_pos, player.ship.rot, player.color, frame_t as f32);
+        }
+
+        // 超速模式效果（在飞船下层）
+        if player.overdrive_active(frame_t) {
+            render::draw_overdrive_effect(ship_pos, player.ship.vel, frame_t as f32);
+        }
+
         // 使用增强渲染绘制飞船
         render::draw_ship(
             ship_pos,
@@ -2654,15 +3673,43 @@ fn render_scene(
         }
     }
 
-    if let Some(state) = duel_state {
-        if let Some(flag) = &state.flag {
-            duel::draw_flag(flag, flag_radius);
-        }
+    // 连击屏幕边缘特效（取所有玩家中最高的连击等级）
+    let max_visual_level = players
+        .iter()
+        .filter(|p| p.alive)
+        .map(|p| p.killstreak_visual_level())
+        .max()
+        .unwrap_or(0);
+    if max_visual_level >= constants::killstreak::VIGNETTE_THRESHOLD {
+        // 计算强度：从阈值开始线性增加
+        let level_above_threshold =
+            (max_visual_level - constants::killstreak::VIGNETTE_THRESHOLD) as f32;
+        let intensity = (level_above_threshold * 0.3 + 0.2)
+            .min(constants::killstreak::VIGNETTE_MAX_INTENSITY);
+        // 使用第一个活着的玩家的颜色
+        let vignette_color = players
+            .iter()
+            .find(|p| p.alive && p.killstreak_visual_level() == max_visual_level)
+            .map(|p| p.color)
+            .unwrap_or(WHITE);
+        render::draw_killstreak_vignette(vignette_color, intensity, frame_t as f32);
+    }
+
+    if let Some(state) = duel_state
+        && let Some(flag) = &state.flag
+    {
+        duel::draw_flag(flag, flag_radius);
     }
 
     ui::draw_players_hud(players, HudMode::Active { time: frame_t }, font);
 
-    // 在 Duel 模式下显示连击状态
+    // 绘制玩家状态效果图标栏（显示当前激活的道具/buff）
+    ui::draw_player_buffs(players, frame_t, font);
+
+    // 绘制连击计数器和分数倍率（所有模式通用）
+    ui::draw_killstreak_counter(players, frame_t, font);
+
+    // 在 Duel 模式下显示连击状态（额外的大字提示）
     if duel_state.is_some() {
         ui::draw_killstreak(players, font);
     }
@@ -2682,13 +3729,13 @@ fn render_scene(
     // 显示成就解锁提示
     let recent_unlocks = achievements.get_recent_unlocks(6.0, frame_t);
     for (i, id) in recent_unlocks.iter().enumerate() {
-        if let Some(progress) = achievements.get_progress(*id) {
-            if let Some(unlock_time) = progress.unlock_time {
-                let time_since = (frame_t - unlock_time) as f32;
-                // 每个提示稍微偏移一点，避免重叠
-                let offset_y = i as f32 * 110.0;
-                ui_achievements::draw_achievement_unlock_toast_offset(*id, time_since, offset_y, font);
-            }
+        if let Some(progress) = achievements.get_progress(*id)
+            && let Some(unlock_time) = progress.unlock_time
+        {
+            let time_since = (frame_t - unlock_time) as f32;
+            // 每个提示稍微偏移一点，避免重叠
+            let offset_y = i as f32 * 110.0;
+            ui_achievements::draw_achievement_unlock_toast_offset(*id, time_since, offset_y, font);
         }
     }
 }
@@ -2712,11 +3759,30 @@ fn spawn_survival_wave(asteroids: &mut Vec<Asteroid>, wave: u32, player_count: P
         PlayerCount::One => ((ASTEROID_WAVE_INCREMENT as f32) * 0.8) as usize,
         PlayerCount::Two => ASTEROID_WAVE_INCREMENT,
     };
-    let asteroid_count = base_count + wave_index * increment;
 
-    // 难度递增：每波速度增加，最多到最大倍数
-    let speed_multiplier = (1.0 + wave_index as f32 * gameplay::WAVE_SPEED_INCREMENT)
-        .min(gameplay::WAVE_SPEED_MAX_MULTIPLIER);
+    // === 波动式难度系统 ===
+    // 计算当前周期和周期内位置
+    let cycle = wave_index as u32 / constants::difficulty::WAVE_CYCLE;
+    let position_in_cycle = wave_index as u32 % constants::difficulty::WAVE_CYCLE;
+
+    // 基础难度随周期增长
+    let base_difficulty = 1.0 + cycle as f32 * constants::difficulty::BASE_DIFFICULTY_GROWTH;
+
+    // 周期内的难度波动：[峰值, 谷底, 上升]
+    let cycle_modifier = constants::difficulty::CYCLE_MULTIPLIERS[position_in_cycle as usize];
+
+    // 最终难度倍数（限制最大值）
+    let difficulty_multiplier =
+        (base_difficulty * cycle_modifier).min(constants::difficulty::MAX_DIFFICULTY_MULTIPLIER);
+
+    // 应用难度倍数到小行星数量
+    let base_asteroid_count = base_count + wave_index * increment;
+    let asteroid_count = ((base_asteroid_count as f32) * difficulty_multiplier) as usize;
+
+    // 速度也受难度影响，但波动更平缓
+    let speed_multiplier = (1.0 + wave_index as f32 * gameplay::WAVE_SPEED_INCREMENT * 0.7)
+        .min(gameplay::WAVE_SPEED_MAX_MULTIPLIER)
+        * (0.9 + cycle_modifier * 0.1); // 速度波动较小
 
     asteroids.extend(spawn_wave_with_speed(
         screen_center,
@@ -2742,6 +3808,7 @@ fn init_players(now: f64, starting_lives: u32, player_count: PlayerCount) -> Vec
             weapon_switch_alt: None,
             dash: KeyCode::Space,   // 冲刺键：空格
             hyperspace: KeyCode::H, // 超空间跳跃：H
+            phase_dash: KeyCode::E, // 相位闪现：E
         },
         now,
         starting_lives,
@@ -2760,8 +3827,9 @@ fn init_players(now: f64, starting_lives: u32, player_count: PlayerCount) -> Vec
                 shoot_alt: Some(KeyCode::Kp1),
                 weapon_switch: KeyCode::Key4,
                 weapon_switch_alt: Some(KeyCode::Kp4),
-                dash: KeyCode::Kp0,           // 冲刺键：小键盘0
-                hyperspace: KeyCode::KpEnter, // 超空间跳跃：小键盘回车
+                dash: KeyCode::Kp0,             // 冲刺键：小键盘0
+                hyperspace: KeyCode::KpEnter,   // 超空间跳跃：小键盘回车
+                phase_dash: KeyCode::KpDecimal, // 相位闪现：小键盘小数点
             },
             now,
             starting_lives,

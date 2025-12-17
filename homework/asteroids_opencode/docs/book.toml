@@ -1,0 +1,20 @@
+[book]
+title = "Asteroids OpenCode - 开发文档"
+author = "开发团队"
+description = "Asteroids OpenCode 项目的完整开发文档"
+
+[output.html]
+git-repository-url = "https://github.com/your-repo/asteroids_opencode"
+edit-url-template = "https://github.com/your-repo/asteroids_opencode/edit/main/docs/{path}"
+
+[output.html.fold]
+enable = true
+
+[output.html.search]
+enable = true
+
+[rust]
+edition = "2024"
+
+[build]
+build-dir = "book"

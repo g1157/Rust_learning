@@ -13,6 +13,18 @@ lazy_static = "1.4"
 # 跨平台 WebSocket 客户端（支持原生和 WASM）
 ewebsock = "0.8"
 
+# 命令行参数解析
+clap = { version = "4.0", features = ["derive"] }
+
+# 性能监控和分析（可选feature）
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+puffin = { version = "0.19", optional = true }
+puffin_http = { version = "0.16", optional = true }
+
+[features]
+default = []
+profiling = ["puffin", "puffin_http"]
+
 # WASM 专用依赖（用于其他 WASM 功能）
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

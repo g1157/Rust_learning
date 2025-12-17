@@ -7,11 +7,15 @@
 //! - 子弹发光效果
 //! - 追踪导弹详细渲染
 //! - 引擎火焰动画
+//! - 乐观命中提示效果
+
+#![allow(dead_code)] // 乐观命中渲染正在集成中
 
 use macroquad::prelude::*;
 
-use crate::bullet::{BULLET_RADIUS, Bullet, WeaponType};
+use crate::bullet::{Bullet, WeaponType, BULLET_RADIUS};
 use crate::constants::homing;
+use crate::effects::{PendingHit, PendingHitKind, PendingHitState, CONFIRM_GRACE, DENIED_FLASH};
 use crate::ship::{SHIP_BASE, SHIP_HEIGHT};
 
 /// 绘制增强版飞船
@@ -191,6 +195,7 @@ pub fn draw_bullet(bullet: &Bullet, offset: Vec2, player_color: Color, time: f32
         WeaponType::Spread => draw_spread_bullet(pos, player_color, time),
         WeaponType::Penetrating => draw_penetrating_bullet(pos, bullet.vel, player_color, time),
         WeaponType::Homing => draw_homing_missile(pos, bullet.vel, player_color, time),
+        WeaponType::ChainIon => draw_chain_ion_bullet(pos, player_color, time),
     }
 }
 
@@ -341,6 +346,67 @@ fn draw_homing_missile(pos: Vec2, vel: Vec2, player_color: Color, time: f32) {
     draw_triangle(inner_left, inner_right, inner_tip, inner_flame);
 }
 
+/// 链式离子炮弹：蓝白色能量球，带电弧环
+fn draw_chain_ion_bullet(pos: Vec2, player_color: Color, time: f32) {
+    let pulse = 1.0 + 0.25 * (time * 18.0).sin();
+    let size = BULLET_RADIUS * 1.4 * pulse;
+
+    // 蓝白色调，混合玩家颜色
+    let ion_color = Color::new(
+        player_color.r * 0.3 + 0.4,
+        player_color.g * 0.4 + 0.5,
+        1.0, // 高蓝色分量
+        1.0,
+    );
+
+    // 外发光层（大范围淡蓝）
+    let glow_outer = Color::new(0.3, 0.6, 1.0, 0.2);
+    draw_circle(pos.x, pos.y, size * 3.5, glow_outer);
+
+    // 中发光层
+    let glow_mid = Color::new(0.5, 0.8, 1.0, 0.35);
+    draw_circle(pos.x, pos.y, size * 2.2, glow_mid);
+
+    // 主体能量球
+    draw_circle(pos.x, pos.y, size, ion_color);
+
+    // 核心高亮（白色）
+    let core_color = Color::new(1.0, 1.0, 1.0, 0.9);
+    draw_circle(pos.x, pos.y, size * 0.4, core_color);
+
+    // 绘制电弧环（旋转的小弧线）
+    let arc_count = 4;
+    let arc_radius = size * 2.0;
+    for i in 0..arc_count {
+        let base_angle = (i as f32 / arc_count as f32) * std::f32::consts::TAU;
+        let rotation = time * 6.0; // 旋转速度
+        let angle = base_angle + rotation;
+
+        // 每个弧线由几个点组成
+        let arc_len = 0.4; // 弧长（弧度）
+        let segments = 4;
+        for j in 0..segments {
+            let t0 = j as f32 / segments as f32;
+            let t1 = (j + 1) as f32 / segments as f32;
+            let a0 = angle + t0 * arc_len;
+            let a1 = angle + t1 * arc_len;
+
+            let p0 = pos + Vec2::new(a0.cos(), a0.sin()) * arc_radius;
+            let p1 = pos + Vec2::new(a1.cos(), a1.sin()) * arc_radius;
+
+            // 电弧抖动
+            let jitter = (time * 25.0 + i as f32 * 2.0 + j as f32).sin() * 2.0;
+            let normal = Vec2::new(-(a0 + a1).sin() * 0.5, (a0 + a1).cos() * 0.5);
+            let p0_j = p0 + normal * jitter;
+            let p1_j = p1 + normal * jitter;
+
+            let arc_alpha = 0.5 + 0.3 * (time * 12.0 + i as f32).sin().abs();
+            let arc_color = Color::new(0.6, 0.9, 1.0, arc_alpha);
+            draw_line(p0_j.x, p0_j.y, p1_j.x, p1_j.y, 1.8, arc_color);
+        }
+    }
+}
+
 /// 绘制护盾效果
 pub fn draw_shield(pos: Vec2, time: f32, remaining_ratio: f32) {
     let radius = SHIP_HEIGHT * 1.2;
@@ -482,5 +548,282 @@ pub fn draw_hyperspace_indicator(pos: Vec2, cooldown_ratio: f32) {
         bar_width * progress,
         bar_height,
         hyperspace_color,
+    );
+}
+
+// ============================================================================
+// 乐观命中提示渲染 (Phase 4C)
+// ============================================================================
+
+/// 绘制乐观命中提示效果
+///
+/// 根据命中状态显示不同的视觉反馈：
+/// - Pending: 黄色/橙色脉冲环，表示等待确认
+/// - Confirmed: 绿色扩散淡出，表示命中成功
+/// - Denied: 红色闪烁，表示命中无效
+pub fn draw_pending_hit(hit: &PendingHit, now: f32) {
+    let elapsed = (now - hit.created_at).max(0.0);
+
+    // 根据目标类型设置基础半径
+    let base_radius = match hit.kind {
+        PendingHitKind::Asteroid => 18.0,
+        PendingHitKind::Ufo => 22.0,
+    };
+
+    match hit.state {
+        PendingHitState::Pending => {
+            // 黄色/橙色脉冲环，表示等待确认
+            let pulse = (elapsed * 8.0).sin().abs();
+            let radius = base_radius + 6.0 * pulse;
+            let alpha = 0.35 + 0.25 * pulse;
+
+            // 外环（黄色）
+            let ring_color = Color::new(1.0, 0.8, 0.2, alpha);
+            draw_circle_lines(hit.pos.x, hit.pos.y, radius, 3.0, ring_color);
+
+            // 内部发光（橙色）
+            let glow_color = Color::new(1.0, 0.5, 0.1, alpha * 0.6);
+            draw_circle(hit.pos.x, hit.pos.y, radius * 0.35, glow_color);
+        }
+        PendingHitState::Confirmed => {
+            // 绿色扩散淡出，表示命中成功
+            let t = ((now - hit.state_changed_at) / CONFIRM_GRACE).clamp(0.0, 1.0);
+            let radius = base_radius + 10.0 * (1.0 - t);
+            let alpha = (1.0 - t) * 0.9;
+
+            // 外环（绿色）
+            let ring_color = Color::new(0.3, 1.0, 0.5, alpha);
+            draw_circle_lines(hit.pos.x, hit.pos.y, radius, 4.0, ring_color);
+
+            // 内部发光（淡绿）
+            let glow_color = Color::new(0.5, 1.0, 0.7, alpha * 0.6);
+            draw_circle(hit.pos.x, hit.pos.y, radius * 0.4, glow_color);
+        }
+        PendingHitState::Denied => {
+            // 红色闪烁，表示命中无效
+            let phase = ((now - hit.state_changed_at) / DENIED_FLASH).clamp(0.0, 1.0);
+            let blink = (now * 30.0).sin().abs();
+            let alpha = (1.0 - phase) * (0.4 + 0.4 * blink);
+            let radius = base_radius + 4.0;
+
+            // 外环（红色）
+            let ring_color = Color::new(1.0, 0.2, 0.2, alpha);
+            draw_circle_lines(hit.pos.x, hit.pos.y, radius, 3.5, ring_color);
+
+            // 内部发光（淡红）
+            let glow_color = Color::new(1.0, 0.4, 0.3, alpha * 0.8);
+            draw_circle(hit.pos.x, hit.pos.y, radius * 0.25, glow_color);
+        }
+    }
+}
+
+// ============================================================================
+// 连击视觉反馈系统
+// ============================================================================
+
+/// 绘制飞船连击发光效果
+///
+/// 根据连击视觉等级（0-4）绘制不同强度的发光圈
+/// - 0: 无效果
+/// - 1: 微光（白色光晕）
+/// - 2: 发光（彩色光晕）
+/// - 3: 强光（多层光晕 + 脉冲）
+/// - 4: 极光（最强光晕 + 强烈脉冲）
+pub fn draw_ship_glow(pos: Vec2, color: Color, visual_level: u32, time: f32) {
+    if visual_level == 0 {
+        return;
+    }
+
+    // 脉冲效果强度随等级增加
+    let pulse_speed = 4.0 + visual_level as f32 * 2.0;
+    let pulse = 0.7 + 0.3 * (time * pulse_speed).sin();
+
+    // 基础半径和透明度随等级增加
+    let base_radius = 20.0 + visual_level as f32 * 8.0;
+    let base_alpha = 0.15 + visual_level as f32 * 0.08;
+
+    // 外层光晕（较大、较淡）
+    let outer_radius = base_radius * 1.5 * pulse;
+    let outer_alpha = base_alpha * 0.5;
+    let outer_color = Color::new(color.r, color.g, color.b, outer_alpha);
+    draw_circle(pos.x, pos.y, outer_radius, outer_color);
+
+    // 中层光晕
+    let mid_radius = base_radius * pulse;
+    let mid_alpha = base_alpha * 0.7;
+    let mid_color = Color::new(color.r, color.g, color.b, mid_alpha);
+    draw_circle(pos.x, pos.y, mid_radius, mid_color);
+
+    // 内层光晕（最亮）
+    let inner_radius = base_radius * 0.6 * pulse;
+    let inner_alpha = base_alpha;
+    let inner_color = Color::new(
+        (color.r + 0.3).min(1.0),
+        (color.g + 0.3).min(1.0),
+        (color.b + 0.3).min(1.0),
+        inner_alpha,
+    );
+    draw_circle(pos.x, pos.y, inner_radius, inner_color);
+
+    // 等级 3+ 额外添加光环线条
+    if visual_level >= 3 {
+        let ring_radius = base_radius * 1.2 * pulse;
+        let ring_alpha = base_alpha * 1.5;
+        let ring_color = Color::new(1.0, 1.0, 1.0, ring_alpha);
+        draw_circle_lines(pos.x, pos.y, ring_radius, 2.0, ring_color);
+    }
+
+    // 等级 4 添加额外的外部光环
+    if visual_level >= 4 {
+        let outer_ring_radius = base_radius * 2.0 * pulse;
+        let outer_ring_alpha = base_alpha * 0.8;
+        let outer_ring_color = Color::new(color.r, color.g, color.b, outer_ring_alpha);
+        draw_circle_lines(pos.x, pos.y, outer_ring_radius, 1.5, outer_ring_color);
+    }
+}
+
+/// 绘制连击屏幕边缘特效（渐晕效果）
+///
+/// 在屏幕边缘绘制发光的渐变效果，表示高连击状态
+/// intensity: 0.0 - 1.0 的强度值
+pub fn draw_killstreak_vignette(color: Color, intensity: f32, time: f32) {
+    if intensity <= 0.0 {
+        return;
+    }
+
+    let sw = screen_width();
+    let sh = screen_height();
+
+    // 脉冲效果
+    let pulse = 0.7 + 0.3 * (time * 3.0).sin();
+    let alpha = intensity * 0.4 * pulse;
+
+    // 渐变边缘宽度
+    let edge_width = 60.0 + intensity * 40.0;
+
+    // 创建半透明的边缘颜色
+    let vignette_color = Color::new(color.r, color.g, color.b, alpha);
+
+    // 绘制四条边的渐变矩形
+    // 顶部
+    draw_rectangle(0.0, 0.0, sw, edge_width, vignette_color);
+    // 底部
+    draw_rectangle(0.0, sh - edge_width, sw, edge_width, vignette_color);
+    // 左侧
+    draw_rectangle(0.0, 0.0, edge_width, sh, vignette_color);
+    // 右侧
+    draw_rectangle(sw - edge_width, 0.0, edge_width, sh, vignette_color);
+
+    // 高强度时添加内层边缘
+    if intensity > 0.5 {
+        let inner_alpha = (intensity - 0.5) * 0.3 * pulse;
+        let inner_color = Color::new(color.r, color.g, color.b, inner_alpha);
+        let inner_edge = edge_width * 0.5;
+
+        draw_rectangle(0.0, 0.0, sw, inner_edge, inner_color);
+        draw_rectangle(0.0, sh - inner_edge, sw, inner_edge, inner_color);
+        draw_rectangle(0.0, 0.0, inner_edge, sh, inner_color);
+        draw_rectangle(sw - inner_edge, 0.0, inner_edge, sh, inner_color);
+    }
+}
+
+/// 绘制幽灵模式效果（半透明飞船 + 残影）
+///
+/// 在飞船周围绘制幽灵般的视觉效果，表示50%闪避状态
+pub fn draw_ghost_mode_effect(pos: Vec2, rot: f32, _color: Color, time: f32) {
+    let rotation = rot.to_radians();
+    let sin_r = rotation.sin();
+    let cos_r = rotation.cos();
+
+    let forward = Vec2::new(sin_r, -cos_r);
+    let right = Vec2::new(cos_r, sin_r);
+
+    // 幽灵残影（多个偏移的半透明轮廓）
+    let ghost_offsets = [
+        (Vec2::new(-8.0, -5.0), 0.15),
+        (Vec2::new(6.0, -3.0), 0.12),
+        (Vec2::new(-4.0, 7.0), 0.10),
+        (Vec2::new(5.0, 5.0), 0.08),
+    ];
+
+    // 脉动效果
+    let pulse = 0.6 + 0.4 * (time * 4.0).sin();
+
+    for (offset, alpha_mult) in ghost_offsets {
+        let ghost_pos = pos + offset * pulse;
+        let ghost_alpha = alpha_mult * pulse;
+        let ghost_color = Color::new(0.7, 0.7, 0.9, ghost_alpha);
+
+        // 简化的飞船轮廓
+        let nose = ghost_pos + forward * (SHIP_HEIGHT / 2.0);
+        let left_wing = ghost_pos - forward * (SHIP_HEIGHT / 2.0) - right * (SHIP_BASE / 2.0);
+        let right_wing = ghost_pos - forward * (SHIP_HEIGHT / 2.0) + right * (SHIP_BASE / 2.0);
+
+        draw_line(nose.x, nose.y, left_wing.x, left_wing.y, 1.5, ghost_color);
+        draw_line(nose.x, nose.y, right_wing.x, right_wing.y, 1.5, ghost_color);
+        draw_line(left_wing.x, left_wing.y, right_wing.x, right_wing.y, 1.5, ghost_color);
+    }
+
+    // 中心光晕
+    let glow_radius = SHIP_HEIGHT * 0.8 * pulse;
+    draw_circle(
+        pos.x,
+        pos.y,
+        glow_radius,
+        Color::new(0.6, 0.6, 0.9, 0.1 * pulse),
+    );
+
+    // 闪烁的星点效果
+    let star_count = 6;
+    for i in 0..star_count {
+        let angle = (time * 2.0 + i as f32 * std::f32::consts::TAU / star_count as f32) % std::f32::consts::TAU;
+        let dist = SHIP_HEIGHT * 0.6 + 10.0 * (time * 3.0 + i as f32).sin();
+        let star_pos = pos + Vec2::new(angle.cos(), angle.sin()) * dist;
+        let star_alpha = 0.3 + 0.3 * ((time * 5.0 + i as f32 * 0.5).sin().abs());
+
+        draw_circle(
+            star_pos.x,
+            star_pos.y,
+            2.0,
+            Color::new(0.8, 0.8, 1.0, star_alpha),
+        );
+    }
+}
+
+/// 绘制超速模式效果（速度线 + 红色光晕）
+pub fn draw_overdrive_effect(pos: Vec2, vel: Vec2, time: f32) {
+    let speed = vel.length();
+    if speed < 50.0 {
+        return;
+    }
+
+    let dir = vel.normalize();
+    let pulse = 0.7 + 0.3 * (time * 8.0).sin();
+
+    // 速度线
+    let line_count = 4;
+    for i in 0..line_count {
+        let offset = (i as f32 - line_count as f32 / 2.0) * 8.0;
+        let perp = Vec2::new(-dir.y, dir.x);
+        let start = pos - dir * 20.0 + perp * offset;
+        let end = start - dir * (30.0 + speed * 0.1) * pulse;
+
+        let alpha = 0.3 * pulse * (1.0 - (i as f32 / line_count as f32).abs());
+        draw_line(
+            start.x,
+            start.y,
+            end.x,
+            end.y,
+            2.0,
+            Color::new(1.0, 0.3, 0.2, alpha),
+        );
+    }
+
+    // 红色光晕
+    draw_circle(
+        pos.x,
+        pos.y,
+        SHIP_HEIGHT * 0.6,
+        Color::new(1.0, 0.2, 0.1, 0.15 * pulse),
     );
 }

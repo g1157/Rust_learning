@@ -62,6 +62,60 @@ pub mod killstreak {
     pub const FIRE_RATE_BONUS: f64 = 0.15;
     /// Per-kill speed bonus in pixels/second.
     pub const SPEED_BONUS: f32 = 30.0;
+
+    // === 连击倍分系统 ===
+    /// 每次连击增加的得分倍数（0.1 = 10%）
+    pub const SCORE_MULTIPLIER_PER_KILL: f32 = 0.1;
+    /// 最大得分倍数
+    pub const MAX_SCORE_MULTIPLIER: f32 = 3.0;
+    /// 连击等级阈值：[普通, 双杀, 三连, 狂暴, 超神]
+    pub const STREAK_THRESHOLDS: [u32; 5] = [0, 2, 3, 5, 10];
+
+    // === 连击视觉反馈 ===
+    /// 触发飞船发光的连击阈值
+    pub const GLOW_THRESHOLD: u32 = 3;
+    /// 触发屏幕边缘特效的连击阈值
+    pub const VIGNETTE_THRESHOLD: u32 = 5;
+    /// 飞船发光强度（每层连击增加）
+    pub const GLOW_INTENSITY_PER_LEVEL: f32 = 0.15;
+    /// 屏幕边缘特效最大强度
+    pub const VIGNETTE_MAX_INTENSITY: f32 = 0.4;
+}
+
+/// 难度节奏系统参数
+pub mod difficulty {
+    /// 难度波动周期（每 N 波为一个周期）
+    pub const WAVE_CYCLE: u32 = 3;
+    /// 周期内的难度倍数曲线 [峰值, 谷底, 上升]
+    pub const CYCLE_MULTIPLIERS: [f32; 3] = [1.2, 0.8, 1.0];
+    /// 基础难度每周期增长率
+    pub const BASE_DIFFICULTY_GROWTH: f32 = 0.15;
+    /// 最大难度倍数上限
+    pub const MAX_DIFFICULTY_MULTIPLIER: f32 = 2.5;
+}
+
+/// 相位闪现（Phase Dash）参数
+///
+/// 与普通冲刺系统独立，是瞬移技能而非速度加速
+pub mod phase_dash {
+    /// 瞬移距离（像素，沿飞船朝向）
+    pub const DISTANCE: f32 = 150.0;
+    /// 冷却时间（秒）
+    pub const COOLDOWN: f64 = 3.0;
+    /// 无敌窗口时长（秒），用于穿透障碍
+    pub const INVULNERABLE_WINDOW: f64 = 0.25;
+    /// 残影可见时长（秒）
+    pub const TRAIL_LIFETIME: f64 = 1.0;
+    /// 延迟爆裂触发延时（秒）
+    pub const EXPLOSION_DELAY: f64 = 1.0;
+    /// 爆炸半径（像素）
+    pub const EXPLOSION_RADIUS: f32 = 70.0;
+    /// 爆炸伤害值（对小行星造成的伤害）
+    pub const EXPLOSION_DAMAGE: u32 = 1;
+    /// 残影采样步长（像素）
+    pub const TRAIL_SAMPLE_STEP: f32 = 25.0;
+    /// 相位半透明 alpha 值（闪现瞬间的透明度）
+    pub const PHASE_ALPHA: f32 = 0.4;
 }
 
 /// Timing and pacing constants.
@@ -209,8 +263,8 @@ pub mod quadtree {
 
 /// Homing missile parameters.
 pub mod homing {
-    /// Missile speed in pixels/second (slower than normal bullets).
-    pub const SPEED: f32 = 600.0;
+    /// Missile speed in pixels/second (increased for better tracking).
+    pub const SPEED: f32 = 900.0;
     /// Maximum turn rate in radians/second.
     pub const TURN_RATE: f32 = 4.0;
     /// Missile lifetime in seconds (longer than normal bullets).
@@ -221,4 +275,29 @@ pub mod homing {
     pub const TRACKING_RANGE: f32 = 500.0;
     /// Missile visual radius.
     pub const RADIUS: f32 = 5.0;
+}
+
+/// Chain ion shot parameters (链式离子炮).
+pub mod chain_ion {
+    /// Maximum total hits including the initial impact (reduced for balance).
+    pub const MAX_JUMPS: usize = 2;
+    /// Maximum search distance per hop (pixels).
+    pub const RANGE: f32 = 260.0;
+    /// Damage ratios per hop (1st/2nd/3rd hit).
+    /// First hit is 100%, second is 70%, third is 50%.
+    pub const DAMAGE_RATIOS: [f32; 3] = [1.0, 0.7, 0.5];
+    /// Lifetime of a chain arc visual effect (seconds).
+    pub const ARC_LIFETIME: f32 = 0.35;
+    /// Flash duration on struck targets (seconds).
+    pub const FLASH_DURATION: f32 = 0.28;
+    /// Visual jitter steps for the lightning line.
+    pub const JITTER_STEPS: usize = 10;
+    /// Maximum perpendicular jitter amplitude (pixels).
+    pub const JITTER_AMPLITUDE: f32 = 12.0;
+    /// Base line width for the arc.
+    pub const LINE_WIDTH: f32 = 3.0;
+    /// Cooldown between chain ion shots (seconds).
+    pub const COOLDOWN: f64 = 0.4;
+    /// Bullet lifetime multiplier (slightly longer than normal).
+    pub const LIFETIME_MULTIPLIER: f64 = 1.2;
 }

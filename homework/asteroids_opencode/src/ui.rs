@@ -58,6 +58,7 @@ pub fn draw_players_hud(players: &[Player], mode: HudMode, font: Option<&Font>) 
             WeaponType::Spread => "Spread",
             WeaponType::Penetrating => "Penetrating",
             WeaponType::Homing => "Homing",
+            WeaponType::ChainIon => "Chain Ion",
         };
 
         let text = format!(
@@ -466,11 +467,11 @@ pub fn draw_mode_selection(
         );
     }
 
-    // 4个卡片纵向排列
+    // 7个卡片纵向排列（含 Roguelike）
     let card_width = screen_width() * 0.65;
-    let card_height = 120.; // 稍微减小卡片高度以容纳更多
-    let spacing = 14.;
-    let total_height = card_height * 6. + spacing * 5.; // 改为6个卡片
+    let card_height = 100.; // 减小卡片高度以容纳7个
+    let spacing = 10.;
+    let total_height = card_height * 7. + spacing * 6.; // 7个卡片
     let start_y = (screen_height() - total_height) / 2. + 20.;
     let card_x = screen_width() / 2. - card_width / 2.;
 
@@ -537,6 +538,21 @@ pub fn draw_mode_selection(
         font,
     });
 
+    // Roguelike 卡片
+    draw_mode_card(ModeCardParams {
+        x: card_x,
+        y: start_y + (card_height + spacing) * 3.,
+        width: card_width,
+        height: card_height,
+        title: "Roguelike",
+        desc: "Run-based adventure with random builds and permanent upgrades!",
+        detail: "3 zones, unique bosses, relics, and card synergies each run.",
+        active: matches!(selection, GameMode::Roguelike),
+        accent: Color::new(0.8, 0.2, 0.6, 1.0), // 品红色
+        footer: "[Enter] Start Run",
+        font,
+    });
+
     // Online 卡片 (disabled on WASM)
     let (online_title, online_desc, online_detail, online_footer, online_accent, online_active) =
         if online_enabled {
@@ -560,7 +576,7 @@ pub fn draw_mode_selection(
         };
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 3.,
+        y: start_y + (card_height + spacing) * 4.,
         width: card_width,
         height: card_height,
         title: online_title,
@@ -577,7 +593,7 @@ pub fn draw_mode_selection(
     let achievements_summary = format!("Unlocked: {} / {} achievements", unlocked, total);
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 4.,
+        y: start_y + (card_height + spacing) * 5.,
         width: card_width,
         height: card_height,
         title: "Achievements",
@@ -596,7 +612,7 @@ pub fn draw_mode_selection(
     );
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 5.,
+        y: start_y + (card_height + spacing) * 6.,
         width: card_width,
         height: card_height,
         title: "Settings",
@@ -752,6 +768,66 @@ fn draw_mode_card(params: ModeCardParams) {
     );
 }
 
+/// 文本换行辅助函数（支持中文和英文）
+fn wrap_text(text: &str, max_width: f32, font_size: u16, font: Option<&Font>) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+
+    // 检查是否包含空格（英文文本）
+    let has_spaces = text.contains(' ');
+
+    if has_spaces {
+        // 英文文本：按空格分词
+        let words: Vec<&str> = text.split(' ').collect();
+        let mut current_line = String::new();
+
+        for word in words {
+            let test_line = if current_line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", current_line, word)
+            };
+
+            let width = measure_text(&test_line, font, font_size, 1.0).width;
+
+            if width <= max_width {
+                current_line = test_line;
+            } else {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                }
+                current_line = word.to_string();
+            }
+        }
+
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+    } else {
+        // 中文文本：按字符逐个测量
+        let mut current_line = String::new();
+
+        for ch in text.chars() {
+            let test_line = format!("{}{}", current_line, ch);
+            let width = measure_text(&test_line, font, font_size, 1.0).width;
+
+            if width <= max_width {
+                current_line = test_line;
+            } else {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                }
+                current_line = ch.to_string();
+            }
+        }
+
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+    }
+
+    lines
+}
+
 /// 绘制自动换行文本
 fn draw_wrapped_text(
     text: &str,
@@ -762,36 +838,7 @@ fn draw_wrapped_text(
     color: Color,
     font: Option<&Font>,
 ) {
-    let words: Vec<&str> = text.split(' ').collect();
-    let mut lines: Vec<String> = Vec::new();
-    let mut current_line = String::new();
-
-    for word in words {
-        let test_line = if current_line.is_empty() {
-            word.to_string()
-        } else {
-            format!("{} {}", current_line, word)
-        };
-
-        let width = if let Some(f) = font {
-            measure_text(&test_line, Some(f), font_size, 1.0).width
-        } else {
-            measure_text(&test_line, None, font_size, 1.0).width
-        };
-
-        if width <= max_width {
-            current_line = test_line;
-        } else {
-            if !current_line.is_empty() {
-                lines.push(current_line);
-            }
-            current_line = word.to_string();
-        }
-    }
-
-    if !current_line.is_empty() {
-        lines.push(current_line);
-    }
+    let lines = wrap_text(text, max_width, font_size, font);
 
     let line_height = font_size as f32 + 4.0; // 减小行距从 6.0 到 4.0
     for (i, line) in lines.iter().enumerate() {
@@ -1149,20 +1196,49 @@ pub fn draw_killstreak(players: &[Player], font: Option<&Font>) {
     }
 }
 
+/// 插值缓冲区调试信息
+#[derive(Debug, Clone)]
+pub struct InterpDebugStats {
+    pub player_buffers: usize,
+    pub asteroid_buffers: usize,
+    pub bullet_buffers: usize,
+    pub avg_player_snapshots: f32,
+    pub avg_bullet_snapshots: f32,
+    pub render_delay_ms: f64,
+}
+
+/// 网络诊断信息
+#[derive(Debug, Clone)]
+pub struct NetworkDebugStats {
+    pub rtt_ms: f32,
+    pub pending_inputs: usize,
+    pub interp: Option<InterpDebugStats>,
+}
+
 /// 性能监控统计数据
 pub struct DebugStats {
     pub fps: f32,
     pub entity_count: usize,
     pub quadtree_depth: usize,
     pub particle_count: usize,
+    pub network: Option<NetworkDebugStats>,
 }
 
 /// 绘制性能监控面板（左上角）
 pub fn draw_debug_panel(stats: &DebugStats, font: Option<&Font>) {
     let panel_x = 12.0;
-    let panel_y = screen_height() - 130.0;
-    let panel_width = 280.0;
-    let panel_height = 115.0;
+    let line_height = 22.0;
+    let base_height = 115.0;
+
+    // 根据网络调试信息动态扩展面板高度
+    let extra_lines = if let Some(net) = &stats.network {
+        1 + net.interp.as_ref().map(|_| 2).unwrap_or(0)
+    } else {
+        0
+    };
+    let panel_height = base_height + line_height * extra_lines as f32;
+    let panel_y = screen_height() - panel_height - 15.0;
+    let panel_width = 300.0;
 
     // 半透明背景面板
     draw_rectangle(
@@ -1183,7 +1259,6 @@ pub fn draw_debug_panel(stats: &DebugStats, font: Option<&Font>) {
 
     let text_x = panel_x + 10.0;
     let mut text_y = panel_y + 25.0;
-    let line_height = 22.0;
     let font_size = 18;
 
     // FPS（绿色表示性能良好）
@@ -1244,6 +1319,63 @@ pub fn draw_debug_panel(stats: &DebugStats, font: Option<&Font>) {
             ..Default::default()
         },
     );
+
+    // 网络调试信息
+    if let Some(net) = &stats.network {
+        text_y += line_height;
+        let rtt_color = if net.rtt_ms <= 120.0 {
+            Color::new(0.2, 1.0, 0.2, 1.0) // 绿色：延迟良好
+        } else if net.rtt_ms <= 200.0 {
+            Color::new(1.0, 0.9, 0.2, 1.0) // 黄色：延迟一般
+        } else {
+            Color::new(1.0, 0.4, 0.2, 1.0) // 红色：延迟过高
+        };
+        draw_text_ex(
+            &format!("RTT: {:.1}ms | Pending: {}", net.rtt_ms, net.pending_inputs),
+            text_x,
+            text_y,
+            TextParams {
+                font,
+                font_size,
+                color: rtt_color,
+                ..Default::default()
+            },
+        );
+
+        if let Some(interp) = &net.interp {
+            text_y += line_height;
+            draw_text_ex(
+                &format!(
+                    "Interp buf P:{} A:{} B:{}",
+                    interp.player_buffers, interp.asteroid_buffers, interp.bullet_buffers
+                ),
+                text_x,
+                text_y,
+                TextParams {
+                    font,
+                    font_size,
+                    color: Color::new(0.6, 0.9, 1.0, 1.0),
+                    ..Default::default()
+                },
+            );
+
+            text_y += line_height;
+            draw_text_ex(
+                &format!(
+                    "Snap P~{:.1} B~{:.1} | Delay:{:.0}ms",
+                    interp.avg_player_snapshots, interp.avg_bullet_snapshots, interp.render_delay_ms
+                ),
+                text_x,
+                text_y,
+                TextParams {
+                    font,
+                    font_size,
+                    color: Color::new(0.8, 0.8, 0.8, 1.0),
+                    ..Default::default()
+                },
+            );
+        }
+    }
 
     // 提示文本
     let hint = "[F3] Close Debug";
@@ -1942,4 +2074,816 @@ pub fn draw_online_waiting(
         Color::new(0.5, 0.55, 0.65, 1.0),
         font,
     );
+}
+
+// ============================================================================
+// 玩家状态效果图标栏
+// ============================================================================
+
+/// 激活的buff/道具效果信息
+#[allow(dead_code)] // name 字段保留用于未来的 tooltip 功能
+pub struct ActiveBuff {
+    pub name: &'static str,
+    pub icon_char: String,
+    pub color: Color,
+    pub remaining: f64,
+    pub max_duration: f64,
+}
+
+/// 绘制玩家状态效果图标栏（显示当前激活的道具/buff）
+pub fn draw_player_buffs(players: &[Player], time: f64, font: Option<&Font>) {
+    for (idx, player) in players.iter().enumerate() {
+        if !player.alive {
+            continue;
+        }
+
+        let buffs = collect_active_buffs(player, time);
+        if buffs.is_empty() {
+            continue;
+        }
+
+        // 根据玩家索引决定显示位置
+        let base_x = if idx == 0 {
+            20.0
+        } else {
+            screen_width() - 20.0 - (buffs.len() as f32 * 50.0)
+        };
+        let base_y = 80.0 + idx as f32 * 40.0;
+
+        // 绘制每个buff图标
+        for (i, buff) in buffs.iter().enumerate() {
+            let x = base_x + i as f32 * 50.0;
+            draw_buff_icon(x, base_y, buff, font);
+        }
+    }
+}
+
+/// 收集玩家当前激活的所有buff
+fn collect_active_buffs(player: &Player, time: f64) -> Vec<ActiveBuff> {
+    let mut buffs = Vec::new();
+
+    // 护盾
+    if player.shield_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Shield",
+            icon_char: "S".to_string(),
+            color: Color::new(0.2, 0.6, 1.0, 1.0),
+            remaining: player.shield_remaining(time),
+            max_duration: crate::player::SHIELD_DURATION,
+        });
+    }
+
+    // 临时护盾（次数型）
+    if player.temp_shield_hits > 0 {
+        buffs.push(ActiveBuff {
+            name: "Temp Shield",
+            icon_char: format!("{}", player.temp_shield_hits),
+            color: Color::new(0.3, 0.8, 1.0, 1.0),
+            remaining: player.temp_shield_hits as f64,
+            max_duration: 3.0, // 最大3次
+        });
+    }
+
+    // 快速射击
+    if player.rapid_fire_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Rapid Fire",
+            icon_char: "R".to_string(),
+            color: Color::new(1.0, 0.9, 0.2, 1.0),
+            remaining: player.rapid_fire_until - time,
+            max_duration: 6.0,
+        });
+    }
+
+    // 穿透弹
+    if player.piercing_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Piercing",
+            icon_char: "P".to_string(),
+            color: Color::new(0.8, 0.3, 1.0, 1.0),
+            remaining: player.piercing_until - time,
+            max_duration: 8.0,
+        });
+    }
+
+    // 幽灵模式
+    if player.ghost_mode_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Ghost",
+            icon_char: "G".to_string(),
+            color: Color::new(0.7, 0.7, 0.9, 0.8),
+            remaining: player.ghost_mode_until - time,
+            max_duration: 5.0,
+        });
+    }
+
+    // 超速模式
+    if player.overdrive_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Overdrive",
+            icon_char: "O".to_string(),
+            color: Color::new(1.0, 0.3, 0.3, 1.0),
+            remaining: player.overdrive_until - time,
+            max_duration: 7.0,
+        });
+    }
+
+    // 传送充能
+    if player.teleport_charge_active(time) {
+        buffs.push(ActiveBuff {
+            name: "Teleport",
+            icon_char: "T".to_string(),
+            color: Color::new(0.6, 0.2, 0.9, 1.0),
+            remaining: player.teleport_charge_until - time,
+            max_duration: 10.0,
+        });
+    }
+
+    buffs
+}
+
+/// 绘制单个buff图标
+fn draw_buff_icon(x: f32, y: f32, buff: &ActiveBuff, font: Option<&Font>) {
+    let size = 40.0;
+    let progress = (buff.remaining / buff.max_duration).clamp(0.0, 1.0) as f32;
+
+    // 背景圆
+    draw_circle(x + size / 2.0, y + size / 2.0, size / 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
+
+    // 进度环（顺时针从顶部开始）
+    let segments = 32;
+    let filled_segments = (progress * segments as f32) as i32;
+    for i in 0..filled_segments {
+        let angle1 = -std::f32::consts::FRAC_PI_2 + (i as f32 / segments as f32) * std::f32::consts::TAU;
+        let angle2 = -std::f32::consts::FRAC_PI_2 + ((i + 1) as f32 / segments as f32) * std::f32::consts::TAU;
+        let cx = x + size / 2.0;
+        let cy = y + size / 2.0;
+        let r = size / 2.0 - 2.0;
+
+        draw_triangle(
+            Vec2::new(cx, cy),
+            Vec2::new(cx + angle1.cos() * r, cy + angle1.sin() * r),
+            Vec2::new(cx + angle2.cos() * r, cy + angle2.sin() * r),
+            Color::new(buff.color.r, buff.color.g, buff.color.b, 0.4),
+        );
+    }
+
+    // 边框
+    draw_circle_lines(
+        x + size / 2.0,
+        y + size / 2.0,
+        size / 2.0,
+        2.0,
+        buff.color,
+    );
+
+    // 图标字符
+    let text_width = measure_text(&buff.icon_char, font, 20, 1.0).width;
+    draw_text_ex(
+        &buff.icon_char,
+        x + size / 2.0 - text_width / 2.0,
+        y + size / 2.0 + 6.0,
+        TextParams {
+            font,
+            font_size: 20,
+            color: buff.color,
+            ..Default::default()
+        },
+    );
+
+    // 剩余时间（小字）
+    if buff.remaining > 0.0 && buff.remaining < 100.0 {
+        let time_text = format!("{:.1}", buff.remaining);
+        let time_width = measure_text(&time_text, font, 12, 1.0).width;
+        draw_text_ex(
+            &time_text,
+            x + size / 2.0 - time_width / 2.0,
+            y + size + 12.0,
+            TextParams {
+                font,
+                font_size: 12,
+                color: Color::new(0.8, 0.8, 0.8, 0.9),
+                ..Default::default()
+            },
+        );
+    }
+}
+
+// ============================================================================
+// 连击系统增强UI
+// ============================================================================
+
+/// 绘制连击计数器和分数倍率（所有模式通用）
+pub fn draw_killstreak_counter(players: &[Player], time: f64, font: Option<&Font>) {
+    for (idx, player) in players.iter().enumerate() {
+        if !player.alive || player.killstreak == 0 {
+            continue;
+        }
+
+        // 检查连击是否即将过期（闪烁警告）
+        let time_since_kill = time - player.get_last_kill_time();
+        let is_expiring = time_since_kill > crate::constants::killstreak::RESET_TIME * 0.7;
+
+        // 根据玩家索引决定显示位置
+        let x = if idx == 0 {
+            screen_width() * 0.15
+        } else {
+            screen_width() * 0.85
+        };
+        let y = screen_height() - 120.0;
+
+        // 连击数
+        let streak_text = format!("{}x", player.killstreak);
+        let multiplier_text = format!("{:.1}x Score", player.score_multiplier());
+
+        // 闪烁效果（即将过期时）
+        let alpha = if is_expiring {
+            0.5 + 0.5 * ((time * 8.0).sin().abs() as f32)
+        } else {
+            1.0
+        };
+
+        // 连击颜色（根据等级变化）
+        let streak_color = match player.killstreak_visual_level() {
+            0 => Color::new(0.8, 0.8, 0.8, alpha),
+            1 => Color::new(1.0, 1.0, 0.5, alpha),
+            2 => Color::new(1.0, 0.8, 0.2, alpha),
+            3 => Color::new(1.0, 0.5, 0.1, alpha),
+            _ => Color::new(1.0, 0.2, 0.2, alpha),
+        };
+
+        // 背景框
+        let bg_width = 100.0;
+        let bg_height = 60.0;
+        draw_rectangle(
+            x - bg_width / 2.0,
+            y - bg_height / 2.0,
+            bg_width,
+            bg_height,
+            Color::new(0.0, 0.0, 0.0, 0.5 * alpha),
+        );
+        draw_rectangle_lines(
+            x - bg_width / 2.0,
+            y - bg_height / 2.0,
+            bg_width,
+            bg_height,
+            2.0,
+            Color::new(streak_color.r, streak_color.g, streak_color.b, 0.7 * alpha),
+        );
+
+        // 连击数（大字）
+        let streak_width = measure_text(&streak_text, font, 32, 1.0).width;
+        draw_text_ex(
+            &streak_text,
+            x - streak_width / 2.0,
+            y - 5.0,
+            TextParams {
+                font,
+                font_size: 32,
+                color: streak_color,
+                ..Default::default()
+            },
+        );
+
+        // 分数倍率（小字）
+        let mult_width = measure_text(&multiplier_text, font, 16, 1.0).width;
+        draw_text_ex(
+            &multiplier_text,
+            x - mult_width / 2.0,
+            y + 18.0,
+            TextParams {
+                font,
+                font_size: 16,
+                color: Color::new(0.9, 0.9, 0.5, alpha),
+                ..Default::default()
+            },
+        );
+
+        // 过期进度条
+        let progress = 1.0 - (time_since_kill / crate::constants::killstreak::RESET_TIME) as f32;
+        let bar_width = bg_width - 10.0;
+        let bar_height = 4.0;
+        let bar_x = x - bar_width / 2.0;
+        let bar_y = y + bg_height / 2.0 - 8.0;
+
+        draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::new(0.3, 0.3, 0.3, 0.5));
+        draw_rectangle(
+            bar_x,
+            bar_y,
+            bar_width * progress.max(0.0),
+            bar_height,
+            streak_color,
+        );
+    }
+}
+
+// ============================================================================
+// Roguelike：奖励选择 UI
+// ============================================================================
+
+use crate::input::Input;
+use crate::roguelike;
+
+/// 绘制奖励卡片
+fn draw_reward_card(
+    rect: Rect,
+    option: &roguelike::RewardOption,
+    selected: bool,
+    hotkey: &str,
+    font: Option<&Font>,
+) {
+    let (kind, name, desc, rarity) = roguelike::reward_display_info(option);
+
+    let base = if selected {
+        Color::new(0.12, 0.14, 0.2, 0.96)
+    } else {
+        Color::new(0.08, 0.1, 0.14, 0.9)
+    };
+
+    draw_shadow_panel(rect.x, rect.y, rect.w, rect.h, base);
+    draw_rectangle_lines(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        if selected { 4.0 } else { 2.0 },
+        if selected {
+            rarity
+        } else {
+            Color::new(rarity.r, rarity.g, rarity.b, 0.65)
+        },
+    );
+
+    // 稀有度条
+    draw_rectangle(rect.x, rect.y, rect.w, 6.0, rarity);
+
+    // 快捷键标签
+    let tag = format!("[{}]", hotkey);
+    let tag_w = measure_text(&tag, font, 18, 1.0).width + 16.0;
+    draw_rectangle(
+        rect.x + rect.w - tag_w - 14.0,
+        rect.y + 14.0,
+        tag_w,
+        26.0,
+        Color::new(rarity.r, rarity.g, rarity.b, 0.18),
+    );
+    draw_text_ex(
+        &tag,
+        rect.x + rect.w - tag_w - 6.0,
+        rect.y + 33.0,
+        TextParams {
+            font,
+            font_size: 18,
+            color: rarity,
+            ..Default::default()
+        },
+    );
+
+    // 类型标签
+    draw_text_ex(
+        kind,
+        rect.x + 18.0,
+        rect.y + 34.0,
+        TextParams {
+            font,
+            font_size: 18,
+            color: Color::new(0.7, 0.75, 0.85, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 名称
+    draw_text_ex(
+        &name,
+        rect.x + 18.0,
+        rect.y + 66.0,
+        TextParams {
+            font,
+            font_size: 28,
+            color: rarity,
+            ..Default::default()
+        },
+    );
+
+    // 描述
+    draw_wrapped_text(
+        &desc,
+        rect.x + 18.0,
+        rect.y + 96.0,
+        rect.w - 36.0,
+        20,
+        Color::new(0.8, 0.84, 0.92, 1.0),
+        font,
+    );
+}
+
+/// 绘制奖励选择界面
+/// 返回选中的奖励索引（如果玩家做出选择）
+pub fn draw_reward_selection(
+    reward_state: &mut roguelike::RewardPhaseState,
+    input: &Input,
+    font: Option<&Font>,
+) -> Option<usize> {
+    // 绘制半透明背景覆盖层（不完全清除，保留 HUD 可见性）
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::new(0.04, 0.05, 0.07, 0.95),
+    );
+
+    reward_state.timer += get_frame_time();
+
+    // 标题
+    let title = "选择奖励";
+    let title_w = measure_text(title, font, 44, 1.0).width;
+    draw_text_ex(
+        title,
+        screen_width() / 2.0 - title_w / 2.0,
+        92.0,
+        TextParams {
+            font,
+            font_size: 44,
+            color: Color::new(0.85, 0.9, 0.98, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 提示（根据选项数量动态调整）
+    let hint = if reward_state.options.len() >= 4 {
+        "按 1/2/3/4 或点击卡片选择"
+    } else {
+        "按 1/2/3 或点击卡片选择"
+    };
+    let hint_w = measure_text(hint, font, 22, 1.0).width;
+    draw_text_ex(
+        hint,
+        screen_width() / 2.0 - hint_w / 2.0,
+        122.0,
+        TextParams {
+            font,
+            font_size: 22,
+            color: Color::new(0.6, 0.65, 0.78, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 获取奖励选项（支持 3-4 个，适配抽卡手套遗物）
+    let count = reward_state.options.len().clamp(3, 4);
+    if reward_state.options.is_empty() {
+        draw_text_ex(
+            "奖励选项未就绪",
+            24.0,
+            screen_height() - 24.0,
+            TextParams {
+                font,
+                font_size: 20,
+                color: RED,
+                ..Default::default()
+            },
+        );
+        return None;
+    }
+
+    // 计算卡片布局（动态适配 3-4 个选项，确保小屏不溢出）
+    let gap = 16.0;
+    let layout_w = (screen_width() * 0.86).min(1120.0);
+    let card_w = ((layout_w - gap * (count as f32 - 1.0)) / count as f32).clamp(160.0, 300.0);
+    let card_h = 220.0;
+    let total_w = card_w * count as f32 + gap * (count as f32 - 1.0);
+    let start_x = screen_width() / 2.0 - total_w / 2.0;
+    let y = screen_height() / 2.0 - card_h / 2.0 + 30.0;
+
+    let mouse = vec2(mouse_position().0, mouse_position().1);
+    let mut hover: Option<usize> = None;
+    let mut rects: Vec<Rect> = Vec::with_capacity(count);
+
+    for i in 0..count {
+        let x = start_x + i as f32 * (card_w + gap);
+        let rect = Rect::new(x, y, card_w, card_h);
+        rects.push(rect);
+        if rect.contains(mouse) {
+            hover = Some(i);
+        }
+    }
+
+    // 更新选中状态
+    if let Some(h) = hover {
+        reward_state.selected = Some(h);
+    }
+
+    // 绘制卡片（选中时有呼吸动画）
+    let pulse = 1.0 + 0.03 * ((get_time() as f32) * 7.0).sin().abs();
+    for i in 0..count {
+        let selected = reward_state.selected == Some(i);
+        let base = rects[i];
+        let scale = if selected { pulse } else { 1.0 };
+        let cx = base.x + base.w / 2.0;
+        let cy = base.y + base.h / 2.0;
+        let rect = Rect::new(
+            cx - base.w * scale / 2.0,
+            cy - base.h * scale / 2.0,
+            base.w * scale,
+            base.h * scale,
+        );
+        draw_reward_card(rect, &reward_state.options[i], selected, &format!("{}", i + 1), font);
+    }
+
+    // 处理输入（支持 1-4 键）
+    let key_choice = if input.is_key_pressed(KeyCode::Key1) || input.is_key_pressed(KeyCode::Kp1) {
+        Some(0)
+    } else if input.is_key_pressed(KeyCode::Key2) || input.is_key_pressed(KeyCode::Kp2) {
+        Some(1)
+    } else if input.is_key_pressed(KeyCode::Key3) || input.is_key_pressed(KeyCode::Kp3) {
+        Some(2)
+    } else if count >= 4 && (input.is_key_pressed(KeyCode::Key4) || input.is_key_pressed(KeyCode::Kp4)) {
+        Some(3)
+    } else {
+        None
+    };
+
+    if let Some(i) = key_choice {
+        if i < count {
+            reward_state.selected = Some(i);
+            return Some(i);
+        }
+    }
+
+    if is_mouse_button_pressed(MouseButton::Left) {
+        if let Some(i) = hover {
+            reward_state.selected = Some(i);
+            return Some(i);
+        }
+    }
+
+    None
+}
+
+// ============================================================================
+// Roguelike：商店 UI
+// ============================================================================
+
+/// 商店 UI 操作结果
+pub enum ShopUiAction {
+    /// 无操作
+    None,
+    /// 确认购买指定索引的商品
+    BuyConfirmed(usize),
+    /// 请求刷新商店
+    RefreshRequested,
+    /// 退出商店
+    ExitShop,
+}
+
+/// 绘制商店界面
+pub fn draw_shop_ui(
+    shop_state: &mut roguelike::ShopPhaseState,
+    gold: u32,
+    refresh_cost: u32,
+    input: &Input,
+    font: Option<&Font>,
+) -> ShopUiAction {
+    // 绘制半透明背景覆盖层（不完全清除，保留 HUD 可见性）
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::new(0.04, 0.05, 0.07, 0.95),
+    );
+
+    // 标题
+    let title = "商店";
+    let title_w = measure_text(title, font, 44, 1.0).width;
+    draw_text_ex(
+        title,
+        screen_width() / 2.0 - title_w / 2.0,
+        72.0,
+        TextParams {
+            font,
+            font_size: 44,
+            color: Color::new(0.85, 0.9, 0.98, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 金币显示
+    let gold_text = format!("金币: {}", gold);
+    draw_text_ex(
+        &gold_text,
+        24.0,
+        40.0,
+        TextParams {
+            font,
+            font_size: 26,
+            color: GOLD,
+            ..Default::default()
+        },
+    );
+
+    // 商品列表
+    let list_w = (screen_width() * 0.72).min(860.0);
+    let list_x = screen_width() / 2.0 - list_w / 2.0;
+    let mut y = 120.0;
+    let row_h = 72.0;
+
+    let mouse = vec2(mouse_position().0, mouse_position().1);
+    let mut hover: Option<usize> = None;
+
+    for (i, item) in shop_state.items.iter().enumerate() {
+        let rect = Rect::new(list_x, y, list_w, row_h);
+        if rect.contains(mouse) {
+            hover = Some(i);
+        }
+
+        let selected = shop_state.selected == Some(i);
+        let (kind, name, desc, color) = roguelike::reward_display_info(&item.reward);
+        let display_name = format!("{} · {}", kind, name);
+
+        // 背景
+        draw_shadow_panel(rect.x, rect.y, rect.w, rect.h, Color::new(0.08, 0.1, 0.14, 0.88));
+        draw_rectangle_lines(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            if selected { 3.5 } else { 2.0 },
+            if selected {
+                color
+            } else {
+                Color::new(color.r, color.g, color.b, 0.6)
+            },
+        );
+
+        // 编号 + 名称
+        draw_text_ex(
+            &format!("{}.", i + 1),
+            rect.x + 16.0,
+            rect.y + 28.0,
+            TextParams {
+                font,
+                font_size: 22,
+                color: Color::new(0.7, 0.75, 0.85, 1.0),
+                ..Default::default()
+            },
+        );
+        draw_text_ex(
+            &display_name,
+            rect.x + 48.0,
+            rect.y + 30.0,
+            TextParams {
+                font,
+                font_size: 24,
+                color,
+                ..Default::default()
+            },
+        );
+        draw_text_ex(
+            &desc,
+            rect.x + 48.0,
+            rect.y + 54.0,
+            TextParams {
+                font,
+                font_size: 18,
+                color: Color::new(0.75, 0.78, 0.85, 1.0),
+                ..Default::default()
+            },
+        );
+
+        // 价格/售罄
+        let right = rect.x + rect.w - 18.0;
+        if item.sold {
+            let sold = "已售";
+            let w = measure_text(sold, font, 22, 1.0).width;
+            draw_text_ex(
+                sold,
+                right - w,
+                rect.y + 44.0,
+                TextParams {
+                    font,
+                    font_size: 22,
+                    color: Color::new(1.0, 0.4, 0.4, 1.0),
+                    ..Default::default()
+                },
+            );
+        } else {
+            let price = format!("{}g", item.price);
+            let w = measure_text(&price, font, 24, 1.0).width;
+            let affordable = gold >= item.price;
+            draw_text_ex(
+                &price,
+                right - w,
+                rect.y + 44.0,
+                TextParams {
+                    font,
+                    font_size: 24,
+                    color: if affordable {
+                        GOLD
+                    } else {
+                        Color::new(0.9, 0.5, 0.5, 1.0)
+                    },
+                    ..Default::default()
+                },
+            );
+        }
+
+        y += row_h + 10.0;
+    }
+
+    // 更新选中状态
+    if let Some(h) = hover {
+        shop_state.selected = Some(h);
+    }
+
+    // 刷新按钮
+    let btn_w = 280.0;
+    let btn_h = 44.0;
+    let btn_x = screen_width() / 2.0 - btn_w / 2.0;
+    let btn_y = screen_height() - 110.0;
+    let refresh_rect = Rect::new(btn_x, btn_y, btn_w, btn_h);
+    let refresh_hover = refresh_rect.contains(mouse);
+
+    draw_shadow_panel(btn_x, btn_y, btn_w, btn_h, Color::new(0.08, 0.1, 0.14, 0.9));
+    draw_rectangle_lines(
+        btn_x,
+        btn_y,
+        btn_w,
+        btn_h,
+        if refresh_hover { 3.0 } else { 2.0 },
+        Color::new(0.3, 0.55, 0.9, if refresh_hover { 0.9 } else { 0.65 }),
+    );
+    let refresh_text = format!("刷新 [R] (-{}g)", refresh_cost);
+    let rw = measure_text(&refresh_text, font, 22, 1.0).width;
+    draw_text_ex(
+        &refresh_text,
+        screen_width() / 2.0 - rw / 2.0,
+        btn_y + 30.0,
+        TextParams {
+            font,
+            font_size: 22,
+            color: Color::new(0.85, 0.9, 0.98, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 继续按钮
+    let cont_y = screen_height() - 60.0;
+    let cont_text = "继续 [Enter]";
+    let cont_w = measure_text(cont_text, font, 20, 1.0).width;
+    draw_text_ex(
+        cont_text,
+        screen_width() / 2.0 - cont_w / 2.0,
+        cont_y,
+        TextParams {
+            font,
+            font_size: 20,
+            color: Color::new(0.6, 0.65, 0.75, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 处理输入
+    if input.is_key_pressed(KeyCode::R) || (refresh_hover && is_mouse_button_pressed(MouseButton::Left)) {
+        return ShopUiAction::RefreshRequested;
+    }
+
+    // 数字键选择
+    let key_select = if input.is_key_pressed(KeyCode::Key1) || input.is_key_pressed(KeyCode::Kp1) {
+        Some(0)
+    } else if input.is_key_pressed(KeyCode::Key2) || input.is_key_pressed(KeyCode::Kp2) {
+        Some(1)
+    } else if input.is_key_pressed(KeyCode::Key3) || input.is_key_pressed(KeyCode::Kp3) {
+        Some(2)
+    } else if input.is_key_pressed(KeyCode::Key4) || input.is_key_pressed(KeyCode::Kp4) {
+        Some(3)
+    } else if input.is_key_pressed(KeyCode::Key5) || input.is_key_pressed(KeyCode::Kp5) {
+        Some(4)
+    } else if input.is_key_pressed(KeyCode::Key6) || input.is_key_pressed(KeyCode::Kp6) {
+        Some(5)
+    } else {
+        None
+    };
+
+    if let Some(i) = key_select {
+        if i < shop_state.items.len() && !shop_state.items[i].sold {
+            return ShopUiAction::BuyConfirmed(i);
+        }
+    }
+
+    // 点击商品购买
+    if is_mouse_button_pressed(MouseButton::Left) {
+        if let Some(i) = hover {
+            if !shop_state.items[i].sold {
+                return ShopUiAction::BuyConfirmed(i);
+            }
+        }
+    }
+
+    // Enter 退出商店
+    if input.is_key_pressed(KeyCode::Enter) {
+        return ShopUiAction::ExitShop;
+    }
+
+    ShopUiAction::None
 }
