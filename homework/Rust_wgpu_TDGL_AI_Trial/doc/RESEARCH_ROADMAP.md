@@ -4,7 +4,13 @@
 ASCII-only header (keep this block) to avoid a Windows apply_patch UTF-8 slicing bug.
 Once tooling is fixed, this header can be simplified.
 File encoding: UTF-8 (Chinese content starts below).
-Last updated: 2025-12-17.
+Last updated: 2025-12-18.
+Synced with: flux quantization/MPBC, gauge-invariant winding, energy diagnostics, headless mode, kappa drive+sweep, pinned/velocity observables.
+Doc note: AI inversion baseline + AI closed-loop runner implemented (scripts/ai_inverse_design.py, scripts/ai_closed_loop.py).
+Doc note: default --out-dir is runs/<mode>_<unix_ms> (pass --out-dir . for legacy cwd output).
+Doc note: repo hygiene: LICENSE + requirements.txt + .gitignore (target/, runs/).
+Pad: 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+Pad2: 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -------------------------------------------------------------------------------
 -->
 
@@ -461,10 +467,13 @@ $$
 - 训练一个轻量模型预测 $F_c$
 - 用优化算法在模型上找候选缺陷分布，再回到 TDGL 仿真验证
 
+**当前实现（baseline，可离线运行）**：
+- `scripts/ai_inverse_design.py`：对 `phase_diagram.csv` 做 ridge 回归代理模型，并用离散网格搜索做反演/逆向设计（Stage 3 的最小闭环版本）
+
 **数据集与基线建议（让 AI 部分更“像研究”）**：
 
 - 输入表示：
-  - `α(r)`：二维图像（或下采样到 64²/128² 以降低训练成本）
+  - `α(r)`：二维图像（或下采样到 64^2/128^2 以降低训练成本）
   - 外场：用整数 `n`（或用 $\varphi$）编码，避免“非法 B”
   - 温度/驱动：$T,\kappa$ 等作为标量输入
 - 标签设计（推荐做 depinning）：
@@ -483,25 +492,32 @@ $$
 
 ### 阶段 1：可信度加固（优先级最高）
 
-- [ ] 把 $B$ 改为量子化的 $B(n)$（或实现磁周期边界 link 修正）
-- [ ] 涡旋检测改为 gauge-invariant 版本（基于 link）
-- [ ] 加入收敛性实验：`dt`、`dx`（至少 2 组对比）
-- [ ] 加入耗散泛函 $F(t)$ 的监测与输出（每 N 步一次）
+- [x] 把 $B$ 改为量子化的 $B(n)$（或实现磁周期边界 link 修正）
+- [x] 涡旋检测改为 gauge-invariant 版本（基于 link）
+- [x] 加入收敛性实验：`dt`、`dx`（至少 2 组对比；见 `scripts/run_convergence_study.py` + `runs/convergence_dt_flux64_smoke/`、`runs/convergence_dx_smoke/`）
+- [x] 加入耗散泛函 $F(t)$ 的监测与输出（每 N 步一次）
 
 **阶段产出**：`N_net ≈ n`、`F(t)` 下降、收敛图（这三张图能显著提高“可信度”）。
 
 ### 阶段 2：选一条主线做“相图”
 
 二选一（建议优先 B，再扩展到 C）：
-- [ ] 去钉扎阈值 $F_c(V_p,n_p,r_p)$ 相图
-- [ ] 匹配场/缺陷几何对比（随机 vs 周期阵列）
+- [x] 先行准备：加入驱动 $\kappa$ 与漂移速度观测量（为 depinning 扫参提供 order parameter）
+- [x] κ sweep 自动化：`--kappa-start/--kappa-end/--kappa-step` + `kappa_sweep.csv`
+- [x] 相图扫参工具：`scripts/run_depinning_phase_diagram.py`（提取 `kappa_c` 汇总到 `phase_diagram.csv`）
+- [x] `kappa_c` 提取策略：`--order-parameter`（推荐 `abs_mean_vx`） + `--kappa-c-method`（baseline_threshold/two_phase_fit）
+- [x] 去钉扎阈值 $F_c(V_p,n_p,r_p)$ 相图（流程闭环：扫参→汇总→绘图；物理口径可继续迭代）
+- [x] 周期缺陷阵列支持（square lattice）：`--defect-mode lattice` + `--defect-spacing`
+- [x] 匹配场/缺陷几何对比（随机 vs 周期阵列）：`scripts/run_matching_field_scan.py` + `scripts/plot_matching_field.py`
 
 **阶段产出**：一张相图 + 一张典型动力学曲线（$\langle v\rangle-F$ 或 $F_c-B$）。
 
 ### 阶段 3：创新扩展（可选，但非常加分）
 
 - [ ] 热噪声相图（$T$-sweep）
-- [ ] AI 反演或 AI 逆向设计闭环（至少完成一个可复现实验）
+- [x] 结构因子 S(k) 工具链：`--dump-positions` + `scripts/plot_structure_factor.py`
+- [x] AI 反演或 AI 逆向设计闭环（baseline：`scripts/ai_inverse_design.py` + `phase_diagram.csv`）
+- [x] AI 闭环（active learning）：`scripts/ai_closed_loop.py`（代理模型 + acquisition 选点 + 自动仿真回填）
 
 ---
 
@@ -516,6 +532,13 @@ $$
 - `snapshots/`：可选，保存若干帧 `|ψ|` 图或涡旋位置
 
 核心原则：**一次运行 = 一组可被别人复现的实验记录**。
+
+**当前项目已实现（最小可复现闭环）**：
+- [x] `--out-dir`：每次实验输出到独立目录（默认 `runs/<mode>_<unix_ms>`）
+- [x] `config.toml`：完整参数快照（自动写入 out-dir）
+- [x] `meta.json`：GPU/后端/argv/时间戳（自动写入 out-dir）
+- [x] `vortices.csv`/`vortex_positions.csv`：带 `kappa` 列的统计与位置数据
+- [x] `kappa_sweep.csv`：用于提取 `kappa_c` 与绘制 depinning 曲线
 
 ---
 

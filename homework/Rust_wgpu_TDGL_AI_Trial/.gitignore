@@ -1,0 +1,20 @@
+# Rust build artifacts
+target/
+**/target/
+
+# Local experiment outputs
+runs/
+
+# Python caches / bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

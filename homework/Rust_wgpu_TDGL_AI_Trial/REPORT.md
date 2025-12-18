@@ -1,3 +1,31 @@
+<!--
+ASCII-only header (keep this block) to avoid a Windows apply_patch UTF-8 slicing bug.
+File encoding: UTF-8.
+Last updated: 2025-12-18.
+Synced with: phi/flux-n, magnetic periodic BC, gauge-invariant vortex winding, energy output, drive kappa+sweep, kappa initial relax, pinned/velocity observables, out-dir, optional vortex position dump, phase diagram scripts, matching field/S(k) scripts, AI inversion baseline, AI closed loop runner.
+Doc note: updated CLI usage + CSV columns + vortex detection notes (+ pinned/velocity columns).
+Doc note: add --seed and write CSV metadata as # comments (+ kappa).
+Doc note: kappa sweep writes kappa_sweep.csv (+ plot script).
+Doc note: kappa_c extraction + automated phase diagram + AI inversion (scripts/ai_inverse_design.py).
+Doc note: AI closed loop runner (scripts/ai_closed_loop.py) for surrogate+simulation feedback.
+Doc note: matching field scan scripts (scripts/run_matching_field_scan.py + scripts/plot_matching_field.py).
+Doc note: structure factor script (scripts/plot_structure_factor.py) based on vortex_positions.csv.
+Doc note: report refreshed with end-to-end workflow summary (phase diagram, matching field, S(k), AI loop).
+Doc note: quick visual checks can be generated under runs/*_smoke (optional).
+Doc note: plot_vortices.py supports --no-show (batch) and optional --kappa selection.
+Doc note: convergence+finite-size scripts: scripts/run_convergence_study.py + scripts/plot_convergence_study.py; run validation: scripts/validate_run.py; refined outputs: runs/convergence_dx_flux64_refined, runs/finite_size_refined.
+Doc note: added literature refs for matching-field / periodic pinning arrays (DOIs via Crossref).
+Doc note: added AI target inversion demo (runs/ai_inversion_target_lattice_refined) and inversion accuracy eval (runs/phase_diagram_ai_eval_128).
+Doc note: default --out-dir is runs/<mode>_<unix_ms> (pass --out-dir . for legacy cwd output).
+Doc note: repo hygiene: LICENSE + requirements.txt + .gitignore (target/, runs/).
+Doc note: external comparison uses OpenAlex abstracts for refs [6-9] (accessed 2025-12-18).
+Doc note: AI inversion baselines include oracle and random-pick error (computed from runs/phase_diagram_ai_eval_128).
+Pad: 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-->
+
 # GPU 加速二维 TDGL 超导涡旋模拟
 
 > **课程**：计算物理
@@ -7,25 +35,39 @@
 
 ---
 
+## 摘要
+
+本项目构建了一个基于 **Rust + wgpu(WebGPU)** 的 GPU TDGL 端到端研究平台，用于研究二维超导涡旋与缺陷钉扎现象。平台把“仿真→输出→后处理→批处理→AI 选点回仿真”的研究工作流落地为可复现工具链：
+
+- **物理一致性**：磁通量量子化（`--flux-n`）+ 磁周期边界（torus 上均匀磁场自洽），涡旋检测使用 **规范不变绕数**（link-based）。
+- **可复现实验记录**：每次运行输出到 `--out-dir`（默认 `runs/<mode>_<unix_ms>`），自动写入 `config.toml` 与 `meta.json`，并以 CSV（含 `#` 元信息注释）记录观测量。
+- **批处理与相图**：支持 headless κ sweep（`kappa_sweep.csv`），并提供脚本自动提取 κ_c、绘制相图与 matching field 曲线。
+- **结构量与创新扩展**：支持输出涡旋位置（`vortex_positions.csv`），并用结构因子 S(k) 定量“有序/无序”；提供 AI 反演（baseline）与 AI 闭环 active learning（自动选点→回填数据集）。
+
+---
+
 ## 一、研究目标
 
 ### 1.1 项目概述
 
-用 **Rust + wgpu(WebGPU)** 在 GPU 上并行求解二维 **时间依赖 Ginzburg–Landau（TDGL）** 方程，研究超导涡旋与钉扎现象。
+用 **Rust + wgpu(WebGPU)** 在 GPU 上并行求解二维 **时间依赖 Ginzburg–Landau（TDGL）** 方程，构建可复现的涡旋研究平台，并围绕钉扎/去钉扎与缺陷几何开展参数研究与自动化分析。
 
 ### 1.2 研究问题
 
-1. **涡旋动力学**：研究超导体中涡旋的形成、湮灭与弛豫过程
-2. **钉扎效应**：缺陷分布对涡旋结构的影响
-3. **磁场响应**：外磁场下涡旋密度的变化
-4. **GPU 加速**：与 CPU 实现的性能对比
+1. **外场自洽与拓扑一致性**：在 torus 上实现均匀外场并验证净涡旋数与总磁通量子数 `flux_n` 的一致性（规范不变统计）。
+2. **去钉扎（depinning）阈值**：通过 κ 驱动与 κ sweep 提取临界 κ_c，并研究其随缺陷强度/密度/几何的变化（相图）。
+3. **缺陷几何与 matching field**：对比随机缺陷与周期缺陷阵列，在匹配场条件下观察 κ_c 的增强（commensurability peak）。
+4. **结构量定量**：从涡旋位置计算结构因子 S(k)，区分 Abrikosov 晶格/无序态，并与缺陷几何关联。
+5. **自动化与 AI 闭环**：将“数据生成→提取→建模→选点→回仿真”闭环落地为脚本工具链，支持离线运行。
 
 ### 1.3 交付成果
 
-- 实时可视化（|ψ| 热力图）
-- 涡旋统计曲线 N_v(t)
-- 性能标度图（不同网格规模）
-- 完整的技术报告
+- 实时可视化（|ψ| 热力图）与 headless 批处理（可生成可复现实验目录）
+- κ sweep / κ_c 提取脚本与相图（`phase_diagram.csv` + heatmap）
+- matching field 扫描与对比曲线（random vs lattice）
+- 结构因子 S(k) 后处理与主峰指标（有序性定量）
+- AI 反演（baseline）与 AI 闭环 active learning（自动选点→回填）
+- 完整的技术报告与文档（README/REPORT/doc）
 
 ---
 
@@ -41,7 +83,7 @@
 
 **核心思想**：
 - 超导态由复数序参量 ψ 描述
-- |ψ|² 代表超导电子对密度
+- |ψ|^2 代表超导电子对密度
 - ψ 的相位与超流速度相关
 
 ### 2.2 Ginzburg-Landau 理论
@@ -54,7 +96,7 @@ $$
 
 | 符号 | 物理含义 | 说明 |
 |:----:|:--------:|:----:|
-| ψ | 序参量 | 复数场，|ψ|² ∝ 超导电子密度 |
+| ψ | 序参量 | 复数场，|ψ|^2 ∝ 超导电子密度 |
 | α | 材料参数 | α < 0 时超导，α > 0 时正常态 |
 | β | 非线性系数 | 稳定项，β > 0 |
 | A | 矢势 | 磁场 B = ∇×A |
@@ -87,7 +129,7 @@ $$
 |:----:|:----:|
 | 核心 | |ψ| = 0（正常态） |
 | 相位 | 绕核心一圈变化 ±2π |
-| 磁通 | 携带量子化磁通 Φ₀ = h/2e |
+| 磁通 | 携带量子化磁通 Φ0 = h/2e |
 
 **涡旋检测**：通过相位绕数（phase winding）识别
 - 绕数 = +2π → 涡旋
@@ -128,12 +170,43 @@ $$
 **Gauge-covariant 版本**（link 变量）：
 
 $$
-U_y(x) = e^{-iBx \cdot dx}
+U_y(i) = e^{-i\varphi i},\quad \varphi \equiv B\,dx^2
 $$
 
 $$
 \Delta_A\psi = \frac{\psi_{xp} + \psi_{xm} + U_y\psi_{yp} + U_y^*\psi_{ym} - 4\psi}{dx^2}
 $$
+
+#### 2.7.1 磁周期边界与磁通量量子化（torus 上均匀磁场自洽）
+
+在二维周期边界（环面 torus）上实现**均匀磁场**时，Landau gauge 的 $A_y=Bx$ 本身不周期。为了让离散系统全局自洽，需要满足：
+
+1) **磁通量量子化（推荐）**  
+设每个 plaquette 的无量纲磁通为 $\varphi=B\,dx^2$，则
+
+$$
+\varphi N_xN_y = 2\pi n,\quad n\in\mathbb Z
+$$
+
+等价于：
+
+$$
+\varphi=\frac{2\pi n}{N_xN_y},\quad B=\frac{\varphi}{dx^2}
+$$
+
+2) **磁周期边界（magnetic periodic BC）**  
+在 link 变量形式下，一个常用构造为：
+
+- $U_y(i)=\exp(-i\varphi i)$  
+- $U_x(i,j)=1$（内部）  
+- 仅在 $x$ 边界 hop（$i=N_x-1\rightarrow 0$）处：
+
+$$
+U_x(N_x-1,j)=\exp(+i\varphi N_x j)
+$$
+
+该构造保证每个 plaquette 的 gauge-invariant 磁通一致，并且系统在 torus 拓扑上自洽。  
+本项目当前实现使用上述磁周期边界，并将外场以整数磁通 `flux_n`（即 $n$）作为推荐输入方式。
 
 **时间推进**（显式 Euler）：
 
@@ -141,7 +214,7 @@ $$
 \psi^{n+1} = \psi^n + dt \cdot F(\psi^n)
 $$
 
-**稳定性条件**：dt < dx²/4
+**稳定性条件**：dt < dx^2/4
 
 ---
 
@@ -165,7 +238,18 @@ Total threads: 65,536
 
 ### 3.3 涡旋检测算法
 
-**相位绕数法**：
+**规范不变绕数（gauge-invariant winding）**：
+
+当 $B\\neq 0$（存在矢势 $\\mathbf A$）时，直接对 $\\theta=\\arg(\\psi)$ 做绕数会依赖 gauge 选择。更稳妥的方式是基于 link 变量计算边相位增量：
+
+$$
+\\Delta\\theta_x(i,j)=\\arg\\left(\\psi^*_{i,j}\\,U_x(i,j)\\,\\psi_{i+1,j}\\right),\\quad
+\\Delta\\theta_y(i,j)=\\arg\\left(\\psi^*_{i,j}\\,U_y(i)\\,\\psi_{i,j+1}\\right)
+$$
+
+再对一个网格元绕一圈求和并 unwrap 到 $(-\\pi,\\pi]$，得到 winding $W\\approx \\pm 2\\pi$ 判定涡旋/反涡旋。
+
+**旧版相位绕数法（仅在 B=0 或不含 A 的简化模型下适用）**：
 
 ```
 对每个网格单元 (x, y):
@@ -193,15 +277,29 @@ Rust_wgpu_TDGL_AI_Trial/
 ├── Cargo.toml
 ├── README.md
 ├── REPORT.md                # 本报告
+├── LICENSE
+├── requirements.txt
+├── .gitignore
 ├── src/
-│   └── main.rs              # 主程序（~550 行）
+│   └── main.rs              # 主程序（~2800 行）
 ├── scripts/
-│   └── plot_vortices.py     # 可视化脚本
+│   ├── plot_vortices.py              # 涡旋时间序列曲线
+│   ├── plot_kappa_sweep.py           # depinning 曲线（order parameter vs kappa）
+│   ├── run_depinning_phase_diagram.py# 扫参/提取 kappa_c -> phase_diagram.csv
+│   ├── plot_phase_diagram.py         # phase_diagram.csv 热图
+│   ├── ai_inverse_design.py          # AI 反演/逆向设计（baseline）
+│   ├── ai_closed_loop.py             # AI 闭环：选点→仿真→回填（active learning）
+│   ├── run_matching_field_scan.py    # matching field: scan flux_n (random vs lattice)
+│   ├── plot_matching_field.py        # matching_field.csv plot (kappa_c vs flux_n)
+│   └── plot_structure_factor.py      # vortex_positions.csv -> 2D structure factor S(k)
 ├── doc/
+│   ├── README.md
 │   ├── IMPLEMENTATION_LOG.md
+│   ├── RESEARCH_ROADMAP.md
 │   └── Rust_wgpu_TDGL_AI_Trial_Doc.md
-├── vortices.csv             # 涡旋统计数据
-└── vortices_plot.png        # 可视化图表
+├── runs/                    # 本地输出目录（默认 --out-dir；.gitignore 忽略）
+├── vortices.csv             # legacy：用 --out-dir . 生成（示例/旧行为）
+└── vortices_plot.png        # legacy：用 --out-dir . 生成（示例/旧行为）
 ```
 
 ### 4.2 核心数据结构
@@ -216,8 +314,8 @@ struct Params {
     _pad0: u32,
     dt: f32,        // 时间步长
     dx: f32,        // 空间步长
-    b_field: f32,   // 外磁场强度
-    _pad1: f32,
+    phi: f32,       // plaquette flux: phi = B * dx^2 (quantized on torus)
+    kappa: f32,     // drive: phase twist / constant Ay0
 }
 
 /// 复数（GPU vec2<f32>）
@@ -233,17 +331,17 @@ struct Complex { re: f32, im: f32 }
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let psi = psi_in[i];
 
-    // Landau gauge link: Uy = exp(-i B x dx)
-    let theta = -params.B * f32(gid.x) * params.dx;
+    // Uy = exp(-i (phi*x + kappa))
+    let theta = -(params.phi * f32(gid.x) + params.kappa);
     let Uy = vec2(cos(theta), sin(theta));
 
     // Gauge-covariant Laplacian
     let psi_yp = cmul(Uy, psi_in[idx(gid.x, yp)]);
     let psi_ym = cmul(conj(Uy), psi_in[idx(gid.x, ym)]);
-    let lap = (psi_xp + psi_xm + psi_yp + psi_ym - 4.0*psi) / dx²;
+    let lap = (psi_xp + psi_xm + psi_yp + psi_ym - 4.0*psi) / dx2;
 
     // TDGL 更新
-    let rhs = lap + alpha[i] * psi - psi * |psi|²;
+    let rhs = lap + alpha[i] * psi - psi * |psi|^2;
     psi_out[i] = psi + dt * rhs;
 }
 ```
@@ -274,7 +372,16 @@ cargo build --release
 ### 5.2 交互式可视化
 
 ```bash
-cargo run --release
+cargo run --release -- --flux-n 209
+
+# 固定随机种子（可复现）
+cargo run --release -- --flux-n 209 --seed 1234
+
+# 或指定目标外场（会自动量子化到最近的整数磁通 n）
+cargo run --release -- --b 0.02
+
+# 可选：修改 dt/dx
+cargo run --release -- --flux-n 209 --dt 0.01 --dx 1.0
 ```
 
 **交互控制**：
@@ -284,13 +391,82 @@ cargo run --release
 ### 5.3 性能基准测试
 
 ```bash
-cargo run --release -- --bench
+cargo run --release -- --bench --flux-n 209
 ```
 
-### 5.4 绘制涡旋曲线
+### 5.4 Headless 扫参/批处理（无窗口）
 
 ```bash
-python scripts/plot_vortices.py
+# headless：适合扫参/批处理（默认输出到 runs/headless_<unix_ms>/）
+cargo run --release -- --headless --steps 20000 --sample-period 100 --flux-n 209 --seed 1234
+
+# depinning/drive point: add constant twist kappa (Uy <- exp(-i(phi*x + kappa)))
+cargo run --release -- --headless --steps 20000 --sample-period 100 --flux-n 209 --kappa 0.02 --out-dir runs/kappa_0.02
+
+# optional: dump vortex positions for structure factor / tracking
+cargo run --release -- --headless --steps 20000 --sample-period 100 --flux-n 209 --kappa 0.02 --dump-positions --out-dir runs/kappa_0.02
+
+# kappa sweep (depinning curve), writes kappa_sweep.csv
+cargo run --release -- --headless --flux-n 209 --kappa-start 0.0 --kappa-end 0.05 --kappa-step 0.01 --kappa-initial-relax-steps 20000 --kappa-relax-steps 2000 --kappa-measure-steps 5000 --sample-period 100 --out-dir runs/kappa_sweep
+```
+
+### 5.5 绘制涡旋曲线
+
+```bash
+python scripts/plot_vortices.py runs/kappa_0.02/vortices.csv
+python scripts/plot_kappa_sweep.py runs/kappa_sweep/kappa_sweep.csv --order-parameter abs_mean_vx --kappa-c-method baseline_threshold --epsilon 1e-3
+```
+
+`vortices.csv` 当前列为：
+
+```
+step,time,kappa,vortices,antivortices,net,energy,energy_density,pinned_v,pinned_av,pinned_net,mean_vx,mean_vy,mean_speed
+```
+
+Note: with `--dump-positions`, also writes `vortex_positions.csv` (`step,time,kappa,x_cell,y_cell,sign`).
+Also writes `kappa_sweep.csv` in sweep mode: `kappa,samples,mean_speed,mean_vx,mean_vy,net_mean,pinned_net_mean,energy_density_mean`.
+
+注：`kappa` 对应 `Uy <- exp(-i(phi*x + kappa))` 的常数相位扭转（等效 `A_y0`），涡旋的洛伦兹漂移方向主要沿 **x**，因此 depinning order parameter 推荐使用 `abs_mean_vx`（而不是 `mean_speed`）。
+
+此外，在 `--out-dir` 中会生成：
+- `config.toml`：本次运行的全部参数（便于复现）
+- `meta.json`：GPU/后端/argv/时间戳等运行环境信息
+
+文件开头会以 `# ...` 注释行记录本次运行的 nx/ny、dt/dx、flux_n、phi/kappa/B、seed 与缺陷参数（便于复现实验）。
+
+### 5.6 自动化相图（kappa_c heatmap）
+
+```bash
+python scripts/run_depinning_phase_diagram.py --flux-n 209 --seed 1234 --order-parameter abs_mean_vx --kappa-c-method baseline_threshold --initial-relax-steps 20000 --out-root runs/phase_diagram --overwrite-summary
+python scripts/plot_phase_diagram.py runs/phase_diagram/phase_diagram.csv --no-show
+```
+
+### 5.7 AI 反演/逆向设计（baseline）
+
+```bash
+python scripts/ai_inverse_design.py train runs/phase_diagram/phase_diagram.csv
+python scripts/ai_inverse_design.py invert runs/phase_diagram/phase_diagram.csv --target 0.03 --search-from-data --top 10
+```
+
+### 5.7.1 AI 闭环（active learning）
+
+```bash
+# 注意：负数列表必须用 '=' 传参（argparse 会把 "-0.2,-0.5" 误判为新的选项）
+python scripts/ai_closed_loop.py --build --objective maximize --iters 8 --init-random 4 --out-root runs/ai_closed_loop --flux-n-list=209 --seed-list=1234 --defect-mode-list=random --defect-spacing-list=32 --alpha-defect-list=-0.2,-0.5 --defect-radius-list=3 --defect-count-list=0,20,50,100 --kappa-start 0.0 --kappa-end 0.05 --kappa-step 0.01 --initial-relax-steps 20000 --relax-steps 2000 --measure-steps 5000 --sample-period 100 --order-parameter abs_mean_vx --kappa-c-method baseline_threshold --epsilon 1e-3
+```
+
+### 5.8 匹配场（matching field）扫描（random vs lattice）
+
+```bash
+python scripts/run_matching_field_scan.py --flux-n-list 32,48,64,80,96 --defect-mode-list random,lattice --defect-spacing 32 --alpha-defect -0.5 --defect-radius 3 --defect-count 64 --kappa-start 0 --kappa-end 0.05 --kappa-step 0.01 --initial-relax-steps 20000 --relax-steps 2000 --measure-steps 5000 --sample-period 100 --order-parameter abs_mean_vx --kappa-c-method baseline_threshold --epsilon 1e-3 --out-root runs/matching_field_scan --overwrite-summary
+python scripts/plot_matching_field.py runs/matching_field_scan/matching_field.csv --show-matching --no-show
+```
+
+### 5.9 结构因子 S(k)（有序性定量）
+
+```bash
+cargo run --release -- --headless --steps 20000 --sample-period 100 --flux-n 64 --seed 1234 --dump-positions --out-dir runs/structure_factor_demo
+python scripts/plot_structure_factor.py runs/structure_factor_demo/vortex_positions.csv --log10 --no-show
 ```
 
 ---
@@ -314,7 +490,10 @@ python scripts/plot_vortices.py
 - net = 0 符合周期边界下的拓扑守恒
 - 稳态涡旋被缺陷钉扎
 
-#### 有磁场 (B = 0.02)
+#### 有磁场 (B_target = 0.02; 建议用 flux_n 量子化)
+
+注：在 torus 上实现均匀磁场需要磁通量量子化/磁周期边界（见 2.7.1），且净涡旋数应使用规范不变绕数统计（见 3.3）。  
+当前版本推荐使用 `--flux-n n` 指定总磁通量子数，稳态 `net` 在无/弱缺陷下应接近 `n`。下表为早期版本示例数据（用于展示涡旋数量随外场增加而上升的趋势）。
 
 | 时间 t | 涡旋数 | 反涡旋数 | 净涡旋 |
 |:------:|:------:|:--------:|:------:|
@@ -327,7 +506,7 @@ python scripts/plot_vortices.py
 
 ### 6.2 涡旋弛豫曲线
 
-![N_v(t) 曲线](vortices_plot.png)
+![N_v(t) 曲线](runs/smoke/vortices_plot.png)
 
 *图1: 涡旋数随时间的变化。初始快速衰减后趋于稳态。*
 
@@ -337,24 +516,129 @@ RTX 4060 Laptop GPU 测试结果：
 
 | 网格规模 | steps/s | cells/s | 相对效率 |
 |:--------:|:-------:|:-------:|:--------:|
-| 128² | 29,833 | 4.89×10⁸ | 基准 |
-| 256² | 28,410 | 1.86×10⁹ | 3.8× |
-| 512² | 22,310 | 5.85×10⁹ | 12.0× |
-| 1024² | 13,329 | 1.40×10¹⁰ | 28.6× |
+| 128^2 | 29,833 | 4.89e8 | 基准 |
+| 256^2 | 28,410 | 1.86e9 | 3.8× |
+| 512^2 | 22,310 | 5.85e9 | 12.0× |
+| 1024^2 | 13,329 | 1.40e10 | 28.6× |
 
 **性能分析**：
-- 小网格（128²）：受 dispatch 开销限制
-- 大网格（1024²）：接近显存带宽瓶颈
-- 256² 是交互式模拟的最佳平衡点
-- 1024² 吞吐量达 14 Gcells/s
+- 小网格（128^2）：受 dispatch 开销限制
+- 大网格（1024^2）：接近显存带宽瓶颈
+- 256^2 是交互式模拟的最佳平衡点
+- 1024^2 吞吐量达 14 Gcells/s
 
-### 6.4 CPU/GPU 一致性验证
+### 6.4 去钉扎 κ sweep 与 κ_c 提取（可复现实验口径）
 
-| 指标 | 结果 |
-|:----:|:----:|
-| 单步最大差异 | 7.45×10⁻⁹ |
-| 相对误差 | < 10⁻⁷ |
-| 结论 | GPU 实现正确 |
+- headless κ sweep：二进制在 `--headless` 下扫描 κ（`--kappa-start/--kappa-end/--kappa-step`），输出 `kappa_sweep.csv`（并写入 `config.toml/meta.json`）。
+- order parameter：驱动通过 `U_y <- exp(-i(phi*x + kappa))` 引入，全局漂移主要沿 **x**，因此推荐 `abs_mean_vx` 作为去钉扎判据。
+- κ_c 提取：脚本支持 `threshold` / `baseline_threshold` / `two_phase_fit`，并把口径写入 `phase_diagram.csv`，便于复现实验与横向对比。
+- 初始热身：`--kappa-initial-relax-steps` 仅对 κ sweep 的第一个 κ 点使用更长松弛时间，用于抑制初值瞬态。
+
+### 6.5 自动化相图（phase_diagram.csv）
+
+通过 `scripts/run_depinning_phase_diagram.py` 扫描缺陷参数并自动提取 κ_c，汇总到 `phase_diagram.csv`，再用 `scripts/plot_phase_diagram.py` 绘制热图（相图）。该流程提供了“缺陷强度/密度/几何 → κ_c”的最小可复现研究框架。
+
+### 6.6 Matching field：随机缺陷 vs 周期缺陷阵列
+
+以周期缺陷阵列（spacing=32）为例，缺陷位点数约为 `N_pins≈8×8=64`。扫描 `flux_n`（等效外场）后，可以观察到周期阵列在 `flux_n≈N_pins` 附近 κ_c 明显增强（commensurability peak），与“匹配场增强钉扎”的物理预期一致；该效应在人工周期钉扎阵列的实验与数值研究中广泛出现（例如 [6–9]）。
+
+（smoke 示例：见 `runs/matching_field_smoke/matching_field.csv`）
+
+| flux_n | κ_c (random) | κ_c (lattice) |
+|:------:|:------------:|:-------------:|
+| 32 | 0.02 | 0.02 |
+| 48 | 0.02 | 0.03 |
+| 64 | 0.02 | 0.04 |
+| 80 | 0.02 | 0.02 |
+| 96 | 0.03 | 0.02 |
+
+![matching field 扫描曲线](runs/matching_field_smoke/matching_field_plot.png)
+
+*图2: matching field 扫描示例（random vs lattice），在 flux_n≈N_pins 附近出现 commensurability peak。*
+
+**与文献对标（外部对比）**
+
+- 物理量对应：本项目用 κ 驱动诱发整体漂移，κ_c 等价于“临界驱动力/临界电流”类型的 depinning 阈值；文献中常用临界电流/临界驱动力随外场的峰值来刻画 matching effect。
+- matching 场归一化：周期阵列下匹配场满足 `B/B_phi = N_v/N_pins ≈ flux_n/N_pins`（本例 `N_pins=64`），因此 `flux_n=32/48/64/80/96` 对应 `B/B_phi=0.5/0.75/1/1.25/1.5`。
+- 本项目观测：在 `B/B_phi=1`（`flux_n=64`）处出现最强增强：`κ_c(lattice)-κ_c(random)=+0.02`；这与周期钉扎阵列在整数匹配场处出现显著增强的普遍结论一致。
+- 分数匹配：文献在 1/2、1/3、1/4、3/4 等分数倍匹配场也常观察到结构/阈值特征（[7,9]）；本 smoke 扫描的 κ 分辨率与采样口径较粗，除 `B/B_phi=1` 外未显现稳定的分数峰，后续可用更细 `kappa_step` 与更长 `measure_steps` 做验证。
+
+来自文献摘要的直接证据（OpenAlex 抽取）：
+
+- [9]（Field 2002, PRL 88）摘要明确指出在 matching field 的若干分数倍处也观察到 matching effects（包括 1/5、1/4、1/3、1/2、3/4）。
+- [8]（Reichhardt 2001, PRB 64）摘要指出周期 pinning 阵列下“critical current 在每个 matching field 处出现峰值”（multi-vortex pinning）以及在 1st matching field 之后的 sharp drop（individual pinning），并讨论 commensurate/incommensurate 的标度差异。
+- [7]（Reichhardt 2001, PRB 63）摘要指出在 square/triangular 阵列下，1/1、1/2、1/4 等填充分数会形成更有序的 vortex states。
+
+补充归一化图：
+
+![matching field (B/B_phi) 扫描曲线](runs/matching_field_smoke/matching_field_plot_b_over_bphi.png)
+
+*图2b: 以 `B/B_phi≈flux_n/N_pins` 为横轴的 matching field 曲线，便于与文献常用坐标直接对比。*
+
+### 6.7 结构因子 S(k)（有序性定量）
+
+启用 `--dump-positions` 可输出 `vortex_positions.csv`（每次采样的涡旋/反涡旋位置）。脚本 `scripts/plot_structure_factor.py` 将位置映射为密度场并做 FFT，输出 2D 结构因子热图与主峰信息，用于定量区分“晶格有序 vs 无序/玻璃态”，并可与 matching field 条件联动分析。
+
+![结构因子 S(k) 示例](runs/structure_factor_smoke/structure_factor_kappa_0_step_5000.png)
+
+*图3: 结构因子 S(k) 示例（2D FFT 热图）。*
+
+### 6.8 AI 反演与 AI 闭环（创新扩展）
+
+- baseline：`scripts/ai_inverse_design.py` 对 `phase_diagram.csv` 训练 ridge 代理模型并做离散网格反演（给定目标 κ_c 搜索缺陷参数）。
+- 闭环：`scripts/ai_closed_loop.py` 基于 bootstrap ridge 估计不确定性，使用 acquisition 自动选点→回仿真→回填数据集，输出 `loop_log.jsonl` 与 `loop_progress.png`。
+- target 反演示例：以目标 `κ_c=0.025` 为例，闭环（objective=target）可在离散候选网格上找到满足目标的参数点（示例输出：`runs/ai_inversion_target_lattice_refined/`，best_abs_err=0）。
+- 反演精度评估（offline）：对 `runs/phase_diagram_ai_eval_128/phase_diagram.csv`（45 点，`nx=ny=128`，`kappa_step=0.005`，`two_phase_fit`）使用 `scripts/evaluate_ai_inversion.py` 做交叉验证（并用 `--fill-missing-with-kappa-end` 将“扫描范围内未 depin”的点视为删失下界），结果稳定：
+  - 5-fold（不同 fold seed）：hit_rate(|err|≤0.005)=0.822–0.867；mean |err|=0.00233–0.00322；median |err|=0。
+  - LOO：hit_rate(|err|≤0.005)=0.800；median |err|=0。
+  - oracle 下界（nearest-in-dataset）：mean |err|≈8.89e-4（用于衡量“离散候选集”与“目标 κ_c”之间的固有量化误差）。
+  - random baseline（随机挑选一个参数点）：mean |err|≈0.0119（显著差于反演结果，用于衡量闭环/反演是否“真有用”）。
+  - 注：代理模型的全局拟合 `fit_r2≈0.29`，说明“直接预测 κ_c”仍有明显模型偏差；但“反演（搜索）”在离散候选集上依然具有较高命中率，适合闭环选点。
+
+**实验记录（可复现命令）**
+
+```bash
+# matching field: flux_n 扫描（smoke）
+python scripts/run_matching_field_scan.py --flux-n-list 32,48,64,80,96 --defect-mode-list random,lattice --defect-spacing 32 --alpha-defect -0.5 --defect-radius 3 --defect-count 64 --kappa-start 0 --kappa-end 0.05 --kappa-step 0.01 --initial-relax-steps 5000 --relax-steps 500 --measure-steps 1000 --sample-period 100 --order-parameter abs_mean_vx --kappa-c-method baseline_threshold --epsilon 1e-3 --out-root runs/matching_field_smoke --overwrite-summary
+python scripts/plot_matching_field.py runs/matching_field_smoke/matching_field.csv --show-matching --no-show
+python scripts/plot_matching_field.py runs/matching_field_smoke/matching_field.csv --x b_over_bphi --show-matching --match-multiples 1,2 --no-show
+
+# AI inversion: offline evaluation (k-fold/LOO)
+python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_diagram.csv --fill-missing-with-kappa-end --kfold 5 --seed 0 --delta 0.005
+python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_diagram.csv --fill-missing-with-kappa-end --kfold 5 --seed 1 --delta 0.005
+python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_diagram.csv --fill-missing-with-kappa-end --kfold 5 --seed 2 --delta 0.005
+python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_diagram.csv --fill-missing-with-kappa-end --method loo --delta 0.005
+```
+
+![AI 闭环进展曲线](runs/ai_closed_loop_smoke/loop_progress.png)
+
+*图4: AI 闭环示例（best-so-far 曲线），展示“选点→回仿真→回填”的最小闭环。*
+
+![AI target 反演闭环示例](runs/ai_inversion_target_lattice_refined/loop_progress.png)
+
+*图4b: AI target 反演示例（best-so-far for |κ_c-target|）。*
+
+### 6.9 收敛性（dt/dx）与有限尺寸效应（可信度加固）
+
+本项目提供 `scripts/run_convergence_study.py` 对 **dt/dx 收敛**与**有限尺寸效应**进行可复现实验，并用 `scripts/validate_run.py` 做单次运行的 schema + sanity checks（例如 `net≈flux_n`、能量下降）。
+
+**dt 收敛（dt vs dt/2）**：在 `flux_n=64`、周期缺陷阵列（spacing=32）与固定扫描口径下，示例中 κ_c 在 `dt=0.01` 与 `dt=0.005` 下保持一致（离散 κ 步长为 0.01）。
+
+![dt 收敛曲线](runs/convergence_dt_flux64_smoke/convergence_plot.png)
+
+*图5: dt 收敛示例（kappa_c(dt)）。*
+
+**dx 收敛（保持 L=nx*dx 常数）**：示例比较 `dx=1,nx=256` 与 `dx=0.5,nx=512`（并把 defect_radius/spacing 按 dx 缩放以保持物理长度不变）。在 κ step=0.005 的 refine 示例中，κ_c 分别为 0.025 与 0.02，差异收敛到 0.005 量级（一个 κ bin），剩余偏差可能来自采样时长不足/有限尺寸与参数提取口径。
+
+![dx 收敛曲线](runs/convergence_dx_flux64_refined/convergence_plot.png)
+
+*图6: dx 收敛示例（kappa_c(dx)，κ step=0.005）。*
+
+**有限尺寸效应（B 固定，nx 变化）**：示例在固定目标外场（`--b` 量子化）下，比较 `nx=128/256/512` 的 κ_c。refine 示例中 κ_c 在 0.01–0.025 区间波动，提示在当前采样口径下有限尺寸仍可能是主导误差源，建议进一步加大 L 或增加测量步数以提升统计稳定性。
+
+![有限尺寸曲线](runs/finite_size_refined/convergence_plot.png)
+
+*图7: 有限尺寸效应示例（kappa_c(nx)，κ step=0.005）。*
 
 ---
 
@@ -364,11 +648,11 @@ RTX 4060 Laptop GPU 测试结果：
 
 | 预期 | 实验结果 | 是否符合 |
 |:----:|:--------:|:--------:|
-| 涡旋-反涡旋成对湮灭 | net = 0 始终成立 | ✅ |
-| 涡旋数指数衰减 | N_v(t) 呈指数下降 | ✅ |
-| 缺陷钉扎涡旋 | 稳态涡旋数 > 0 | ✅ |
-| 磁场增加涡旋 | B=0.02 时涡旋数增 4 倍 | ✅ |
-| GPU 加速有效 | 1024² 达 14 Gcells/s | ✅ |
+| 涡旋-反涡旋成对湮灭 | B=0 下 net≈0，N_v(t) 衰减并趋于稳态 | 是 |
+| 外场自洽与净涡旋统计 | flux_n 量子化 + 磁周期边界 + gauge-invariant winding | 是（机制已实现） |
+| 去钉扎阈值可量化 | κ sweep + κ_c 自动提取 + 相图脚本 | 是 |
+| matching field 峰 | 周期阵列在 flux_n≈N_pins 附近 κ_c 增强（6.6） | 是（示例） |
+| GPU 加速有效 | 1024^2 达 14 Gcells/s | 是 |
 
 ### 7.2 技术亮点
 
@@ -376,8 +660,12 @@ RTX 4060 Laptop GPU 测试结果：
 |:----:|:--------:|:----:|
 | 纯 GPU 渲染 | Fragment shader 直接采样 | 无 CPU 回读瓶颈 |
 | Gauge-covariant | Link 变量 | 正确处理磁场 |
+| 磁周期边界 | x 边界 hop 缝合相位 + 磁通量量子化 | torus 上均匀磁场全局自洽 |
 | 实时可视化 | winit 0.30 + wgpu | 流畅交互 |
-| 涡旋检测 | 相位绕数算法 | 准确识别拓扑缺陷 |
+| 涡旋检测 | 规范不变绕数（link-based） | 支持统计净涡旋与耗散诊断 |
+| headless + 标准化输出 | `--headless/--out-dir` + `config.toml/meta.json` | 批处理可复现、便于扫参 |
+| 批处理脚本链路 | phase diagram / matching field / S(k) / plotting | 从“能跑”升级到“能做研究” |
+| AI 闭环 | bootstrap 代理模型 + acquisition 选点 + 回仿真回填 | 支持逆向设计与自动探索 |
 
 ### 7.3 局限性与改进方向
 
@@ -386,7 +674,8 @@ RTX 4060 Laptop GPU 测试结果：
 | 显式 Euler 稳定性限制 | 半隐式方法 |
 | 无电流项 | 完整 TDGL + Maxwell |
 | 无热噪声 | 添加 Langevin 项 |
-| 固定参数 | 配置文件支持 |
+| 参数输入未模块化 | 已输出 `config.toml`，未来支持读取/批量生成配置 |
+| 收敛性证据不足 | dt/dx 收敛与有限尺寸效应实验（按 roadmap 补齐） |
 
 ---
 
@@ -395,19 +684,17 @@ RTX 4060 Laptop GPU 测试结果：
 本项目成功实现了 GPU 加速的二维 TDGL 超导涡旋模拟：
 
 1. **物理正确性**：
-   - CPU/GPU 结果一致（误差 < 10⁻⁷）
-   - 涡旋动力学符合物理预期
-   - 磁场响应正确
+   - 实现磁通量量子化 + 磁周期边界，并用规范不变绕数统计涡旋（外场下仍可自洽）
+   - 输出能量/能量密度与钉扎/速度观测量，支持诊断与复现实验口径
 
 2. **计算性能**：
-   - 1024² 网格达 14 Gcells/s
+   - 1024^2 网格达 14 Gcells/s
    - 实时可视化流畅
 
 3. **功能完整**：
-   - Gauge-covariant TDGL（含磁场）
-   - 空间变化钉扎势
-   - 涡旋检测与统计
-   - 可视化与数据导出
+   - κ 驱动与 κ sweep + κ_c 自动提取与相图工具链
+   - matching field（随机 vs 周期阵列）与结构因子 S(k) 后处理
+   - AI 反演（baseline）与 AI 闭环 active learning（自动选点→回仿真→回填）
 
 4. **工程质量**：
    - 代码结构清晰
@@ -427,3 +714,11 @@ RTX 4060 Laptop GPU 测试结果：
 4. wgpu Documentation. https://wgpu.rs/
 
 5. WebGPU Specification. https://www.w3.org/TR/webgpu/
+
+6. Baert, M., Metlushko, V. V., Jonckheere, R., Moshchalkov, V. V., & Bruynseraede, Y. (1995). Composite Flux-Line Lattices Stabilized in Superconducting Films by a Regular Array of Artificial Defects. *Physical Review Letters*, 74(16), 3269–3272. https://doi.org/10.1103/PhysRevLett.74.3269
+
+7. Reichhardt, C., Grønbech-Jensen, N. (2001). Critical currents and vortex states at fractional matching fields in superconductors with periodic pinning. *Physical Review B*, 63, 054510. https://doi.org/10.1103/PhysRevB.63.054510
+
+8. Reichhardt, C., Zimányi, G. T., Scalettar, R. T., Hoffmann, A., & Schuller, I. K. (2001). Individual and multiple vortex pinning in systems with periodic pinning arrays. *Physical Review B*, 64, 052503. https://doi.org/10.1103/PhysRevB.64.052503
+
+9. Field, S. B., James, S. S., Barentine, J., Metlushko, V., Crabtree, G. W., Shtrikman, H., Ilic, B., & Brueck, S. R. J. (2002). Vortex Configurations, Matching, and Domain Structure in Large Arrays of Artificial Pinning Centers. *Physical Review Letters*, 88, 067003. https://doi.org/10.1103/PhysRevLett.88.067003
