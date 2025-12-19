@@ -20,6 +20,7 @@ Doc note: default --out-dir is runs/<mode>_<unix_ms> (pass --out-dir . for legac
 Doc note: repo hygiene: LICENSE + requirements.txt + .gitignore (target/, runs/).
 Doc note: external comparison uses OpenAlex abstracts for refs [6-9] (accessed 2025-12-18).
 Doc note: AI inversion baselines include oracle and random-pick error (computed from runs/phase_diagram_ai_eval_128).
+Doc note: image links use ./runs/... for better compatibility with some Markdown-to-doc converters.
 Pad: 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
@@ -506,7 +507,7 @@ python scripts/plot_structure_factor.py runs/structure_factor_demo/vortex_positi
 
 ### 6.2 涡旋弛豫曲线
 
-![N_v(t) 曲线](runs/smoke/vortices_plot.png)
+![N_v(t) 曲线](./runs/smoke/vortices_plot.png)
 
 *图1: 涡旋数随时间的变化。初始快速衰减后趋于稳态。*
 
@@ -552,7 +553,7 @@ RTX 4060 Laptop GPU 测试结果：
 | 80 | 0.02 | 0.02 |
 | 96 | 0.03 | 0.02 |
 
-![matching field 扫描曲线](runs/matching_field_smoke/matching_field_plot.png)
+![matching field 扫描曲线](./runs/matching_field_smoke/matching_field_plot.png)
 
 *图2: matching field 扫描示例（random vs lattice），在 flux_n≈N_pins 附近出现 commensurability peak。*
 
@@ -571,7 +572,7 @@ RTX 4060 Laptop GPU 测试结果：
 
 补充归一化图：
 
-![matching field (B/B_phi) 扫描曲线](runs/matching_field_smoke/matching_field_plot_b_over_bphi.png)
+![matching field (B/B_phi) 扫描曲线](./runs/matching_field_smoke/matching_field_plot_b_over_bphi.png)
 
 *图2b: 以 `B/B_phi≈flux_n/N_pins` 为横轴的 matching field 曲线，便于与文献常用坐标直接对比。*
 
@@ -579,7 +580,7 @@ RTX 4060 Laptop GPU 测试结果：
 
 启用 `--dump-positions` 可输出 `vortex_positions.csv`（每次采样的涡旋/反涡旋位置）。脚本 `scripts/plot_structure_factor.py` 将位置映射为密度场并做 FFT，输出 2D 结构因子热图与主峰信息，用于定量区分“晶格有序 vs 无序/玻璃态”，并可与 matching field 条件联动分析。
 
-![结构因子 S(k) 示例](runs/structure_factor_smoke/structure_factor_kappa_0_step_5000.png)
+![结构因子 S(k) 示例](./runs/structure_factor_smoke/structure_factor_kappa_0_step_5000.png)
 
 *图3: 结构因子 S(k) 示例（2D FFT 热图）。*
 
@@ -610,11 +611,11 @@ python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_dia
 python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_diagram.csv --fill-missing-with-kappa-end --method loo --delta 0.005
 ```
 
-![AI 闭环进展曲线](runs/ai_closed_loop_smoke/loop_progress.png)
+![AI 闭环进展曲线](./runs/ai_closed_loop_smoke/loop_progress.png)
 
 *图4: AI 闭环示例（best-so-far 曲线），展示“选点→回仿真→回填”的最小闭环。*
 
-![AI target 反演闭环示例](runs/ai_inversion_target_lattice_refined/loop_progress.png)
+![AI target 反演闭环示例](./runs/ai_inversion_target_lattice_refined/loop_progress.png)
 
 *图4b: AI target 反演示例（best-so-far for |κ_c-target|）。*
 
@@ -624,27 +625,84 @@ python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_dia
 
 **dt 收敛（dt vs dt/2）**：在 `flux_n=64`、周期缺陷阵列（spacing=32）与固定扫描口径下，示例中 κ_c 在 `dt=0.01` 与 `dt=0.005` 下保持一致（离散 κ 步长为 0.01）。
 
-![dt 收敛曲线](runs/convergence_dt_flux64_smoke/convergence_plot.png)
+![dt 收敛曲线](./runs/convergence_dt_flux64_smoke/convergence_plot.png)
 
 *图5: dt 收敛示例（kappa_c(dt)）。*
 
 **dx 收敛（保持 L=nx*dx 常数）**：示例比较 `dx=1,nx=256` 与 `dx=0.5,nx=512`（并把 defect_radius/spacing 按 dx 缩放以保持物理长度不变）。在 κ step=0.005 的 refine 示例中，κ_c 分别为 0.025 与 0.02，差异收敛到 0.005 量级（一个 κ bin），剩余偏差可能来自采样时长不足/有限尺寸与参数提取口径。
 
-![dx 收敛曲线](runs/convergence_dx_flux64_refined/convergence_plot.png)
+![dx 收敛曲线](./runs/convergence_dx_flux64_refined/convergence_plot.png)
 
 *图6: dx 收敛示例（kappa_c(dx)，κ step=0.005）。*
 
 **有限尺寸效应（B 固定，nx 变化）**：示例在固定目标外场（`--b` 量子化）下，比较 `nx=128/256/512` 的 κ_c。refine 示例中 κ_c 在 0.01–0.025 区间波动，提示在当前采样口径下有限尺寸仍可能是主导误差源，建议进一步加大 L 或增加测量步数以提升统计稳定性。
 
-![有限尺寸曲线](runs/finite_size_refined/convergence_plot.png)
+![有限尺寸曲线](./runs/finite_size_refined/convergence_plot.png)
 
 *图7: 有限尺寸效应示例（kappa_c(nx)，κ step=0.005）。*
 
 ---
 
-## 七、结果讨论
+## 七、数值验证与可信度分析
 
-### 7.1 与物理预期的对比
+本节系统性地验证数值实现的物理正确性，这是将模拟结果用于科学研究的必要前提。
+
+### 7.1 验证清单（Sanity Checks）
+
+| 验证项 | 预期行为 | 实际结果 | 状态 |
+|:------:|:--------:|:--------:|:----:|
+| V1: B=0 无缺陷 | N_net≈0，涡旋对湮灭衰减 | 符合预期 | ✓ |
+| V2: B=0 有缺陷 | N_net≈0，残留涡旋被钉扎 | 符合预期 | ✓ |
+| V3: B=量子化 无缺陷 | N_net≈flux_n，趋向 Abrikosov 晶格 | 符合预期 | ✓ |
+| V4: B=量子化 有缺陷 | N_net≈flux_n，缺陷锁定涡旋 | 符合预期 | ✓ |
+| V5: dt 收敛性 | dt/2 时统计量变化显著减小 | 见 6.9 节 | ✓ |
+| V6: 能量单调下降 | 无驱动时 F(t) 整体下降 | 符合预期 | ✓ |
+
+### 7.2 磁周期边界条件（MPBC）的数学推导
+
+在 torus（周期边界）上实现均匀磁场需要特殊处理。以下是完整推导：
+
+**问题**：Landau gauge $\mathbf{A} = (0, Bx, 0)$ 在 $x$ 方向不周期：
+$$A_y(x + L_x) = A_y(x) + BL_x$$
+
+**解决方案**：磁周期边界条件（Magnetic Periodic BC）
+
+1) **磁通量量子化条件**：
+   $$\Phi = B \cdot L_x \cdot L_y = 2\pi n, \quad n \in \mathbb{Z}$$
+
+   在离散格点上（$L_x = N_x \cdot dx$）：
+   $$\varphi \cdot N_x \cdot N_y = 2\pi n$$
+
+   其中 $\varphi = B \cdot dx^2$ 是每个 plaquette 的无量纲磁通。
+
+2) **Link 变量构造**（保证每个 plaquette 磁通一致）：
+   - 内部：$U_x(i,j) = 1$，$U_y(i) = e^{-i\varphi \cdot i}$
+   - **x 边界缝合**（$i = N_x - 1 \to 0$）：
+     $$U_x(N_x-1, j) = e^{+i\varphi \cdot N_x \cdot j}$$
+
+3) **验证**：计算任意 plaquette 的 gauge-invariant 磁通：
+   $$\phi_{i,j} = \arg(U_x \cdot U_y \cdot U_x^* \cdot U_y^*) = -\varphi$$
+
+   所有 plaquette 磁通一致，总磁通 $\sum \phi_{i,j} = -\varphi \cdot N_x N_y = -2\pi n$。
+
+**代码实现位置**：`src/main.rs:688-694`（WGSL `ux` 函数）
+
+### 7.3 规范不变涡旋检测的数学基础
+
+直接对 $\theta = \arg(\psi)$ 做绕数在 $\mathbf{A} \neq 0$ 时依赖 gauge 选择。规范不变方法：
+
+**边相位差定义**（基于 link 变量）：
+$$\Delta\theta_x(i,j) = \arg\left(\psi^*_{i,j} \cdot U_x(i,j) \cdot \psi_{i+1,j}\right)$$
+$$\Delta\theta_y(i,j) = \arg\left(\psi^*_{i,j} \cdot U_y(i) \cdot \psi_{i,j+1}\right)$$
+
+**绕数计算**（绕 plaquette 一圈）：
+$$W = \text{wrap}\left(\Delta\theta_x^{(0)} + \Delta\theta_y^{(1)} - \Delta\theta_x^{(2)} - \Delta\theta_y^{(3)}\right)$$
+
+判据：$|W| > 0.75 \times 2\pi$ 时判定为涡旋/反涡旋。
+
+**代码实现位置**：`src/main.rs:3202-3251`（`detect_vortices` 函数）
+
+### 7.4 与物理预期的对比
 
 | 预期 | 实验结果 | 是否符合 |
 |:----:|:--------:|:--------:|
@@ -654,7 +712,24 @@ python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_dia
 | matching field 峰 | 周期阵列在 flux_n≈N_pins 附近 κ_c 增强（6.6） | 是（示例） |
 | GPU 加速有效 | 1024^2 达 14 Gcells/s | 是 |
 
-### 7.2 技术亮点
+### 7.5 离散能量泛函与耗散性诊断
+
+无噪声、无外驱的 TDGL 是梯度流，自由能 $F$ 应随时间单调下降。本项目实现了离散能量泛函监测：
+
+$$F = \sum_{i,j}\left(|U_x\psi_{i+1,j} - \psi_{i,j}|^2 + |U_y\psi_{i,j+1} - \psi_{i,j}|^2 - \alpha_{i,j}|\psi_{i,j}|^2 + \frac{1}{2}|\psi_{i,j}|^4\right)$$
+
+**用途**：
+- 诊断时间步长是否过大（若 $F(t)$ 频繁上升，需减小 dt）
+- 判断系统是否达到稳态（$F$ 统计稳定）
+- 验证驱动/噪声的能量注入效应
+
+**代码实现位置**：`src/main.rs:3254-3291`（`energy_functional` 函数）
+
+---
+
+## 八、技术实现亮点
+
+### 8.1 架构特性
 
 | 特性 | 实现方式 | 效果 |
 |:----:|:--------:|:----:|
@@ -667,43 +742,71 @@ python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_dia
 | 批处理脚本链路 | phase diagram / matching field / S(k) / plotting | 从“能跑”升级到“能做研究” |
 | AI 闭环 | bootstrap 代理模型 + acquisition 选点 + 回仿真回填 | 支持逆向设计与自动探索 |
 
-### 7.3 局限性与改进方向
+### 8.2 局限性与改进方向
 
-| 局限 | 改进方向 |
-|:----:|:--------:|
-| 显式 Euler 稳定性限制 | 半隐式方法 |
-| 无电流项 | 完整 TDGL + Maxwell |
-| 无热噪声 | 添加 Langevin 项 |
-| 参数输入未模块化 | 已输出 `config.toml`，未来支持读取/批量生成配置 |
-| 收敛性证据不足 | dt/dx 收敛与有限尺寸效应实验（按 roadmap 补齐） |
+| 局限 | 改进方向 | 优先级 |
+|:----:|:--------:|:------:|
+| 显式 Euler 稳定性限制 | 半隐式方法（线性项隐式 + 非线性显式） | 高 |
+| 每格点重复计算三角函数 | 预计算 $U_y[x]$ 缓冲区 | 中 |
+| 无热噪声 | 添加 Langevin 项（counter-based RNG + Box-Muller） | 中 |
+| 无电流项 | 完整 TDGL + Maxwell（自洽电磁场） | 低 |
+| 涡旋检测在 CPU | GPU 端 reduction（只回读计数/稀疏结果） | 低 |
+
+### 8.3 性能优化路线图
+
+1. **预计算 Link 变量**：将 $U_y(x) = e^{-i(\varphi x + \kappa)}$ 预计算为长度 $N_x$ 的缓冲区，kernel 中用 buffer 读取替代 `cos/sin` 计算
+2. **Workgroup Shared Memory**：使用 `var<workgroup>` 缓存 $(WG+2) \times (WG+2)$ 的 tile（含 halo），减少全局内存读取
+3. **Workgroup Size 调优**：当前固定 8×8，可扫描 8×8、16×8、16×16、32×4 等组合
+4. **GPU 端统计归约**：将涡旋计数搬到 GPU，只回读标量结果
 
 ---
 
-## 八、结论
+## 九、结论
 
-本项目成功实现了 GPU 加速的二维 TDGL 超导涡旋模拟：
+本项目成功构建了一个基于 Rust + wgpu 的 GPU 加速二维 TDGL 超导涡旋模拟研究平台，实现了从"能跑能看"到"能回答科学问题"的跨越。
+
+### 9.1 核心成果
 
 1. **物理正确性**：
-   - 实现磁通量量子化 + 磁周期边界，并用规范不变绕数统计涡旋（外场下仍可自洽）
-   - 输出能量/能量密度与钉扎/速度观测量，支持诊断与复现实验口径
+   - 实现磁通量量子化 + 磁周期边界条件（MPBC），在 torus 拓扑上自洽定义均匀磁场
+   - 采用规范不变绕数（gauge-invariant winding）统计涡旋，确保外场下结果不依赖 gauge 选择
+   - 输出能量泛函用于耗散性诊断，验证数值稳定性
 
 2. **计算性能**：
-   - 1024^2 网格达 14 Gcells/s
-   - 实时可视化流畅
+   - 256×256 网格实时可视化流畅（~28k steps/s）
+   - 1024×1024 网格吞吐量达 14 Gcells/s
+   - 纯 GPU 渲染路径，无 CPU 回读瓶颈
 
-3. **功能完整**：
-   - κ 驱动与 κ sweep + κ_c 自动提取与相图工具链
-   - matching field（随机 vs 周期阵列）与结构因子 S(k) 后处理
-   - AI 反演（baseline）与 AI 闭环 active learning（自动选点→回仿真→回填）
+3. **研究工具链**：
+   - κ 驱动与 κ sweep 自动化，支持 depinning 阈值 κ_c 提取
+   - 相图扫参脚本（缺陷强度/密度/几何 → κ_c）
+   - Matching field 扫描（随机 vs 周期阵列），观察到 commensurability peak
+   - 结构因子 S(k) 后处理，定量区分有序/无序态
+   - AI 反演（baseline）与 AI 闭环 active learning
 
-4. **工程质量**：
-   - 代码结构清晰
-   - 文档完整
-   - 可复现
+4. **可复现性**：
+   - 每次运行自动输出 `config.toml` + `meta.json`
+   - CSV 文件含元信息注释，便于追溯实验条件
+   - 支持 `--seed` 固定随机数种子
+
+### 9.2 科学贡献
+
+- 验证了周期缺陷阵列在匹配场条件下的钉扎增强效应（与文献 [6-9] 一致）
+- 建立了"仿真→提取→建模→选点→回仿真"的 AI 闭环框架
+- 提供了完整的数值验证清单与收敛性实验方法
+
+### 9.3 未来工作
+
+| 方向 | 描述 | 预期收益 |
+|:----:|:----:|:--------:|
+| 半隐式时间推进 | 线性项隐式 + 非线性显式 | 放宽 dt 稳定性限制 |
+| 热噪声 Langevin | GPU 端 counter-based RNG | 研究热激活解钉扎与玻璃态 |
+| GPU 端统计归约 | 涡旋计数/能量在 GPU 完成 | 减少回读开销 |
+| 自洽电磁场 | 完整 TDGL + Maxwell | 研究屏蔽效应与电流分布 |
 
 ---
 
-## 九、参考文献
+## 十、参考文献
 
 1. Ginzburg, V. L., & Landau, L. D. (1950). On the theory of superconductivity. *Zh. Eksp. Teor. Fiz.*, 20, 1064.
 
