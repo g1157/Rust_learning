@@ -494,6 +494,10 @@ python scripts/plot_structure_factor.py runs/structure_factor_demo/vortex_positi
 - **net = 0 严格保持**，验证周期边界下的拓扑守恒
 - 能量密度单调下降（-0.41→-0.48），符合 TDGL 梯度流特性
 
+![实验2a: B=0 无缺陷涡旋动力学](./runs/exp2a_B0_no_defect/vortices_plot.png)
+
+*图1a: B=0 无缺陷条件下的涡旋动力学时间序列。*
+
 #### 实验 2b: B=0 有缺陷（钉扎效应）
 
 | 时间 t | 步数 | 涡旋数 | 反涡旋数 | 净涡旋 | 钉扎净数 |
@@ -505,6 +509,10 @@ python scripts/plot_structure_factor.py runs/structure_factor_demo/vortex_positi
 **物理分析**：
 - net = 0 仍严格保持（拓扑守恒不受缺陷影响）
 - 稳态涡旋数略高于无缺陷情况（34 vs 29），部分涡旋被缺陷钉扎
+
+![实验2b: B=0 有缺陷涡旋动力学](./runs/exp2b_B0_with_defect/vortices_plot.png)
+
+*图1b: B=0 有缺陷条件下的涡旋动力学时间序列。*
 
 #### 实验 2c: B≠0 (flux_n=64) 有缺陷（外场自洽验证）
 
@@ -518,6 +526,10 @@ python scripts/plot_structure_factor.py runs/structure_factor_demo/vortex_positi
 - **净涡旋数 net = 64 = flux_n**，完美验证磁通量量子化与 MPBC 的正确性
 - 外磁场显著增加涡旋数量（75 vs 34），符合 Type-II 超导体物理预期
 - 钉扎涡旋数稳定在 6-9 个
+
+![实验2c: B≠0 有缺陷涡旋动力学](./runs/exp2c_B64_with_defect/vortices_plot.png)
+
+*图1c: B≠0 (flux_n=64) 有缺陷条件下的涡旋动力学时间序列，验证 net=flux_n。*
 
 ### 6.2 GPU 性能基准
 
@@ -569,6 +581,14 @@ RTX 4060 Laptop GPU 测试结果（2024-12-19 实测）：
 - **匹配场效应**：flux_n=64 = N_pins，涡旋数与缺陷数匹配，周期阵列可钉扎约 31%（20/64）的涡旋
 - **去钉扎阈值**：|mean_vx| 在 κ≈0.025-0.030 开始显著增大，表明涡旋开始整体漂移
 
+![实验3a: 随机缺陷 κ sweep](./runs/exp3a_kappa_sweep_random/kappa_sweep_plot.png)
+
+*图2a: 随机缺陷条件下的 κ sweep depinning 曲线。*
+
+![实验3b: 周期阵列 κ sweep](./runs/exp3b_kappa_sweep_lattice/kappa_sweep_plot.png)
+
+*图2b: 周期阵列缺陷条件下的 κ sweep depinning 曲线。*
+
 ### 6.4 Matching Field 实验（与文献对比）
 
 #### 实验 4: 随机缺陷 vs 周期阵列（N_pins=64, spacing=32）
@@ -599,6 +619,18 @@ RTX 4060 Laptop GPU 测试结果（2024-12-19 实测）：
 - 周期阵列在 B/B_φ=n（整数）时，涡旋数与缺陷数成整数比，形成 commensurate 结构
 - Commensurate 结构下涡旋被有效钉扎，临界电流/钉扎力增强
 - 本实验验证了 Reichhardt 等人的理论预测
+
+![Matching Field: 钉扎涡旋数 vs B/B_φ](./runs/lit_compare/lit_compare_pinned_vs_bphi.png)
+
+*图2c: Matching field 实验结果 - 钉扎涡旋数随 B/B_φ 的变化（随机 vs 周期阵列）。*
+
+![Matching Field: 增强比](./runs/lit_compare/lit_compare_enhancement.png)
+
+*图2d: 周期阵列相对于随机缺陷的钉扎增强比，整数匹配场（绿色）处增强显著。*
+
+![Matching Field: 汇总表](./runs/lit_compare/lit_compare_summary_table.png)
+
+*图2e: Matching field 实验汇总表，与 Reichhardt et al. PRB 64, 052503 (2001) 对比。*
 
 ### 6.5 收敛性验证实验
 
