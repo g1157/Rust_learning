@@ -1,0 +1,8 @@
+{
+  "created_unix_ms": 1766133975891,
+  "package": {"name": "Rust_wgpu_TDGL_AI_Trial", "version": "0.1.0"},
+  "platform": {"os": "windows", "arch": "x86_64"},
+  "mode": "headless",
+  "argv": ["target\\release\\Rust_wgpu_TDGL_AI_Trial.exe","--headless","--steps","10000","--sample-period","1000","--flux-n","0","--defect-count","50","--seed","42","--out-dir","runs/exp2b_B0_with_defect"],
+  "adapter": {"name": "NVIDIA GeForce RTX 4060 Laptop GPU", "backend": "Vulkan", "device_type": "DiscreteGpu", "vendor": 4318, "device": 10464}
+}

@@ -1,0 +1,3 @@
+status,run_dir,flux_n,seed,defect_mode,defect_spacing,alpha_default,alpha_defect,defect_radius,defect_count,kappa_start,kappa_end,kappa_step,initial_relax_steps,relax_steps,measure_steps,sample_period,order_parameter,kappa_c_method,epsilon,consecutive,baseline_points,min_segment_points,kappa_c
+ok,runs/ai_closed_loop_smoke/dm_random_ds_32ad_m0d5_dc_50_dr_3_n_64_seed_1234,64,1234,random,32,1.0,-0.5,3,50,0.0,0.02,0.01,2000,200,500,100,abs_mean_vx,baseline_threshold,0.001,1,2,2,2.00000000e-02
+ok,runs/ai_closed_loop_smoke/dm_random_ds_32ad_m0d2_dc_50_dr_3_n_64_seed_1234,64,1234,random,32,1.0,-0.2,3,50,0.0,0.02,0.01,2000,200,500,100,abs_mean_vx,baseline_threshold,0.001,1,2,2,2.00000000e-02

@@ -1,0 +1,5 @@
+# mode=headless steps=10 sample_period=10
+# nx=256 ny=256 dt=0.01 dx=1 flux_n=1 phi=0.0000958738 kappa=0 B=0.0000958738 seed=1
+# defects: count=50 radius=3 alpha_default=1 alpha_defect=-0.5
+step,time,kappa,vortices,antivortices,net,energy,energy_density,pinned_v,pinned_av,pinned_net,mean_vx,mean_vy,mean_speed
+10,0.1000,0.000000e0,8877,8876,1,5.654159e2,8.627561e-3,299,289,10,0.000000e0,0.000000e0,0.000000e0

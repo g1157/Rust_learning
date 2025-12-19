@@ -1,0 +1,8 @@
+{
+  "created_unix_ms": 1766048535497,
+  "package": {"name": "Rust_wgpu_TDGL_AI_Trial", "version": "0.1.0"},
+  "platform": {"os": "windows", "arch": "x86_64"},
+  "mode": "headless_kappa_sweep",
+  "argv": ["target\\debug\\Rust_wgpu_TDGL_AI_Trial.exe","--headless","--nx","128","--ny","128","--flux-n","64","--seed","1234","--alpha-default","1.0","--alpha-defect","-1.0","--defect-radius","2","--defect-count","75","--defect-mode","random","--defect-spacing","32","--kappa-start","0.0","--kappa-end","0.05","--kappa-step","0.005","--kappa-initial-relax-steps","5000","--kappa-relax-steps","1000","--kappa-measure-steps","2000","--sample-period","100","--out-dir","runs\\phase_diagram_ai_eval_128\\dm_random_ds_32_nx128_ny128_ad_m1_dc_75_dr_2_n_64_seed_1234"],
+  "adapter": {"name": "NVIDIA GeForce RTX 4060 Laptop GPU", "backend": "Vulkan", "device_type": "DiscreteGpu", "vendor": 4318, "device": 10464}
+}

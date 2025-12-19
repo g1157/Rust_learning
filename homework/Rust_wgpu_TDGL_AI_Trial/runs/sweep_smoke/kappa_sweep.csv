@@ -1,0 +1,7 @@
+# mode=headless_kappa_sweep kappa_start=0 kappa_end=0.02 kappa_step=0.01 relax_steps=10 measure_steps=20 sample_period=10
+# nx=256 ny=256 dt=0.01 dx=1 flux_n=5 phi=0.00047936902 B=0.00047936902 seed=1234
+# defects: count=50 radius=3 alpha_default=1 alpha_defect=-0.5
+kappa,samples,mean_speed,mean_vx,mean_vy,net_mean,pinned_net_mean,energy_density_mean
+0.000000e0,2,2.037850e0,-1.058486e-1,-4.628633e-1,5.000000e0,3.000000e0,2.979114e-3
+1.000000e-2,2,2.386358e0,-1.850481e-2,-7.179867e-1,5.000000e0,4.500000e0,1.620130e-4
+2.000000e-2,2,1.978540e0,-1.215806e-1,-4.984803e-1,5.000000e0,0.000000e0,-6.019852e-4

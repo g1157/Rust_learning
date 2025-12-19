@@ -1,0 +1,3 @@
+study,run_dir,nx,ny,dt,dx,b_target,flux_n,b_eff,seed,defect_mode,defect_spacing,alpha_default,alpha_defect,defect_radius,defect_count,kappa_start,kappa_end,kappa_step,initial_relax_steps,relax_steps,measure_steps,sample_period,order_parameter,kappa_c_method,epsilon,consecutive,baseline_points,min_segment_points,kappa_c
+dt,runs/convergence_dt_smoke/dt_dt_0d01_nx256_ny256_dt0d01_dx1,256,256,0.01,1,0.02,209,2.00376240e-02,1234,random,32,1,-0.5,3,50,0,0.05,0.01,20000,2000,5000,100,abs_mean_vx,baseline_threshold,0.001,1,2,2,
+dt,runs/convergence_dt_smoke/dt_dt_0d005_nx256_ny256_dt0d005_dx1,256,256,0.005,1,0.02,209,2.00376240e-02,1234,random,32,1,-0.5,3,50,0,0.05,0.01,40000,4000,10000,100,abs_mean_vx,baseline_threshold,0.001,1,2,2,

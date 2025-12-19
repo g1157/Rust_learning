@@ -1,0 +1,1 @@
+status,run_dir,flux_n,seed,defect_mode,defect_spacing,alpha_default,alpha_defect,defect_radius,defect_count,kappa_start,kappa_end,kappa_step,initial_relax_steps,relax_steps,measure_steps,sample_period,order_parameter,kappa_c_method,epsilon,consecutive,baseline_points,min_segment_points,kappa_c

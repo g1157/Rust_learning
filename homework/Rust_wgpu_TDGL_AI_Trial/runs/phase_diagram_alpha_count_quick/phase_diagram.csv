@@ -1,0 +1,10 @@
+status,run_dir,flux_n,seed,defect_mode,defect_spacing,alpha_default,alpha_defect,defect_radius,defect_count,kappa_start,kappa_end,kappa_step,relax_steps,measure_steps,sample_period,order_parameter,kappa_c_method,epsilon,consecutive,baseline_points,min_segment_points,kappa_c
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m0d2_dc_0_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-0.2,3,0,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,3.00000000e-02
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m0d2_dc_50_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-0.2,3,50,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,0.00000000e+00
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m0d2_dc_100_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-0.2,3,100,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,0.00000000e+00
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m0d5_dc_0_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-0.5,3,0,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,3.00000000e-02
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m0d5_dc_50_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-0.5,3,50,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,5.00000000e-02
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m0d5_dc_100_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-0.5,3,100,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,0.00000000e+00
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m1_dc_0_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-1.0,3,0,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,3.00000000e-02
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m1_dc_50_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-1.0,3,50,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,5.00000000e-02
+ok,runs/phase_diagram_alpha_count_quick/dm_random_ds_32ad_m1_dc_100_dr_3_n_209_seed_1234,209,1234,random,32,1.0,-1.0,3,100,0.0,0.05,0.01,500,1000,100,abs_mean_vx,two_phase_fit,0.001,1,2,2,0.00000000e+00

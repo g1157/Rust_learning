@@ -1,0 +1,2 @@
+status,run_dir,flux_n,seed,alpha_default,alpha_defect,defect_radius,defect_count,kappa_start,kappa_end,kappa_step,relax_steps,measure_steps,sample_period,epsilon,consecutive,kappa_c
+ok,runs/phase_diagram_script_smoke/ad_m0d5_dc_50_dr_3_n_1_seed_1,1,1,1.0,-0.5,3,50,0.0,0.01,0.01,5,10,5,0.001,1,0.00000000e+00
