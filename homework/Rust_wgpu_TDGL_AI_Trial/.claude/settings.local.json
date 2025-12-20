@@ -4,7 +4,11 @@
       "Bash(cargo build:*)",
       "Bash(RUST_LOG=info cargo run:*)",
       "Bash(RUST_LOG=Rust_wgpu_TDGL_AI_Trial=info cargo run:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "WebFetch(domain:journals.aps.org)",
+      "mcp__exa__web_search_exa",
+      "Bash(git commit:*)",
+      "Bash(dir:*)"
     ]
   }
 }
