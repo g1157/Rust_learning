@@ -222,10 +222,7 @@ pub fn boss_radius(boss: &BossState) -> f32 {
 
 /// Boss 行为更新入口
 pub fn update_boss(boss: &mut BossState, players: &[Player], asteroids: &mut Vec<Asteroid>, dt: f32) {
-    match boss.kind {
-        BossKind::GiantSplitter => update_giant_splitter(boss, players, asteroids, dt),
-        _ => {}
-    }
+    if boss.kind == BossKind::GiantSplitter { update_giant_splitter(boss, players, asteroids, dt) }
 }
 
 /// GiantSplitter：缓慢追踪玩家 + 周期性召唤小型小行星
@@ -743,11 +740,10 @@ impl RunState {
 
     /// 触发遗物效果（拾取道具）
     pub fn trigger_pickup(&mut self) {
-        if self.has_relic(RelicId::SalvageMagnet) {
-            if rand::gen_range(0.0, 1.0) < 0.3 {
+        if self.has_relic(RelicId::SalvageMagnet)
+            && rand::gen_range(0.0, 1.0) < 0.3 {
                 self.add_gold(5);
             }
-        }
     }
 
     /// 进入下一波
@@ -1161,11 +1157,10 @@ pub fn buy_shop_item(run: &mut RunState, players: &mut [Player], idx: usize) -> 
     apply_reward_option(run, players, &reward);
 
     // 标记为已售
-    if let RunPhase::Shop(ref mut shop) = run.phase {
-        if let Some(item) = shop.items.get_mut(idx) {
+    if let RunPhase::Shop(ref mut shop) = run.phase
+        && let Some(item) = shop.items.get_mut(idx) {
             item.sold = true;
         }
-    }
     true
 }
 

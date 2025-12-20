@@ -417,10 +417,10 @@ impl Player {
         }
 
         // 检查幽灵模式（50%闪避几率）
-        if self.ghost_mode_active(time) {
-            if rand::gen_range(0.0f32, 1.0) < 0.5 {
-                return; // 闪避成功
-            }
+        if self.ghost_mode_active(time)
+            && rand::gen_range(0.0f32, 1.0) < 0.5
+        {
+            return; // 闪避成功
         }
 
         // 标记本条命受伤

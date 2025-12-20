@@ -2603,19 +2603,17 @@ pub fn draw_reward_selection(
         None
     };
 
-    if let Some(i) = key_choice {
-        if i < count {
+    if let Some(i) = key_choice
+        && i < count {
             reward_state.selected = Some(i);
             return Some(i);
         }
-    }
 
-    if is_mouse_button_pressed(MouseButton::Left) {
-        if let Some(i) = hover {
+    if is_mouse_button_pressed(MouseButton::Left)
+        && let Some(i) = hover {
             reward_state.selected = Some(i);
             return Some(i);
         }
-    }
 
     None
 }
@@ -2865,20 +2863,17 @@ pub fn draw_shop_ui(
         None
     };
 
-    if let Some(i) = key_select {
-        if i < shop_state.items.len() && !shop_state.items[i].sold {
+    if let Some(i) = key_select
+        && i < shop_state.items.len() && !shop_state.items[i].sold {
             return ShopUiAction::BuyConfirmed(i);
         }
-    }
 
     // 点击商品购买
-    if is_mouse_button_pressed(MouseButton::Left) {
-        if let Some(i) = hover {
-            if !shop_state.items[i].sold {
+    if is_mouse_button_pressed(MouseButton::Left)
+        && let Some(i) = hover
+            && !shop_state.items[i].sold {
                 return ShopUiAction::BuyConfirmed(i);
             }
-        }
-    }
 
     // Enter 退出商店
     if input.is_key_pressed(KeyCode::Enter) {

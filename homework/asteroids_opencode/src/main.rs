@@ -875,8 +875,8 @@ async fn main() {
                 }
 
                 // 绘制奖励选择 UI
-                if let roguelike::RunPhase::Reward(ref mut reward_state) = run_state.phase {
-                    if let Some(idx) = ui::draw_reward_selection(
+                if let roguelike::RunPhase::Reward(ref mut reward_state) = run_state.phase
+                    && let Some(idx) = ui::draw_reward_selection(
                         reward_state,
                         &input_state,
                         fonts.get_best(settings.font_choice),
@@ -894,7 +894,6 @@ async fn main() {
                             };
                         }
                     }
-                }
 
                 // 绘制引导提示
                 tutorial_state.draw(frame_t, fonts.get_best(settings.font_choice));
@@ -1936,11 +1935,10 @@ async fn main() {
                     let lives_before = player.lives;
                     player.mark_dead(frame_t);
                     // Roguelike：Boss 战受伤标记（用于完美封印等遗物判定）
-                    if player.lives < lives_before {
-                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                    if player.lives < lives_before
+                        && let GameState::RoguelikeBoss { run_state } = &mut state {
                             run_state.boss_damage_taken = true;
                         }
-                    }
                     // 添加碰撞爆炸效果 - 使用飞船位置而不是小行星位置
                     particles.spawn_explosion(ship_center, asteroid.size, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
@@ -1973,11 +1971,10 @@ async fn main() {
                     let lives_before = player.lives;
                     player.mark_dead(frame_t);
                     // Roguelike：Boss 战受伤标记
-                    if player.lives < lives_before {
-                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                    if player.lives < lives_before
+                        && let GameState::RoguelikeBoss { run_state } = &mut state {
                             run_state.boss_damage_taken = true;
                         }
-                    }
                     particles.spawn_explosion(ship_center, UFO_RADIUS, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {
@@ -2009,11 +2006,10 @@ async fn main() {
                     let lives_before = player.lives;
                     player.mark_dead(frame_t);
                     // Roguelike：Boss 战受伤标记
-                    if player.lives < lives_before {
-                        if let GameState::RoguelikeBoss { run_state } = &mut state {
+                    if player.lives < lives_before
+                        && let GameState::RoguelikeBoss { run_state } = &mut state {
                             run_state.boss_damage_taken = true;
                         }
-                    }
                     particles.spawn_explosion(ship_center, 20.0, RED, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {

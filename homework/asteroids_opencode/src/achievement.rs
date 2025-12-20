@@ -749,14 +749,14 @@ impl AchievementManager {
 
     /// 检查并解锁成就
     pub fn unlock(&mut self, id: AchievementId, time: f64) -> bool {
-        if let Some(progress) = self.progress.get_mut(&id) {
-            if !progress.unlocked {
-                progress.unlocked = true;
-                progress.unlock_time = Some(time);
-                self.recently_unlocked.push((id, time));
-                self.save();
-                return true;
-            }
+        if let Some(progress) = self.progress.get_mut(&id)
+            && !progress.unlocked
+        {
+            progress.unlocked = true;
+            progress.unlock_time = Some(time);
+            self.recently_unlocked.push((id, time));
+            self.save();
+            return true;
         }
         false
     }
@@ -764,13 +764,13 @@ impl AchievementManager {
     /// 更新进度
     pub fn update_progress(&mut self, id: AchievementId, value: u32, time: f64) {
         let achievement = Achievement::get(id);
-        if let Some(progress) = self.progress.get_mut(&id) {
-            if !progress.unlocked {
-                progress.current = value;
-                // 检查是否达到目标
-                if achievement.target > 0 && progress.current >= achievement.target {
-                    self.unlock(id, time);
-                }
+        if let Some(progress) = self.progress.get_mut(&id)
+            && !progress.unlocked
+        {
+            progress.current = value;
+            // 检查是否达到目标
+            if achievement.target > 0 && progress.current >= achievement.target {
+                self.unlock(id, time);
             }
         }
     }
@@ -839,27 +839,27 @@ impl AchievementManager {
             stats: self.stats.clone(),
         };
 
-        if let Ok(json) = serde_json::to_string(&save_data) {
-            if let Err(e) = storage::save("achievements", &json) {
-                eprintln!("Failed to save achievements: {}", e);
-            }
+        if let Ok(json) = serde_json::to_string(&save_data)
+            && let Err(e) = storage::save("achievements", &json)
+        {
+            eprintln!("Failed to save achievements: {}", e);
         }
     }
 
     /// 从文件加载
     pub fn load(&mut self) {
-        if let Ok(data) = storage::load("achievements") {
-            if let Ok(save_data) = serde_json::from_str::<SaveData>(&data) {
-                // 加载统计数据
-                self.stats = save_data.stats;
+        if let Ok(data) = storage::load("achievements")
+            && let Ok(save_data) = serde_json::from_str::<SaveData>(&data)
+        {
+            // 加载统计数据
+            self.stats = save_data.stats;
 
-                // 加载成就进度
-                for (id_str, progress) in save_data.progress {
-                    if let Some(id) = self.parse_achievement_id(&id_str) {
-                        if let Some(existing_progress) = self.progress.get_mut(&id) {
-                            *existing_progress = progress;
-                        }
-                    }
+            // 加载成就进度
+            for (id_str, progress) in save_data.progress {
+                if let Some(id) = self.parse_achievement_id(&id_str)
+                    && let Some(existing_progress) = self.progress.get_mut(&id)
+                {
+                    *existing_progress = progress;
                 }
             }
         }

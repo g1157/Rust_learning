@@ -183,7 +183,7 @@ impl TutorialState {
                 } else {
                     1.0
                 };
-                self.draw_toast(&text, alpha, font);
+                self.draw_toast(text, alpha, font);
             }
         }
     }
