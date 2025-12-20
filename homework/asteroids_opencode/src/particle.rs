@@ -9,6 +9,7 @@
 //! - 透明度淡出
 //! - 最多 1000 个并发粒子
 //! - 内置节流机制减少每帧粒子生成
+//! - 对象池模式减少内存分配
 
 use macroquad::prelude::*;
 
@@ -24,6 +25,7 @@ const THRUSTER_THROTTLE_INTERVAL: f32 = 0.025; // 40 次/秒，而非 60 次/秒
 const BULLET_TRAIL_THROTTLE_INTERVAL: f32 = 0.016; // ~60 次/秒 全局上限
 
 /// 单个粒子
+#[derive(Clone)]
 pub struct Particle {
     pub pos: Vec2,
     pub vel: Vec2,
@@ -31,6 +33,8 @@ pub struct Particle {
     pub size: f32,
     pub created_at: f32,
     pub lifetime: f32,
+    /// 是否处于活跃状态（对象池使用）
+    active: bool,
 }
 
 impl Particle {
@@ -43,7 +47,37 @@ impl Particle {
             size,
             created_at: now,
             lifetime,
+            active: true,
         }
+    }
+
+    /// 创建一个非活跃的占位粒子（用于对象池预分配）
+    fn inactive() -> Self {
+        Self {
+            pos: Vec2::ZERO,
+            vel: Vec2::ZERO,
+            color: Color::new(0.0, 0.0, 0.0, 0.0),
+            size: 0.0,
+            created_at: 0.0,
+            lifetime: 0.0,
+            active: false,
+        }
+    }
+
+    /// 重置粒子状态（对象池复用）
+    fn reset(&mut self, pos: Vec2, vel: Vec2, color: Color, size: f32, lifetime: f32, now: f32) {
+        self.pos = pos;
+        self.vel = vel;
+        self.color = color;
+        self.size = size;
+        self.created_at = now;
+        self.lifetime = lifetime;
+        self.active = true;
+    }
+
+    /// 标记为非活跃
+    fn deactivate(&mut self) {
+        self.active = false;
     }
 
     /// 更新粒子位置
@@ -55,7 +89,7 @@ impl Particle {
 
     /// 检查粒子是否存活
     pub fn is_alive(&self, now: f32) -> bool {
-        now - self.created_at < self.lifetime
+        self.active && now - self.created_at < self.lifetime
     }
 
     /// 获取粒子当前的透明度（随时间衰减）
@@ -66,9 +100,12 @@ impl Particle {
     }
 }
 
-/// 粒子系统
+/// 粒子系统（使用对象池模式）
 pub struct ParticleSystem {
+    /// 粒子池（预分配，包含活跃和非活跃粒子）
     particles: Vec<Particle>,
+    /// 活跃粒子数量
+    active_count: usize,
     /// 上次推进器粒子生成时间（用于节流）
     last_thruster_time: f32,
     /// 上次子弹尾迹生成时间（全局节流）
@@ -77,27 +114,45 @@ pub struct ParticleSystem {
 
 impl ParticleSystem {
     pub fn new() -> Self {
+        // 预分配粒子池
+        let mut particles = Vec::with_capacity(particles::MAX_PARTICLES);
+        for _ in 0..particles::MAX_PARTICLES {
+            particles.push(Particle::inactive());
+        }
         Self {
-            particles: Vec::with_capacity(particles::MAX_PARTICLES),
+            particles,
+            active_count: 0,
             last_thruster_time: f32::NEG_INFINITY,
             last_bullet_trail_time: f32::NEG_INFINITY,
         }
     }
 
-    /// 确保有足够空间容纳新粒子，超出 MAX_PARTICLES 时移除最老的粒子
-    fn make_room(&mut self, needed: usize) {
-        let available = particles::MAX_PARTICLES.saturating_sub(self.particles.len());
-        if needed > available {
-            let to_remove = needed - available;
-            // 移除最老的粒子（Vec 头部）
-            self.particles.drain(0..to_remove.min(self.particles.len()));
+    /// 从对象池获取一个可用粒子槽位，返回索引
+    /// 如果池已满，复用最老的粒子
+    fn acquire_slot(&mut self) -> usize {
+        // 优先查找非活跃粒子
+        for (i, p) in self.particles.iter().enumerate() {
+            if !p.active {
+                return i;
+            }
+        }
+        // 池已满，复用第一个（最老的）粒子
+        0
+    }
+
+    /// 添加粒子到池中
+    fn add_particle(&mut self, pos: Vec2, vel: Vec2, color: Color, size: f32, lifetime: f32, now: f32) {
+        let slot = self.acquire_slot();
+        let was_active = self.particles[slot].active;
+        self.particles[slot].reset(pos, vel, color, size, lifetime, now);
+        if !was_active {
+            self.active_count += 1;
         }
     }
 
     /// 创建爆炸效果
     pub fn spawn_explosion(&mut self, pos: Vec2, size: f32, color: Color, now: f32) {
         let count = (EXPLOSION_PARTICLE_COUNT as f32 * (size / 20.0).min(3.0)) as usize;
-        self.make_room(count);
         let (speed_min, speed_max) = particles::EXPLOSION_SPEED_RANGE;
         let (size_min, size_max) = particles::EXPLOSION_SIZE_RANGE;
         let (life_min, life_max) = particles::EXPLOSION_LIFETIME_RANGE;
@@ -109,8 +164,7 @@ impl ParticleSystem {
             let particle_size = rand::gen_range(size_min, size_max);
             let lifetime = rand::gen_range(life_min, life_max);
 
-            self.particles
-                .push(Particle::new(pos, vel, color, particle_size, lifetime, now));
+            self.add_particle(pos, vel, color, particle_size, lifetime, now);
         }
     }
 
@@ -123,7 +177,6 @@ impl ParticleSystem {
             return;
         }
         self.last_thruster_time = now;
-        self.make_room(THRUSTER_PARTICLE_COUNT);
 
         let (spread_min, spread_max) = particles::THRUSTER_SPREAD_RANGE;
         let (speed_min, speed_max) = particles::THRUSTER_SPEED_RANGE;
@@ -141,8 +194,7 @@ impl ParticleSystem {
             let size = rand::gen_range(1.5, 3.0);
             let lifetime = rand::gen_range(life_min, life_max);
 
-            self.particles
-                .push(Particle::new(pos, vel, orange, size, lifetime, now));
+            self.add_particle(pos, vel, orange, size, lifetime, now);
         }
     }
 
@@ -163,7 +215,6 @@ impl ParticleSystem {
         }
 
         self.last_bullet_trail_time = now;
-        self.make_room(1);
 
         let particle_vel = vel * 0.2;
         let size = rand::gen_range(0.8, 1.5);
@@ -173,42 +224,47 @@ impl ParticleSystem {
         // 尾迹颜色更淡
         let trail_color = Color::new(color.r, color.g, color.b, particles::TRAIL_ALPHA);
 
-        self.particles.push(Particle::new(
-            pos,
-            particle_vel,
-            trail_color,
-            size,
-            lifetime,
-            now,
-        ));
+        self.add_particle(pos, particle_vel, trail_color, size, lifetime, now);
     }
 
     /// 更新所有粒子
     pub fn update(&mut self, dt: f32, now: f32) {
+        self.active_count = 0;
         for particle in self.particles.iter_mut() {
-            particle.update(dt);
+            if particle.active {
+                particle.update(dt);
+                if !particle.is_alive(now) {
+                    particle.deactivate();
+                } else {
+                    self.active_count += 1;
+                }
+            }
         }
-        self.particles.retain(|p| p.is_alive(now));
     }
 
     /// 绘制所有粒子
     pub fn draw(&self, now: f32) {
         for particle in &self.particles {
-            let alpha = particle.alpha(now);
-            let color = Color::new(particle.color.r, particle.color.g, particle.color.b, alpha);
-            draw_circle(particle.pos.x, particle.pos.y, particle.size, color);
+            if particle.active {
+                let alpha = particle.alpha(now);
+                let color = Color::new(particle.color.r, particle.color.g, particle.color.b, alpha);
+                draw_circle(particle.pos.x, particle.pos.y, particle.size, color);
+            }
         }
     }
 
     /// 清空所有粒子
     #[allow(dead_code)]
     pub fn clear(&mut self) {
-        self.particles.clear();
+        for particle in self.particles.iter_mut() {
+            particle.deactivate();
+        }
+        self.active_count = 0;
     }
 
-    /// 获取当前粒子数量
+    /// 获取当前活跃粒子数量
     pub fn count(&self) -> usize {
-        self.particles.len()
+        self.active_count
     }
 
     /// 创建道具拾取效果（向上飘散的光点）
@@ -234,14 +290,7 @@ impl ParticleSystem {
                 1.0,
             );
 
-            self.particles.push(Particle::new(
-                pos,
-                vel,
-                bright_color,
-                particle_size,
-                lifetime,
-                now,
-            ));
+            self.add_particle(pos, vel, bright_color, particle_size, lifetime, now);
         }
 
         // 添加中心闪光
@@ -250,14 +299,14 @@ impl ParticleSystem {
             let speed = rand::gen_range(20.0, 60.0);
             let vel = Vec2::new(angle.cos() * speed, angle.sin() * speed);
 
-            self.particles.push(Particle::new(
+            self.add_particle(
                 pos,
                 vel,
                 Color::new(1.0, 1.0, 1.0, 0.9),
                 rand::gen_range(3.0, 5.0),
                 rand::gen_range(0.2, 0.4),
                 now,
-            ));
+            );
         }
     }
 }
@@ -412,5 +461,23 @@ mod tests {
         let system = ParticleSystem::default();
         assert_eq!(system.count(), 0);
         assert!(system.last_thruster_time.is_infinite() && system.last_thruster_time < 0.0);
+    }
+
+    #[test]
+    fn test_object_pool_reuse() {
+        let mut system = ParticleSystem::new();
+
+        // 生成一些粒子
+        system.spawn_explosion(Vec2::new(100.0, 100.0), 20.0, RED, 0.0);
+        let initial_count = system.count();
+        assert!(initial_count > 0);
+
+        // 让粒子过期
+        system.update(10.0, 10.0);
+        assert_eq!(system.count(), 0);
+
+        // 再次生成粒子，应该复用已有槽位
+        system.spawn_explosion(Vec2::new(100.0, 100.0), 20.0, BLUE, 10.0);
+        assert!(system.count() > 0);
     }
 }
