@@ -54,9 +54,9 @@ impl ZoneId {
     /// Zone1 从 0.6 开始，比普通 Survival 更简单
     pub fn difficulty_multiplier(&self) -> f32 {
         match self {
-            ZoneId::Zone1 => 0.6,  // 简单开局
-            ZoneId::Zone2 => 1.0,  // 正常难度
-            ZoneId::Zone3 => 1.5,  // 困难
+            ZoneId::Zone1 => 0.6, // 简单开局
+            ZoneId::Zone2 => 1.0, // 正常难度
+            ZoneId::Zone3 => 1.5, // 困难
         }
     }
 
@@ -72,9 +72,9 @@ impl ZoneId {
     /// 获取区域基础小行星数量
     pub fn base_asteroid_count(&self) -> usize {
         match self {
-            ZoneId::Zone1 => 5,   // 少量小行星
-            ZoneId::Zone2 => 8,   // 中等数量
-            ZoneId::Zone3 => 12,  // 大量小行星
+            ZoneId::Zone1 => 5,  // 少量小行星
+            ZoneId::Zone2 => 8,  // 中等数量
+            ZoneId::Zone3 => 12, // 大量小行星
         }
     }
 
@@ -221,8 +221,15 @@ pub fn boss_radius(boss: &BossState) -> f32 {
 }
 
 /// Boss 行为更新入口
-pub fn update_boss(boss: &mut BossState, players: &[Player], asteroids: &mut Vec<Asteroid>, dt: f32) {
-    if boss.kind == BossKind::GiantSplitter { update_giant_splitter(boss, players, asteroids, dt) }
+pub fn update_boss(
+    boss: &mut BossState,
+    players: &[Player],
+    asteroids: &mut Vec<Asteroid>,
+    dt: f32,
+) {
+    if boss.kind == BossKind::GiantSplitter {
+        update_giant_splitter(boss, players, asteroids, dt)
+    }
 }
 
 /// GiantSplitter：缓慢追踪玩家 + 周期性召唤小型小行星
@@ -264,7 +271,8 @@ fn update_giant_splitter(
     };
 
     // 周期性召唤小行星
-    if boss.phase_timer >= summon_interval && asteroids.len() < GIANT_SPLITTER_MAX_SUMMONED_ASTEROIDS
+    if boss.phase_timer >= summon_interval
+        && asteroids.len() < GIANT_SPLITTER_MAX_SUMMONED_ASTEROIDS
     {
         boss.phase_timer -= summon_interval;
 
@@ -546,7 +554,11 @@ pub enum RunPhase {
     /// 休息阶段
     Rest(RestPhaseState),
     /// 区域过渡
-    ZoneTransition { from: ZoneId, to: ZoneId, timer: f32 },
+    ZoneTransition {
+        from: ZoneId,
+        to: ZoneId,
+        timer: f32,
+    },
     /// 游戏胜利
     Victory,
     /// 游戏失败
@@ -740,10 +752,9 @@ impl RunState {
 
     /// 触发遗物效果（拾取道具）
     pub fn trigger_pickup(&mut self) {
-        if self.has_relic(RelicId::SalvageMagnet)
-            && rand::gen_range(0.0, 1.0) < 0.3 {
-                self.add_gold(5);
-            }
+        if self.has_relic(RelicId::SalvageMagnet) && rand::gen_range(0.0, 1.0) < 0.3 {
+            self.add_gold(5);
+        }
     }
 
     /// 进入下一波
@@ -807,7 +818,11 @@ impl RunState {
     /// 进入休息阶段
     pub fn enter_rest_phase(&mut self) {
         self.phase = RunPhase::Rest(RestPhaseState {
-            options: vec![RestOption::Heal, RestOption::UpgradeCard, RestOption::RemoveCard],
+            options: vec![
+                RestOption::Heal,
+                RestOption::UpgradeCard,
+                RestOption::RemoveCard,
+            ],
             selected: None,
         });
     }
@@ -942,11 +957,21 @@ pub fn draw_boss_health_bar(boss: &BossState) {
     let bar_y = 50.0;
 
     // 背景
-    draw_rectangle(bar_x - 2.0, bar_y - 2.0, bar_width + 4.0, bar_height + 4.0, DARKGRAY);
+    draw_rectangle(
+        bar_x - 2.0,
+        bar_y - 2.0,
+        bar_width + 4.0,
+        bar_height + 4.0,
+        DARKGRAY,
+    );
 
     // 血条
     let health_width = bar_width * boss.health_percent();
-    let health_color = if boss.is_enraged { RED } else { Color::new(0.8, 0.2, 0.2, 1.0) };
+    let health_color = if boss.is_enraged {
+        RED
+    } else {
+        Color::new(0.8, 0.2, 0.2, 1.0)
+    };
     draw_rectangle(bar_x, bar_y, health_width, bar_height, health_color);
 
     // Boss 名称
@@ -1158,9 +1183,10 @@ pub fn buy_shop_item(run: &mut RunState, players: &mut [Player], idx: usize) -> 
 
     // 标记为已售
     if let RunPhase::Shop(ref mut shop) = run.phase
-        && let Some(item) = shop.items.get_mut(idx) {
-            item.sold = true;
-        }
+        && let Some(item) = shop.items.get_mut(idx)
+    {
+        item.sold = true;
+    }
     true
 }
 

@@ -39,6 +39,7 @@ pub struct Particle {
 
 impl Particle {
     /// 创建新粒子
+    #[allow(dead_code)]
     pub fn new(pos: Vec2, vel: Vec2, color: Color, size: f32, lifetime: f32, now: f32) -> Self {
         Self {
             pos,
@@ -141,7 +142,15 @@ impl ParticleSystem {
     }
 
     /// 添加粒子到池中
-    fn add_particle(&mut self, pos: Vec2, vel: Vec2, color: Color, size: f32, lifetime: f32, now: f32) {
+    fn add_particle(
+        &mut self,
+        pos: Vec2,
+        vel: Vec2,
+        color: Color,
+        size: f32,
+        lifetime: f32,
+        now: f32,
+    ) {
         let slot = self.acquire_slot();
         let was_active = self.particles[slot].active;
         self.particles[slot].reset(pos, vel, color, size, lifetime, now);
@@ -227,30 +236,24 @@ impl ParticleSystem {
         self.add_particle(pos, particle_vel, trail_color, size, lifetime, now);
     }
 
-    /// 更新所有粒子
-    pub fn update(&mut self, dt: f32, now: f32) {
+    /// 更新所有粒子（优化版本：返回活跃粒子列表用于绘制）
+    pub fn update_and_get_active(&mut self, dt: f32, now: f32) -> Vec<(Vec2, f32, Color)> {
+        let mut active_particles = Vec::new();
         self.active_count = 0;
         for particle in self.particles.iter_mut() {
             if particle.active {
                 particle.update(dt);
-                if !particle.is_alive(now) {
-                    particle.deactivate();
-                } else {
+                if particle.is_alive(now) {
                     self.active_count += 1;
+                    let alpha = particle.alpha(now);
+                    let color = Color::new(particle.color.r, particle.color.g, particle.color.b, alpha);
+                    active_particles.push((particle.pos, particle.size, color));
+                } else {
+                    particle.deactivate();
                 }
             }
         }
-    }
-
-    /// 绘制所有粒子
-    pub fn draw(&self, now: f32) {
-        for particle in &self.particles {
-            if particle.active {
-                let alpha = particle.alpha(now);
-                let color = Color::new(particle.color.r, particle.color.g, particle.color.b, alpha);
-                draw_circle(particle.pos.x, particle.pos.y, particle.size, color);
-            }
-        }
+        active_particles
     }
 
     /// 清空所有粒子
@@ -364,9 +367,9 @@ mod tests {
         let mut system = ParticleSystem::new();
         system.spawn_explosion(Vec2::new(100.0, 100.0), 20.0, RED, 0.0);
         let initial_count = system.count();
-        system.update(0.1, 0.1);
+        let _ = system.update_and_get_active(0.1, 0.1);
         assert_eq!(system.count(), initial_count);
-        system.update(10.0, 10.0);
+        let _ = system.update_and_get_active(10.0, 10.0);
         assert_eq!(system.count(), 0); // 所有粒子应该已过期
     }
 
@@ -473,7 +476,7 @@ mod tests {
         assert!(initial_count > 0);
 
         // 让粒子过期
-        system.update(10.0, 10.0);
+        let _ = system.update_and_get_active(10.0, 10.0);
         assert_eq!(system.count(), 0);
 
         // 再次生成粒子，应该复用已有槽位

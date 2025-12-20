@@ -614,7 +614,10 @@ impl InterpolationManager {
         let avg_player_snapshots = if self.players.is_empty() {
             0.0
         } else {
-            self.players.values().map(|buf| buf.history.len()).sum::<usize>() as f32
+            self.players
+                .values()
+                .map(|buf| buf.history.len())
+                .sum::<usize>() as f32
                 / self.players.len() as f32
         };
 
@@ -622,7 +625,10 @@ impl InterpolationManager {
         let avg_bullet_snapshots = if self.bullets.is_empty() {
             0.0
         } else {
-            self.bullets.values().map(|buf| buf.history.len()).sum::<usize>() as f32
+            self.bullets
+                .values()
+                .map(|buf| buf.history.len())
+                .sum::<usize>() as f32
                 / self.bullets.len() as f32
         };
 

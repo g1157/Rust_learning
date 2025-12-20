@@ -175,10 +175,11 @@ impl QuadTree {
         if self.children.is_some() {
             let index = self.get_child_index(&obj);
             if let Some(idx) = index
-                && let Some(ref mut children) = self.children {
-                    children[idx].insert(obj);
-                    return;
-                }
+                && let Some(ref mut children) = self.children
+            {
+                children[idx].insert(obj);
+                return;
+            }
         }
 
         // 添加到当前节点

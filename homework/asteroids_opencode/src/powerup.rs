@@ -51,10 +51,14 @@ impl PowerUpType {
     /// 获取道具稀有度
     pub fn rarity(self) -> PowerUpRarity {
         match self {
-            Self::Shield | Self::DualShot | Self::TripleShot |
-            Self::RapidFire | Self::TempShield => PowerUpRarity::Common,
-            Self::PiercingRounds | Self::GhostMode |
-            Self::Overdrive | Self::TeleportCharge => PowerUpRarity::Advanced,
+            Self::Shield
+            | Self::DualShot
+            | Self::TripleShot
+            | Self::RapidFire
+            | Self::TempShield => PowerUpRarity::Common,
+            Self::PiercingRounds | Self::GhostMode | Self::Overdrive | Self::TeleportCharge => {
+                PowerUpRarity::Advanced
+            }
         }
     }
 
@@ -158,7 +162,11 @@ pub struct PickupInfo {
 }
 
 /// 处理道具拾取，返回拾取的道具信息列表
-pub fn handle_pickups(players: &mut [Player], powerups: &mut Vec<PowerUp>, now: f64) -> Vec<PickupInfo> {
+pub fn handle_pickups(
+    players: &mut [Player],
+    powerups: &mut Vec<PowerUp>,
+    now: f64,
+) -> Vec<PickupInfo> {
     let mut pickups = Vec::new();
     for player in players.iter_mut() {
         if !player.alive {
@@ -474,7 +482,14 @@ fn draw_rapid_fire_icon(center: Vec2, alpha: f32) {
         Vec2::new(center.x + r * 0.4, center.y + r),
     ];
     for i in 0..3 {
-        draw_line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y, 3., color);
+        draw_line(
+            points[i].x,
+            points[i].y,
+            points[i + 1].x,
+            points[i + 1].y,
+            3.,
+            color,
+        );
     }
 }
 
@@ -488,8 +503,22 @@ fn draw_piercing_icon(center: Vec2, alpha: f32) {
     // 穿透箭头
     let r = POWERUP_RADIUS * 0.5;
     draw_line(center.x - r, center.y, center.x + r, center.y, 3., color);
-    draw_line(center.x + r, center.y, center.x + r * 0.5, center.y - r * 0.4, 2., color);
-    draw_line(center.x + r, center.y, center.x + r * 0.5, center.y + r * 0.4, 2., color);
+    draw_line(
+        center.x + r,
+        center.y,
+        center.x + r * 0.5,
+        center.y - r * 0.4,
+        2.,
+        color,
+    );
+    draw_line(
+        center.x + r,
+        center.y,
+        center.x + r * 0.5,
+        center.y + r * 0.4,
+        2.,
+        color,
+    );
 
     // 两个被穿透的小圆
     draw_circle_lines(center.x - r * 0.3, center.y, r * 0.25, 2., color);
@@ -512,7 +541,14 @@ fn draw_temp_shield_icon(center: Vec2, alpha: f32) {
     ];
     for i in 0..6 {
         let next = (i + 1) % 6;
-        draw_line(vertices[i].x, vertices[i].y, vertices[next].x, vertices[next].y, 3., color);
+        draw_line(
+            vertices[i].x,
+            vertices[i].y,
+            vertices[next].x,
+            vertices[next].y,
+            3.,
+            color,
+        );
     }
 
     // 中心数字 "3"
@@ -528,7 +564,12 @@ fn draw_ghost_mode_icon(center: Vec2, alpha: f32) {
 
     // 幽灵身体（椭圆上半部 + 波浪下半部）
     let r = POWERUP_RADIUS * 0.45;
-    draw_circle(center.x, center.y - r * 0.2, r, Color::new(0.7, 0.7, 0.9, alpha * 0.4));
+    draw_circle(
+        center.x,
+        center.y - r * 0.2,
+        r,
+        Color::new(0.7, 0.7, 0.9, alpha * 0.4),
+    );
 
     // 眼睛
     let eye_color = Color::new(0.2, 0.2, 0.3, alpha);
@@ -548,13 +589,48 @@ fn draw_overdrive_icon(center: Vec2, alpha: f32) {
 
     // 右箭头
     draw_line(center.x, center.y, center.x + r * 0.8, center.y, 3., color);
-    draw_line(center.x + r * 0.8, center.y, center.x + r * 0.4, center.y - r * 0.4, 2., color);
-    draw_line(center.x + r * 0.8, center.y, center.x + r * 0.4, center.y + r * 0.4, 2., color);
+    draw_line(
+        center.x + r * 0.8,
+        center.y,
+        center.x + r * 0.4,
+        center.y - r * 0.4,
+        2.,
+        color,
+    );
+    draw_line(
+        center.x + r * 0.8,
+        center.y,
+        center.x + r * 0.4,
+        center.y + r * 0.4,
+        2.,
+        color,
+    );
 
     // 左箭头（较短，表示旋转加速）
-    draw_line(center.x - r * 0.2, center.y - r * 0.5, center.x - r * 0.2, center.y + r * 0.5, 3., color);
-    draw_line(center.x - r * 0.2, center.y - r * 0.5, center.x - r * 0.5, center.y - r * 0.2, 2., color);
-    draw_line(center.x - r * 0.2, center.y + r * 0.5, center.x - r * 0.5, center.y + r * 0.2, 2., color);
+    draw_line(
+        center.x - r * 0.2,
+        center.y - r * 0.5,
+        center.x - r * 0.2,
+        center.y + r * 0.5,
+        3.,
+        color,
+    );
+    draw_line(
+        center.x - r * 0.2,
+        center.y - r * 0.5,
+        center.x - r * 0.5,
+        center.y - r * 0.2,
+        2.,
+        color,
+    );
+    draw_line(
+        center.x - r * 0.2,
+        center.y + r * 0.5,
+        center.x - r * 0.5,
+        center.y + r * 0.2,
+        2.,
+        color,
+    );
 }
 
 /// 传送充能图标（紫色漩涡）

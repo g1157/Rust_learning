@@ -15,7 +15,7 @@
 use macroquad::prelude::*;
 
 use crate::achievement::{AchievementId, AchievementManager};
-use crate::asteroid::{spawn_wave_with_speed, Asteroid};
+use crate::asteroid::{Asteroid, spawn_wave_with_speed};
 use crate::constants::{difficulty, gameplay};
 use crate::game_state::{GameMode, PlayerCount};
 use crate::player::{Controls, Player};

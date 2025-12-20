@@ -20,7 +20,7 @@ use crate::bullet::BULLET_RADIUS;
 use crate::player::Player;
 use crate::quadtree::{ObjectIndex, QuadTree};
 use crate::ship::SHIP_HEIGHT;
-use crate::ufo::{EnemyBullet, ENEMY_BULLET_RADIUS, UFO_RADIUS, Ufo};
+use crate::ufo::{ENEMY_BULLET_RADIUS, EnemyBullet, UFO_RADIUS, Ufo};
 use crate::utils::circle_intersects_triangle;
 
 // ============================================================================
@@ -171,10 +171,7 @@ pub fn check_enemy_bullet_player_collisions(
 }
 
 /// 检测子弹与 UFO 的碰撞（简单版本，不处理链式攻击）
-pub fn check_bullet_ufo_collisions(
-    players: &[Player],
-    ufos: &[Ufo],
-) -> Vec<(usize, usize, usize)> {
+pub fn check_bullet_ufo_collisions(players: &[Player], ufos: &[Ufo]) -> Vec<(usize, usize, usize)> {
     // 返回 (player_idx, bullet_idx, ufo_idx)
     let mut collisions = Vec::new();
 

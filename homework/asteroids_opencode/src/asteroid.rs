@@ -241,7 +241,11 @@ impl Asteroid {
             * rand::gen_range(ASTEROID_SPLIT_SPEED_MIN, ASTEROID_SPLIT_SPEED_MAX);
 
         // 分裂型小行星产生更多碎片
-        let child_count = if self.asteroid_type == AsteroidType::Splitter { 3 } else { 2 };
+        let child_count = if self.asteroid_type == AsteroidType::Splitter {
+            3
+        } else {
+            2
+        };
 
         let mut children = vec![
             Self::child_from(self, perp_a, child_size, child_sides),
@@ -250,11 +254,15 @@ impl Asteroid {
 
         // 分裂型额外产生一个碎片
         if child_count > 2 {
-            let extra_vel = Vec2::new(
-                rand::gen_range(-1.0, 1.0),
-                rand::gen_range(-1.0, 1.0),
-            ).normalize() * rand::gen_range(ASTEROID_SPLIT_SPEED_MIN, ASTEROID_SPLIT_SPEED_MAX);
-            children.push(Self::child_from(self, extra_vel, child_size * 0.8, child_sides));
+            let extra_vel = Vec2::new(rand::gen_range(-1.0, 1.0), rand::gen_range(-1.0, 1.0))
+                .normalize()
+                * rand::gen_range(ASTEROID_SPLIT_SPEED_MIN, ASTEROID_SPLIT_SPEED_MAX);
+            children.push(Self::child_from(
+                self,
+                extra_vel,
+                child_size * 0.8,
+                child_sides,
+            ));
         }
 
         Some(children)
@@ -333,7 +341,12 @@ pub fn draw_asteroid_with_time(asteroid: &Asteroid, offset: Vec2, _base_color: C
             center.x,
             center.y,
             glow_radius,
-            Color::new(glow_color.r, glow_color.g, glow_color.b, glow_color.a * pulse),
+            Color::new(
+                glow_color.r,
+                glow_color.g,
+                glow_color.b,
+                glow_color.a * pulse,
+            ),
         );
 
         // 磁性小行星：绘制磁力线
@@ -358,7 +371,11 @@ pub fn draw_asteroid_with_time(asteroid: &Asteroid, offset: Vec2, _base_color: C
     }
 
     // 绘制不规则多边形的边
-    let line_width = if asteroid.asteroid_type == AsteroidType::Golden { 3.0 } else { 2.0 };
+    let line_width = if asteroid.asteroid_type == AsteroidType::Golden {
+        3.0
+    } else {
+        2.0
+    };
     for i in 0..n {
         let v1 = vertices[i] + offset;
         let v2 = vertices[(i + 1) % n] + offset;
@@ -367,12 +384,7 @@ pub fn draw_asteroid_with_time(asteroid: &Asteroid, offset: Vec2, _base_color: C
 
     // 特殊类型绘制内部填充
     if asteroid.asteroid_type.has_special_effect() {
-        let fill_color = Color::new(
-            asteroid_color.r,
-            asteroid_color.g,
-            asteroid_color.b,
-            0.15,
-        );
+        let fill_color = Color::new(asteroid_color.r, asteroid_color.g, asteroid_color.b, 0.15);
         // 简化填充：绘制中心圆
         draw_circle(center.x, center.y, asteroid.size * 0.5, fill_color);
     }
@@ -405,7 +417,14 @@ fn draw_magnetic_field(center: Vec2, size: f32, time: f32) {
             let p2 = center + Vec2::new(a2.cos() * r2, a2.sin() * r2);
 
             let alpha = 0.4 * (1.0 - t1);
-            draw_line(p1.x, p1.y, p2.x, p2.y, 1.5, Color::new(0.8, 0.3, 0.9, alpha));
+            draw_line(
+                p1.x,
+                p1.y,
+                p2.x,
+                p2.y,
+                1.5,
+                Color::new(0.8, 0.3, 0.9, alpha),
+            );
         }
     }
 }
@@ -427,7 +446,14 @@ fn draw_explosive_warning(center: Vec2, size: f32, time: f32) {
     draw_line(right.x, right.y, top.x, top.y, 2.0, tri_color);
 
     // 中心感叹号
-    draw_line(center.x, center.y - tri_size * 0.3, center.x, center.y + tri_size * 0.1, 2.0, tri_color);
+    draw_line(
+        center.x,
+        center.y - tri_size * 0.3,
+        center.x,
+        center.y + tri_size * 0.1,
+        2.0,
+        tri_color,
+    );
     draw_circle(center.x, center.y + tri_size * 0.25, 2.0, tri_color);
 }
 
@@ -443,7 +469,12 @@ fn draw_golden_sparkles(center: Vec2, size: f32, time: f32) {
         let sparkle_alpha = 0.5 + 0.5 * ((time * 5.0 + i as f32 * 0.7).sin());
         let sparkle_size = 2.0 + 1.5 * sparkle_alpha;
 
-        draw_circle(sparkle_pos.x, sparkle_pos.y, sparkle_size, Color::new(1.0, 0.95, 0.5, sparkle_alpha));
+        draw_circle(
+            sparkle_pos.x,
+            sparkle_pos.y,
+            sparkle_size,
+            Color::new(1.0, 0.95, 0.5, sparkle_alpha),
+        );
     }
 }
 
@@ -462,10 +493,13 @@ fn draw_ice_crystals(center: Vec2, size: f32, time: f32) {
 
         for j in 0..6 {
             let angle = (j as f32 * std::f32::consts::FRAC_PI_3) + time * 0.3;
-            let end = crystal_center + Vec2::new(angle.cos() * crystal_size, angle.sin() * crystal_size);
+            let end =
+                crystal_center + Vec2::new(angle.cos() * crystal_size, angle.sin() * crystal_size);
             draw_line(
-                crystal_center.x, crystal_center.y,
-                end.x, end.y,
+                crystal_center.x,
+                crystal_center.y,
+                end.x,
+                end.y,
                 1.5,
                 Color::new(0.6, 0.95, 1.0, alpha),
             );

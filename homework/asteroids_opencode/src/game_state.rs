@@ -421,25 +421,50 @@ pub enum PauseSelection {
 /// 游戏状态机
 #[derive(Clone)]
 pub enum GameState {
-    ModeSelection { selection: GameMode },
-    SettingsDetail { selection: SettingOption },
+    ModeSelection {
+        selection: GameMode,
+    },
+    SettingsDetail {
+        selection: SettingOption,
+    },
     AchievementsView,
-    OnlineLobby { nickname_input: bool },
-    OnlineWaiting { room_id: u32 },
+    OnlineLobby {
+        nickname_input: bool,
+    },
+    OnlineWaiting {
+        room_id: u32,
+    },
     WaitingStart,
-    DraftSelection { draft_state: DraftState },
+    DraftSelection {
+        draft_state: DraftState,
+    },
     Playing,
     Paused {
         selection: PauseSelection,
         roguelike_state: Option<roguelike::RunState>,
     },
-    VictoryPause { started_at: f64 },
-    RoundEnd { winner_idx: usize },
-    GameOver { victory: bool, end_time: f64 },
-    RoguelikeRun { run_state: roguelike::RunState },
-    RoguelikeReward { run_state: roguelike::RunState },
-    RoguelikeShop { run_state: roguelike::RunState },
-    RoguelikeBoss { run_state: roguelike::RunState },
+    VictoryPause {
+        started_at: f64,
+    },
+    RoundEnd {
+        winner_idx: usize,
+    },
+    GameOver {
+        victory: bool,
+        end_time: f64,
+    },
+    RoguelikeRun {
+        run_state: roguelike::RunState,
+    },
+    RoguelikeReward {
+        run_state: roguelike::RunState,
+    },
+    RoguelikeShop {
+        run_state: roguelike::RunState,
+    },
+    RoguelikeBoss {
+        run_state: roguelike::RunState,
+    },
 }
 
 // ============================================================================

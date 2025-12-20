@@ -104,11 +104,21 @@ impl ChainLightningManager {
                 for node in fx.nodes.iter() {
                     let p = *node + offset;
                     // 外环发光
-                    draw_circle(p.x, p.y, flash_radius * 1.5, Color::new(1.0, 1.0, 1.0, flash_alpha * 0.3));
+                    draw_circle(
+                        p.x,
+                        p.y,
+                        flash_radius * 1.5,
+                        Color::new(1.0, 1.0, 1.0, flash_alpha * 0.3),
+                    );
                     // 主闪烁圈
                     draw_circle(p.x, p.y, flash_radius, flash_color);
                     // 核心高亮
-                    draw_circle(p.x, p.y, flash_radius * 0.4, Color::new(1.0, 1.0, 1.0, flash_alpha * 0.8));
+                    draw_circle(
+                        p.x,
+                        p.y,
+                        flash_radius * 0.4,
+                        Color::new(1.0, 1.0, 1.0, flash_alpha * 0.8),
+                    );
                 }
             }
         }
@@ -412,7 +422,7 @@ mod tests {
     #[test]
     fn test_find_chain_targets_single() {
         let asteroids = vec![
-            make_asteroid(Vec2::new(0.0, 0.0), true),   // 原始目标（已碰撞）
+            make_asteroid(Vec2::new(0.0, 0.0), true), // 原始目标（已碰撞）
             make_asteroid(Vec2::new(50.0, 0.0), false), // 可链接目标
         ];
         let targets = find_chain_asteroid_targets(Vec2::ZERO, 0, &asteroids, 2, 100.0);

@@ -1363,7 +1363,9 @@ pub fn draw_debug_panel(stats: &DebugStats, font: Option<&Font>) {
             draw_text_ex(
                 &format!(
                     "Snap P~{:.1} B~{:.1} | Delay:{:.0}ms",
-                    interp.avg_player_snapshots, interp.avg_bullet_snapshots, interp.render_delay_ms
+                    interp.avg_player_snapshots,
+                    interp.avg_bullet_snapshots,
+                    interp.render_delay_ms
                 ),
                 text_x,
                 text_y,
@@ -2208,14 +2210,21 @@ fn draw_buff_icon(x: f32, y: f32, buff: &ActiveBuff, font: Option<&Font>) {
     let progress = (buff.remaining / buff.max_duration).clamp(0.0, 1.0) as f32;
 
     // 背景圆
-    draw_circle(x + size / 2.0, y + size / 2.0, size / 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
+    draw_circle(
+        x + size / 2.0,
+        y + size / 2.0,
+        size / 2.0,
+        Color::new(0.0, 0.0, 0.0, 0.6),
+    );
 
     // 进度环（顺时针从顶部开始）
     let segments = 32;
     let filled_segments = (progress * segments as f32) as i32;
     for i in 0..filled_segments {
-        let angle1 = -std::f32::consts::FRAC_PI_2 + (i as f32 / segments as f32) * std::f32::consts::TAU;
-        let angle2 = -std::f32::consts::FRAC_PI_2 + ((i + 1) as f32 / segments as f32) * std::f32::consts::TAU;
+        let angle1 =
+            -std::f32::consts::FRAC_PI_2 + (i as f32 / segments as f32) * std::f32::consts::TAU;
+        let angle2 = -std::f32::consts::FRAC_PI_2
+            + ((i + 1) as f32 / segments as f32) * std::f32::consts::TAU;
         let cx = x + size / 2.0;
         let cy = y + size / 2.0;
         let r = size / 2.0 - 2.0;
@@ -2229,13 +2238,7 @@ fn draw_buff_icon(x: f32, y: f32, buff: &ActiveBuff, font: Option<&Font>) {
     }
 
     // 边框
-    draw_circle_lines(
-        x + size / 2.0,
-        y + size / 2.0,
-        size / 2.0,
-        2.0,
-        buff.color,
-    );
+    draw_circle_lines(x + size / 2.0, y + size / 2.0, size / 2.0, 2.0, buff.color);
 
     // 图标字符
     let text_width = measure_text(&buff.icon_char, font, 20, 1.0).width;
@@ -2366,7 +2369,13 @@ pub fn draw_killstreak_counter(players: &[Player], time: f64, font: Option<&Font
         let bar_x = x - bar_width / 2.0;
         let bar_y = y + bg_height / 2.0 - 8.0;
 
-        draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::new(0.3, 0.3, 0.3, 0.5));
+        draw_rectangle(
+            bar_x,
+            bar_y,
+            bar_width,
+            bar_height,
+            Color::new(0.3, 0.3, 0.3, 0.5),
+        );
         draw_rectangle(
             bar_x,
             bar_y,
@@ -2575,9 +2584,8 @@ pub fn draw_reward_selection(
 
     // 绘制卡片（选中时有呼吸动画）
     let pulse = 1.0 + 0.03 * ((get_time() as f32) * 7.0).sin().abs();
-    for i in 0..count {
+    for (i, base) in rects.iter().enumerate().take(count) {
         let selected = reward_state.selected == Some(i);
-        let base = rects[i];
         let scale = if selected { pulse } else { 1.0 };
         let cx = base.x + base.w / 2.0;
         let cy = base.y + base.h / 2.0;
@@ -2587,7 +2595,13 @@ pub fn draw_reward_selection(
             base.w * scale,
             base.h * scale,
         );
-        draw_reward_card(rect, &reward_state.options[i], selected, &format!("{}", i + 1), font);
+        draw_reward_card(
+            rect,
+            &reward_state.options[i],
+            selected,
+            &format!("{}", i + 1),
+            font,
+        );
     }
 
     // 处理输入（支持 1-4 键）
@@ -2597,23 +2611,27 @@ pub fn draw_reward_selection(
         Some(1)
     } else if input.is_key_pressed(KeyCode::Key3) || input.is_key_pressed(KeyCode::Kp3) {
         Some(2)
-    } else if count >= 4 && (input.is_key_pressed(KeyCode::Key4) || input.is_key_pressed(KeyCode::Kp4)) {
+    } else if count >= 4
+        && (input.is_key_pressed(KeyCode::Key4) || input.is_key_pressed(KeyCode::Kp4))
+    {
         Some(3)
     } else {
         None
     };
 
     if let Some(i) = key_choice
-        && i < count {
-            reward_state.selected = Some(i);
-            return Some(i);
-        }
+        && i < count
+    {
+        reward_state.selected = Some(i);
+        return Some(i);
+    }
 
     if is_mouse_button_pressed(MouseButton::Left)
-        && let Some(i) = hover {
-            reward_state.selected = Some(i);
-            return Some(i);
-        }
+        && let Some(i) = hover
+    {
+        reward_state.selected = Some(i);
+        return Some(i);
+    }
 
     None
 }
@@ -2700,7 +2718,13 @@ pub fn draw_shop_ui(
         let display_name = format!("{} · {}", kind, name);
 
         // 背景
-        draw_shadow_panel(rect.x, rect.y, rect.w, rect.h, Color::new(0.08, 0.1, 0.14, 0.88));
+        draw_shadow_panel(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            Color::new(0.08, 0.1, 0.14, 0.88),
+        );
         draw_rectangle_lines(
             rect.x,
             rect.y,
@@ -2842,7 +2866,9 @@ pub fn draw_shop_ui(
     );
 
     // 处理输入
-    if input.is_key_pressed(KeyCode::R) || (refresh_hover && is_mouse_button_pressed(MouseButton::Left)) {
+    if input.is_key_pressed(KeyCode::R)
+        || (refresh_hover && is_mouse_button_pressed(MouseButton::Left))
+    {
         return ShopUiAction::RefreshRequested;
     }
 
@@ -2864,16 +2890,19 @@ pub fn draw_shop_ui(
     };
 
     if let Some(i) = key_select
-        && i < shop_state.items.len() && !shop_state.items[i].sold {
-            return ShopUiAction::BuyConfirmed(i);
-        }
+        && i < shop_state.items.len()
+        && !shop_state.items[i].sold
+    {
+        return ShopUiAction::BuyConfirmed(i);
+    }
 
     // 点击商品购买
     if is_mouse_button_pressed(MouseButton::Left)
         && let Some(i) = hover
-            && !shop_state.items[i].sold {
-                return ShopUiAction::BuyConfirmed(i);
-            }
+        && !shop_state.items[i].sold
+    {
+        return ShopUiAction::BuyConfirmed(i);
+    }
 
     // Enter 退出商店
     if input.is_key_pressed(KeyCode::Enter) {

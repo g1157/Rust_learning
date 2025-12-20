@@ -13,9 +13,9 @@
 
 use macroquad::prelude::*;
 
-use crate::bullet::{Bullet, WeaponType, BULLET_RADIUS};
+use crate::bullet::{BULLET_RADIUS, Bullet, WeaponType};
 use crate::constants::homing;
-use crate::effects::{PendingHit, PendingHitKind, PendingHitState, CONFIRM_GRACE, DENIED_FLASH};
+use crate::effects::{CONFIRM_GRACE, DENIED_FLASH, PendingHit, PendingHitKind, PendingHitState};
 use crate::ship::{SHIP_BASE, SHIP_HEIGHT};
 
 /// 绘制增强版飞船
@@ -761,7 +761,14 @@ pub fn draw_ghost_mode_effect(pos: Vec2, rot: f32, _color: Color, time: f32) {
 
         draw_line(nose.x, nose.y, left_wing.x, left_wing.y, 1.5, ghost_color);
         draw_line(nose.x, nose.y, right_wing.x, right_wing.y, 1.5, ghost_color);
-        draw_line(left_wing.x, left_wing.y, right_wing.x, right_wing.y, 1.5, ghost_color);
+        draw_line(
+            left_wing.x,
+            left_wing.y,
+            right_wing.x,
+            right_wing.y,
+            1.5,
+            ghost_color,
+        );
     }
 
     // 中心光晕
@@ -776,7 +783,8 @@ pub fn draw_ghost_mode_effect(pos: Vec2, rot: f32, _color: Color, time: f32) {
     // 闪烁的星点效果
     let star_count = 6;
     for i in 0..star_count {
-        let angle = (time * 2.0 + i as f32 * std::f32::consts::TAU / star_count as f32) % std::f32::consts::TAU;
+        let angle = (time * 2.0 + i as f32 * std::f32::consts::TAU / star_count as f32)
+            % std::f32::consts::TAU;
         let dist = SHIP_HEIGHT * 0.6 + 10.0 * (time * 3.0 + i as f32).sin();
         let star_pos = pos + Vec2::new(angle.cos(), angle.sin()) * dist;
         let star_alpha = 0.3 + 0.3 * ((time * 5.0 + i as f32 * 0.5).sin().abs());

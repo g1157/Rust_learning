@@ -46,8 +46,8 @@ mod score;
 mod ship;
 mod sound;
 mod storage;
-mod ufo;
 mod tutorial;
+mod ufo;
 mod ui;
 mod ui_achievements;
 mod utils;
@@ -59,16 +59,16 @@ use asteroid::{Asteroid, spawn_wave_with_speed};
 use battle_draft::{Card, DraftState, draw_draft_ui};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
 use clap::Parser;
-use duel::{DuelState, DUEL_BULLET_RADIUS};
+use duel::{DUEL_BULLET_RADIUS, DuelState};
 use effects::{PendingHitKind, PendingHitManager, ScreenShake, SlowMotion};
 use font::FontSystem;
 use game::{
-    init_players, reset_players, spawn_survival_wave,
-    total_survival_score, update_achievements, ASTEROID_COUNT, ASTEROID_WAVE_INCREMENT,
+    ASTEROID_COUNT, ASTEROID_WAVE_INCREMENT, init_players, reset_players, spawn_survival_wave,
+    total_survival_score, update_achievements,
 };
 use game_state::{
-    adjust_setting, FontChoice, GameMode, GameSettings, GameState, OnlineBullet,
-    PauseSelection, PlayerCount, SettingOption, TimeAttackDuration, TimeAttackState,
+    FontChoice, GameMode, GameSettings, GameState, OnlineBullet, PauseSelection, PlayerCount,
+    SettingOption, TimeAttackDuration, TimeAttackState, adjust_setting,
 };
 use macroquad::prelude::*;
 use particle::ParticleSystem;
@@ -160,7 +160,9 @@ async fn main() {
     let mut tutorial_state = tutorial::TutorialState::new(); // 新手引导系统
 
     // 在线多人网络客户端
-    let mut network_client = network::NetworkClient::new("ws://127.0.0.1:9001".to_string());
+    let server_url = std::env::var("ASTEROIDS_SERVER_URL")
+        .unwrap_or_else(|_| "wss://localhost:9001".to_string());
+    let mut network_client = network::NetworkClient::new(server_url);
     let mut online_nickname = String::new(); // 玩家昵称
     let mut is_online_mode = false; // 是否为在线模式
     let _last_key_frame = 0u64; // 防抖：上次按键的帧计数（保留供未来使用）
@@ -480,9 +482,7 @@ async fn main() {
                                 difficulty * settings.asteroid_speed_multiplier,
                             );
                             survival_wave = 1;
-                            state = GameState::RoguelikeRun {
-                                run_state: new_run,
-                            };
+                            state = GameState::RoguelikeRun { run_state: new_run };
                         }
                         _ => {
                             // 进入游戏 (Survival/Duel)
@@ -604,7 +604,9 @@ async fn main() {
                     if matches!(current_mode, GameMode::Survival | GameMode::TimeAttack) {
                         global_draft_state.reset(); // 重置选卡状态（新游戏）
                         global_draft_state.start_draft(true); // 开局选卡
-                        state = GameState::DraftSelection { draft_state: global_draft_state.clone() };
+                        state = GameState::DraftSelection {
+                            draft_state: global_draft_state.clone(),
+                        };
                     } else {
                         state = GameState::Playing;
                     }
@@ -613,12 +615,15 @@ async fn main() {
                 next_frame().await;
                 continue;
             }
-            GameState::DraftSelection { ref mut draft_state } => {
+            GameState::DraftSelection {
+                ref mut draft_state,
+            } => {
                 // 更新动画计时器
                 draft_state.update(raw_dt);
 
                 // 输入处理：左右键切换卡牌
-                if input_state.is_key_pressed(KeyCode::Left) || input_state.is_key_pressed(KeyCode::A)
+                if input_state.is_key_pressed(KeyCode::Left)
+                    || input_state.is_key_pressed(KeyCode::A)
                 {
                     draft_state.move_selection(-1);
                 }
@@ -702,7 +707,8 @@ async fn main() {
                     }
                     GameMode::Roguelike => {
                         if victory {
-                            "Run complete! You conquered all zones! Press [Enter] to restart".to_string()
+                            "Run complete! You conquered all zones! Press [Enter] to restart"
+                                .to_string()
                         } else {
                             "Run ended. Press [Enter] to try again".to_string()
                         }
@@ -800,7 +806,12 @@ async fn main() {
                 }
 
                 // 处理区域过渡
-                if let roguelike::RunPhase::ZoneTransition { from, to, ref mut timer } = run_state.phase {
+                if let roguelike::RunPhase::ZoneTransition {
+                    from,
+                    to,
+                    ref mut timer,
+                } = run_state.phase
+                {
                     *timer -= dt as f32;
                     roguelike::draw_zone_transition(from, to, *timer);
                     if *timer <= 0.0 {
@@ -880,20 +891,21 @@ async fn main() {
                         reward_state,
                         &input_state,
                         fonts.get_best(settings.font_choice),
-                    ) {
-                        // 应用选中的奖励
-                        if let Some(reward) = reward_state.options.get(idx).cloned() {
-                            // 播放选择音效
-                            sounds.play(SoundEffect::PowerUp, settings.sound_volume);
-                            roguelike::apply_reward_option(run_state, &mut players, &reward);
-                            // 生成商店物品并进入商店
-                            let items = roguelike::generate_shop_items(run_state);
-                            run_state.enter_shop_phase(items);
-                            state = GameState::RoguelikeShop {
-                                run_state: run_state.clone(),
-                            };
-                        }
+                    )
+                {
+                    // 应用选中的奖励
+                    if let Some(reward) = reward_state.options.get(idx).cloned() {
+                        // 播放选择音效
+                        sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+                        roguelike::apply_reward_option(run_state, &mut players, &reward);
+                        // 生成商店物品并进入商店
+                        let items = roguelike::generate_shop_items(run_state);
+                        run_state.enter_shop_phase(items);
+                        state = GameState::RoguelikeShop {
+                            run_state: run_state.clone(),
+                        };
                     }
+                }
 
                 // 绘制引导提示
                 tutorial_state.draw(frame_t, fonts.get_best(settings.font_choice));
@@ -915,7 +927,8 @@ async fn main() {
                 let max_waves = run_state.zone.wave_count();
 
                 // 绘制商店 UI 并获取操作
-                let action = if let roguelike::RunPhase::Shop(ref mut shop_state) = run_state.phase {
+                let action = if let roguelike::RunPhase::Shop(ref mut shop_state) = run_state.phase
+                {
                     ui::draw_shop_ui(
                         shop_state,
                         current_gold,
@@ -943,20 +956,22 @@ async fn main() {
                     }
                     ui::ShopUiAction::ExitShop => {
                         // 从 ShopPhaseState 获取波次信息
-                        let (wave_at_enter, max_waves_at_enter) = if let roguelike::RunPhase::Shop(ref shop) = run_state.phase {
-                            (shop.wave_at_enter, shop.max_waves_at_enter)
-                        } else {
-                            (1, max_waves)
-                        };
+                        let (wave_at_enter, max_waves_at_enter) =
+                            if let roguelike::RunPhase::Shop(ref shop) = run_state.phase {
+                                (shop.wave_at_enter, shop.max_waves_at_enter)
+                            } else {
+                                (1, max_waves)
+                            };
                         let is_last_wave = wave_at_enter >= max_waves_at_enter;
 
                         // 先将 phase 恢复为 Combat，否则 advance_wave() 不会生效
-                        run_state.phase = roguelike::RunPhase::Combat(roguelike::CombatPhaseState {
-                            wave_in_zone: wave_at_enter,
-                            enemies_remaining: 0,
-                            spawn_timer: 0.0,
-                            wave_start_time: 0.0,
-                        });
+                        run_state.phase =
+                            roguelike::RunPhase::Combat(roguelike::CombatPhaseState {
+                                wave_in_zone: wave_at_enter,
+                                enemies_remaining: 0,
+                                spawn_timer: 0.0,
+                                wave_start_time: 0.0,
+                            });
 
                         if is_last_wave {
                             // 最后一波完成，进入 Boss 战
@@ -1079,13 +1094,14 @@ async fn main() {
                 ref roguelike_state,
             } => {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
+                let active_particles = particles.update_and_get_active(dt, frame_t as f32);
                 render_scene(
                     &players,
                     &asteroids,
                     &ufos,
                     &enemy_bullets,
                     &powerups,
-                    &particles,
+                    &active_particles,
                     duel_view,
                     frame_t,
                     false,
@@ -1160,9 +1176,7 @@ async fn main() {
                     if let Some(run_state) = roguelike_state.clone() {
                         // 根据 RunPhase 恢复到对应的 GameState
                         state = match run_state.phase {
-                            roguelike::RunPhase::Boss(_) => {
-                                GameState::RoguelikeBoss { run_state }
-                            }
+                            roguelike::RunPhase::Boss(_) => GameState::RoguelikeBoss { run_state },
                             _ => GameState::RoguelikeRun { run_state },
                         };
                     } else {
@@ -1184,13 +1198,14 @@ async fn main() {
             }
             GameState::VictoryPause { started_at } => {
                 let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
+                let active_particles = particles.update_and_get_active(dt, frame_t as f32);
                 render_scene(
                     &players,
                     &asteroids,
                     &ufos,
                     &enemy_bullets,
                     &powerups,
-                    &particles,
+                    &active_particles,
                     duel_view,
                     frame_t,
                     false,
@@ -1229,13 +1244,14 @@ async fn main() {
             GameState::RoundEnd { winner_idx } => {
                 // 显示回合结束画面
                 let duel_view = Some(&duel_state);
+                let active_particles = particles.update_and_get_active(dt, frame_t as f32);
                 render_scene(
                     &players,
                     &asteroids,
                     &ufos,
                     &enemy_bullets,
                     &powerups,
-                    &particles,
+                    &active_particles,
                     duel_view,
                     frame_t,
                     false,
@@ -1335,25 +1351,35 @@ async fn main() {
                     } else {
                         online_nickname.clone()
                     };
+                    // 生成客户端令牌用于基本身份验证
+                    let client_token = format!("client_{}_{}", frame_t as u64, rand::gen_range(100000u32, 999999));
                     // 默认使用 Survival 模式
                     if let Some(net_mode) =
                         network::NetworkGameMode::from_game_mode(GameMode::Survival)
                     {
-                        network_client.send(network::ClientMessage::JoinQueue {
+                        if let Err(err) = network_client.send(network::ClientMessage::JoinQueue {
                             mode: net_mode,
                             nickname,
-                        });
-                        current_mode = GameMode::Survival;
-                        state = GameState::OnlineWaiting { room_id: 0 };
+                            token: client_token,
+                        }) {
+                            eprintln!("[网络] 加入队列发送失败: {}", err);
+                        } else {
+                            current_mode = GameMode::Survival;
+                            state = GameState::OnlineWaiting { room_id: 0 };
+                        }
                     }
                 }
 
                 // ESC 返回主菜单
                 if input_state.is_key_pressed(KeyCode::Escape) {
-                    network_client.disconnect();
-                    state = GameState::ModeSelection {
-                        selection: GameMode::Online,
+                    if let Err(err) = network_client.send(network::ClientMessage::LeaveQueue) {
+                        eprintln!("[网络] 离开队列发送失败: {}", err);
+                    }
+                    state = GameState::OnlineLobby {
+                        nickname_input: false,
                     };
+                    next_frame().await;
+                    continue;
                 }
 
                 next_frame().await;
@@ -1371,7 +1397,9 @@ async fn main() {
 
                 // ESC 离开队列返回大厅
                 if input_state.is_key_pressed(KeyCode::Escape) {
-                    network_client.send(network::ClientMessage::LeaveQueue);
+                    if let Err(err) = network_client.send(network::ClientMessage::LeaveQueue) {
+                        eprintln!("[网络] 离开队列发送失败: {}", err);
+                    }
                     state = GameState::OnlineLobby {
                         nickname_input: false,
                     };
@@ -1394,7 +1422,9 @@ async fn main() {
                                 rid, players, mode
                             );
                             // 立即发送 Ready 消息
-                            network_client.send(network::ClientMessage::Ready);
+                            if let Err(err) = network_client.send(network::ClientMessage::Ready) {
+                                eprintln!("[网络] Ready 发送失败: {}", err);
+                            }
                         }
                         network::ServerMessage::GameStart => {
                             // 游戏开始 - 初始化游戏状态
@@ -1474,7 +1504,13 @@ async fn main() {
             // 发送输入到服务器（使用 send_input 支持客户端预测）
             // 记录当前帧的 dt，用于重播时保持物理一致性
             let input_timestamp = get_time();
-            network_client.send_input(keys_pressed.clone(), input_timestamp, dt);
+            if let Err(err) =
+                network_client.send_input(keys_pressed.clone(), input_timestamp, dt)
+            {
+                if !matches!(err, network::NetworkSendError::RateLimited(_)) {
+                    eprintln!("[网络] 输入发送失败: {}", err);
+                }
+            }
 
             // === 客户端预测：本地立即应用输入 ===
             // 在等待服务器响应期间，先在本地应用输入，减少感知延迟
@@ -1564,7 +1600,12 @@ async fn main() {
                                             } else {
                                                 dt
                                             };
-                                            apply_predicted_input(local_player, &parsed, replay_dt, cmd.timestamp);
+                                            apply_predicted_input(
+                                                local_player,
+                                                &parsed,
+                                                replay_dt,
+                                                cmd.timestamp,
+                                            );
                                         }
                                     }
                                 }
@@ -1894,7 +1935,7 @@ async fn main() {
             }
         }
 
-        particles.update(dt, frame_t as f32);
+        particles.update_and_get_active(dt, frame_t as f32);
 
         // 更新链式闪电效果
         chain_lightnings.update(frame_t as f32);
@@ -1936,9 +1977,10 @@ async fn main() {
                     player.mark_dead(frame_t);
                     // Roguelike：Boss 战受伤标记（用于完美封印等遗物判定）
                     if player.lives < lives_before
-                        && let GameState::RoguelikeBoss { run_state } = &mut state {
-                            run_state.boss_damage_taken = true;
-                        }
+                        && let GameState::RoguelikeBoss { run_state } = &mut state
+                    {
+                        run_state.boss_damage_taken = true;
+                    }
                     // 添加碰撞爆炸效果 - 使用飞船位置而不是小行星位置
                     particles.spawn_explosion(ship_center, asteroid.size, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
@@ -1972,9 +2014,10 @@ async fn main() {
                     player.mark_dead(frame_t);
                     // Roguelike：Boss 战受伤标记
                     if player.lives < lives_before
-                        && let GameState::RoguelikeBoss { run_state } = &mut state {
-                            run_state.boss_damage_taken = true;
-                        }
+                        && let GameState::RoguelikeBoss { run_state } = &mut state
+                    {
+                        run_state.boss_damage_taken = true;
+                    }
                     particles.spawn_explosion(ship_center, UFO_RADIUS, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {
@@ -2007,9 +2050,10 @@ async fn main() {
                     player.mark_dead(frame_t);
                     // Roguelike：Boss 战受伤标记
                     if player.lives < lives_before
-                        && let GameState::RoguelikeBoss { run_state } = &mut state {
-                            run_state.boss_damage_taken = true;
-                        }
+                        && let GameState::RoguelikeBoss { run_state } = &mut state
+                    {
+                        run_state.boss_damage_taken = true;
+                    }
                     particles.spawn_explosion(ship_center, 20.0, RED, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
                     if settings.enable_screen_shake {
@@ -2043,7 +2087,12 @@ async fn main() {
                     }
                 }
                 // 生成爆炸视觉效果
-                particles.spawn_explosion(explosion.pos, explosion.radius * 0.5, SKYBLUE, frame_t as f32);
+                particles.spawn_explosion(
+                    explosion.pos,
+                    explosion.radius * 0.5,
+                    SKYBLUE,
+                    frame_t as f32,
+                );
             }
         }
 
@@ -2670,7 +2719,7 @@ async fn main() {
             None
         };
 
-        let debug_stats = DebugStats {
+        let _debug_stats = DebugStats {
             fps: 1.0 / raw_dt, // 使用原始 dt 计算真实 FPS
             entity_count,
             quadtree_depth: quadtree.max_depth(),
@@ -2678,29 +2727,30 @@ async fn main() {
             network: network_debug,
         };
 
-        render_scene(
-            &players,
-            &asteroids,
-            &ufos,
-            &enemy_bullets,
-            &powerups,
-            &particles,
-            duel_view,
-            frame_t,
-            false,
-            screen_shake,
-            Some(&debug_stats),
-            time_scale,
-            &achievements,
-            fonts.get_best(settings.font_choice),
-            settings.flag_radius,
-            current_mode,
-            &vortex_manager,
-            &starfield,
-            is_online_mode,
-            &online_bullets,
-            &chain_lightnings,
-        );
+                let active_particles = particles.update_and_get_active(dt, frame_t as f32);
+                render_scene(
+                    &players,
+                    &asteroids,
+                    &ufos,
+                    &enemy_bullets,
+                    &powerups,
+                    &active_particles,
+                    duel_view,
+                    frame_t,
+                    false,
+                    None,
+                    None,
+                    1.0,
+                    &achievements,
+                    fonts.get_best(settings.font_choice),
+                    settings.flag_radius,
+                    current_mode,
+                    &vortex_manager,
+                    &starfield,
+                    is_online_mode,
+                    &online_bullets,
+                    &chain_lightnings,
+                );
         if matches!(current_mode, GameMode::Survival) {
             ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
         }
@@ -3120,7 +3170,7 @@ fn render_scene(
     ufos: &[Ufo],
     enemy_bullets: &[EnemyBullet],
     powerups: &[PowerUp],
-    particles: &ParticleSystem,
+    active_particles: &[(Vec2, f32, Color)],
     duel_state: Option<&DuelState>,
     frame_t: f64,
     show_pause_hint: bool,
@@ -3150,7 +3200,9 @@ fn render_scene(
     starfield.draw(frame_t as f32);
 
     // 绘制粒子（在背景之后，其他物体之前）
-    particles.draw(frame_t as f32);
+    for (pos, size, color) in active_particles.iter() {
+        draw_circle(pos.x, pos.y, *size, *color);
+    }
 
     // 绘制子弹（使用增强渲染）
     for player in players.iter() {
@@ -3279,8 +3331,8 @@ fn render_scene(
         // 计算强度：从阈值开始线性增加
         let level_above_threshold =
             (max_visual_level - constants::killstreak::VIGNETTE_THRESHOLD) as f32;
-        let intensity = (level_above_threshold * 0.3 + 0.2)
-            .min(constants::killstreak::VIGNETTE_MAX_INTENSITY);
+        let intensity =
+            (level_above_threshold * 0.3 + 0.2).min(constants::killstreak::VIGNETTE_MAX_INTENSITY);
         // 使用第一个活着的玩家的颜色
         let vignette_color = players
             .iter()

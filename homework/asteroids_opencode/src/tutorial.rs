@@ -117,22 +117,14 @@ impl TutorialState {
                     "操作：W/↑ 推进 · A/D/←/→ 转向 · J/Space 射击 · K/F 闪现 · Esc 暂停",
                     7.0,
                 ),
-                TutorialScreen::RoguelikeCombat => (
-                    "Roguelike：清空波次后选择奖励，然后前往商店",
-                    6.0,
-                ),
-                TutorialScreen::RoguelikeReward => (
-                    "奖励选择：按 1/2/3 或点击卡片选择",
-                    5.0,
-                ),
-                TutorialScreen::RoguelikeShop => (
-                    "商店：点击商品购买 · R 刷新 · Enter 继续",
-                    5.0,
-                ),
-                TutorialScreen::RoguelikeBoss => (
-                    "Boss 战：小心 Boss 的攻击模式，狂暴时更危险！",
-                    5.0,
-                ),
+                TutorialScreen::RoguelikeCombat => {
+                    ("Roguelike：清空波次后选择奖励，然后前往商店", 6.0)
+                }
+                TutorialScreen::RoguelikeReward => ("奖励选择：按 1/2/3 或点击卡片选择", 5.0),
+                TutorialScreen::RoguelikeShop => ("商店：点击商品购买 · R 刷新 · Enter 继续", 5.0),
+                TutorialScreen::RoguelikeBoss => {
+                    ("Boss 战：小心 Boss 的攻击模式，狂暴时更危险！", 5.0)
+                }
             };
             self.toast = Some((text.to_string(), now + duration));
         }

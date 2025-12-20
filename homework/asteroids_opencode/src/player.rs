@@ -63,9 +63,9 @@ pub struct Controls {
     pub shoot_alt: Option<KeyCode>,
     pub weapon_switch: KeyCode,
     pub weapon_switch_alt: Option<KeyCode>,
-    pub dash: KeyCode,        // 冲刺键
-    pub hyperspace: KeyCode,  // 超空间跳跃键
-    pub phase_dash: KeyCode,  // 相位闪现键
+    pub dash: KeyCode,       // 冲刺键
+    pub hyperspace: KeyCode, // 超空间跳跃键
+    pub phase_dash: KeyCode, // 相位闪现键
 }
 
 impl Controls {
@@ -307,7 +307,8 @@ impl Player {
                         WeaponType::Penetrating,
                     ));
                 } else {
-                    self.bullets.push(Bullet::new(position, modified_direction, now));
+                    self.bullets
+                        .push(Bullet::new(position, modified_direction, now));
                 }
                 1
             }
@@ -347,7 +348,8 @@ impl Player {
             }
             WeaponType::Homing => {
                 // 追踪导弹：速度较慢，但会追踪目标（也受子弹速度加成影响）
-                let missile_vel = direction.normalize() * homing::SPEED * self.modifiers.bullet_speed_mult;
+                let missile_vel =
+                    direction.normalize() * homing::SPEED * self.modifiers.bullet_speed_mult;
                 self.bullets.push(Bullet::with_weapon_type(
                     position,
                     missile_vel,
@@ -417,9 +419,7 @@ impl Player {
         }
 
         // 检查幽灵模式（50%闪避几率）
-        if self.ghost_mode_active(time)
-            && rand::gen_range(0.0f32, 1.0) < 0.5
-        {
+        if self.ghost_mode_active(time) && rand::gen_range(0.0f32, 1.0) < 0.5 {
             return; // 闪避成功
         }
 
@@ -438,7 +438,9 @@ impl Player {
             // 注意：took_damage_this_life 保持当前值（用于记录这条命是否受伤）
         } else {
             // 复活：开始新的一条命（应用无敌时间修改器）
-            let invuln_duration = self.modifiers.modified_invuln_duration(HIT_INVULNERABLE_DURATION);
+            let invuln_duration = self
+                .modifiers
+                .modified_invuln_duration(HIT_INVULNERABLE_DURATION);
             self.invulnerable_until = time + invuln_duration;
             // 重置受伤标记，因为这是新的一条命
             self.took_damage_this_life = false;
@@ -759,9 +761,12 @@ impl Player {
     /// 获取当前最大速度（考虑卡牌加成、连击加成和道具加成）
     pub fn max_speed(&self, time: f64) -> f32 {
         // 先应用卡牌加成到基础速度
-        let base_speed = self.modifiers.modified_max_speed(crate::ship::SHIP_MAX_SPEED);
+        let base_speed = self
+            .modifiers
+            .modified_max_speed(crate::ship::SHIP_MAX_SPEED);
         // 再叠加连击加成
-        let killstreak_speed = base_speed + (self.killstreak.min(3) as f32 * KILLSTREAK_SPEED_BONUS);
+        let killstreak_speed =
+            base_speed + (self.killstreak.min(3) as f32 * KILLSTREAK_SPEED_BONUS);
         // 最后应用超速模式（速度+80%）
         if self.overdrive_active(time) {
             killstreak_speed * 1.8
