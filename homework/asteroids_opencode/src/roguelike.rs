@@ -13,7 +13,9 @@ use macroquad::prelude::*;
 use macroquad::text::{Font, TextParams};
 
 use crate::asteroid::{Asteroid, AsteroidType};
+use crate::battle_draft::{Card, generate_draft_options};
 use crate::player::Player;
+use crate::ufo::Ufo;
 use crate::utils::wrap_around;
 
 // ============================================================================
@@ -212,11 +214,30 @@ const GIANT_SPLITTER_SUMMON_COUNT_ENRAGED: usize = 3;
 
 const GIANT_SPLITTER_MAX_SUMMONED_ASTEROIDS: usize = 40;
 
+// UFO 母舰常量
+const UFO_MOTHERSHIP_SPEED_NORMAL: f32 = 80.0;
+const UFO_MOTHERSHIP_SPEED_ENRAGED: f32 = 120.0;
+const UFO_MOTHERSHIP_SUMMON_INTERVAL_NORMAL: f32 = 4.0;
+const UFO_MOTHERSHIP_SUMMON_INTERVAL_ENRAGED: f32 = 2.5;
+const UFO_MOTHERSHIP_SUMMON_COUNT_NORMAL: usize = 1;
+const UFO_MOTHERSHIP_SUMMON_COUNT_ENRAGED: usize = 2;
+const UFO_MOTHERSHIP_RADIUS: f32 = 60.0;
+const UFO_MOTHERSHIP_MAX_UFOS: usize = 6;
+
+// 虫洞守卫常量
+const WORMHOLE_WARDEN_SPEED_NORMAL: f32 = 100.0;
+const WORMHOLE_WARDEN_SPEED_ENRAGED: f32 = 150.0;
+const WORMHOLE_WARDEN_TELEPORT_INTERVAL_NORMAL: f32 = 6.0;
+const WORMHOLE_WARDEN_TELEPORT_INTERVAL_ENRAGED: f32 = 3.5;
+const WORMHOLE_WARDEN_PROJECTILE_INTERVAL: f32 = 2.0;
+const WORMHOLE_WARDEN_RADIUS: f32 = 50.0;
+
 /// 获取 Boss 碰撞半径
 pub fn boss_radius(boss: &BossState) -> f32 {
     match boss.kind {
         BossKind::GiantSplitter => GIANT_SPLITTER_RADIUS,
-        _ => 80.0,
+        BossKind::UfoMothership => UFO_MOTHERSHIP_RADIUS,
+        BossKind::WormholeWarden => WORMHOLE_WARDEN_RADIUS,
     }
 }
 
@@ -225,10 +246,13 @@ pub fn update_boss(
     boss: &mut BossState,
     players: &[Player],
     asteroids: &mut Vec<Asteroid>,
+    ufos: &mut Vec<Ufo>,
     dt: f32,
 ) {
-    if boss.kind == BossKind::GiantSplitter {
-        update_giant_splitter(boss, players, asteroids, dt)
+    match boss.kind {
+        BossKind::GiantSplitter => update_giant_splitter(boss, players, asteroids, dt),
+        BossKind::UfoMothership => update_ufo_mothership(boss, players, ufos, dt),
+        BossKind::WormholeWarden => update_wormhole_warden(boss, players, asteroids, dt),
     }
 }
 
@@ -316,6 +340,165 @@ fn spawn_giant_splitter_minion(boss_pos: Vec2, enraged: bool) -> Asteroid {
     }
 }
 
+/// UfoMothership：快速移动 + 召唤UFO
+fn update_ufo_mothership(
+    boss: &mut BossState,
+    players: &[Player],
+    ufos: &mut Vec<Ufo>,
+    dt: f32,
+) {
+    // 找到最近的存活玩家
+    let Some((_, target_pos)) = players
+        .iter()
+        .filter(|p| p.alive)
+        .map(|p| ((p.ship.pos - boss.position).length_squared(), p.ship.pos))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+    else {
+        return;
+    };
+
+    // 移动速度（狂暴时加速）
+    let speed = if boss.is_enraged {
+        UFO_MOTHERSHIP_SPEED_ENRAGED
+    } else {
+        UFO_MOTHERSHIP_SPEED_NORMAL
+    };
+
+    // 环绕移动模式
+    let to_target = target_pos - boss.position;
+    let distance = to_target.length();
+
+    // 在远处时直线接近，在近处时环绕
+    let dir = if distance > 200.0 {
+        to_target.normalize_or_zero()
+    } else {
+        // 环绕运动
+        let perpendicular = Vec2::new(-to_target.y, to_target.x).normalize_or_zero();
+        let orbit_strength = 0.7;
+        let approach_strength = 0.3;
+        (perpendicular * orbit_strength + to_target.normalize_or_zero() * approach_strength).normalize_or_zero()
+    };
+
+    boss.position += dir * speed * dt;
+    boss.position = wrap_around(&boss.position);
+
+    // 召唤计时器
+    boss.phase_timer += dt;
+    let summon_interval = if boss.is_enraged {
+        UFO_MOTHERSHIP_SUMMON_INTERVAL_ENRAGED
+    } else {
+        UFO_MOTHERSHIP_SUMMON_INTERVAL_NORMAL
+    };
+
+    // 召唤UFO
+    if boss.phase_timer >= summon_interval && ufos.len() < UFO_MOTHERSHIP_MAX_UFOS {
+        boss.phase_timer -= summon_interval;
+
+        let spawn_count = if boss.is_enraged {
+            UFO_MOTHERSHIP_SUMMON_COUNT_ENRAGED
+        } else {
+            UFO_MOTHERSHIP_SUMMON_COUNT_NORMAL
+        };
+
+        for _ in 0..spawn_count {
+            if ufos.len() >= UFO_MOTHERSHIP_MAX_UFOS {
+                break;
+            }
+            ufos.push(spawn_ufo_mothership_minion(boss.position, boss.is_enraged));
+        }
+    }
+}
+
+/// 生成UFO母舰召唤的UFO
+fn spawn_ufo_mothership_minion(_boss_pos: Vec2, enraged: bool) -> Ufo {
+    use crate::ufo::ufo_config_for_wave;
+
+    // 使用第3波的UFO配置作为基础，狂暴时升级到第5波
+    let wave = if enraged { 5 } else { 3 };
+    let config = ufo_config_for_wave(wave);
+
+    Ufo::spawn_from_edge(get_time(), true, config) // 强制掉落道具
+}
+
+/// WormholeWarden：传送移动 + 发射虫洞弹丸
+fn update_wormhole_warden(
+    boss: &mut BossState,
+    players: &[Player],
+    asteroids: &mut Vec<Asteroid>,
+    dt: f32,
+) {
+    // 找到最近的存活玩家
+    let Some((_, target_pos)) = players
+        .iter()
+        .filter(|p| p.alive)
+        .map(|p| ((p.ship.pos - boss.position).length_squared(), p.ship.pos))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+    else {
+        return;
+    };
+
+    // 传送计时器
+    boss.phase_timer += dt;
+    let teleport_interval = if boss.is_enraged {
+        WORMHOLE_WARDEN_TELEPORT_INTERVAL_ENRAGED
+    } else {
+        WORMHOLE_WARDEN_TELEPORT_INTERVAL_NORMAL
+    };
+
+    // 周期性传送
+    if boss.phase_timer >= teleport_interval {
+        boss.phase_timer -= teleport_interval;
+
+        // 传送到玩家附近但不直接重叠
+        let teleport_distance = rand::gen_range(150.0, 300.0);
+        let angle = rand::gen_range(0.0, std::f32::consts::TAU);
+        let teleport_pos = target_pos + Vec2::new(angle.cos(), angle.sin()) * teleport_distance;
+        boss.position = wrap_around(&teleport_pos);
+
+        // 传送时召唤虫洞弹丸
+        for _ in 0..3 {
+            asteroids.push(spawn_wormhole_projectile(boss.position, target_pos, boss.is_enraged));
+        }
+    }
+
+    // 持续发射弹丸
+    boss.phase += 1;
+    if boss.phase % 120 == 0 { // 每2秒
+        asteroids.push(spawn_wormhole_projectile(boss.position, target_pos, boss.is_enraged));
+    }
+}
+
+/// 生成虫洞守卫发射的虫洞弹丸（特殊小行星）
+fn spawn_wormhole_projectile(boss_pos: Vec2, target_pos: Vec2, enraged: bool) -> Asteroid {
+    let to_target = target_pos - boss_pos;
+    let dir = to_target.normalize_or_zero();
+
+    // 虫洞弹丸：高速、发光的小型物体
+    let size = rand::gen_range(8.0, 12.0);
+    let speed = if enraged { 400.0 } else { 280.0 };
+
+    Asteroid {
+        pos: wrap_around(&(boss_pos + dir * (WORMHOLE_WARDEN_RADIUS + size + 10.0))),
+        vel: dir * speed,
+        size,
+        sides: 6,
+        rot: rand::gen_range(0.0, std::f32::consts::TAU),
+        rot_speed: rand::gen_range(-4.0, 4.0),
+        collided: false,
+        vertex_offsets: std::array::from_fn(|_| rand::gen_range(0.8, 1.0)),
+        asteroid_type: AsteroidType::Normal,
+    }
+}
+
+/// Boss 渲染入口
+pub fn draw_boss(boss: &BossState, offset: Vec2, time: f32) {
+    match boss.kind {
+        BossKind::GiantSplitter => draw_giant_splitter(boss, offset, time),
+        BossKind::UfoMothership => draw_ufo_mothership(boss, offset, time),
+        BossKind::WormholeWarden => draw_wormhole_warden(boss, offset, time),
+    }
+}
+
 /// GiantSplitter 渲染（规则多边形 + 脉动效果）
 pub fn draw_giant_splitter(boss: &BossState, offset: Vec2, time: f32) {
     if boss.kind != BossKind::GiantSplitter {
@@ -349,6 +532,74 @@ pub fn draw_giant_splitter(boss: &BossState, offset: Vec2, time: f32) {
         2.0,
         DARKGRAY,
     );
+}
+
+/// UfoMothership 渲染（UFO形状 + 引擎光效）
+pub fn draw_ufo_mothership(boss: &BossState, offset: Vec2, time: f32) {
+    if boss.kind != BossKind::UfoMothership {
+        return;
+    }
+
+    let center = boss.position + offset;
+    let radius = UFO_MOTHERSHIP_RADIUS;
+    let color = if boss.is_enraged {
+        Color::new(1.0, 0.4, 0.1, 1.0) // 狂暴时橙色
+    } else {
+        Color::new(0.6, 0.6, 1.0, 1.0) // 正常蓝色
+    };
+
+    // UFO主体（椭圆）
+    draw_ellipse(center.x, center.y, radius * 0.8, radius * 0.4, 0.0, color);
+
+    // 顶部圆顶
+    draw_circle(center.x, center.y - radius * 0.2, radius * 0.3, Color::new(0.8, 0.8, 0.9, 1.0));
+
+    // 引擎光效
+    let engine_offset = Vec2::new(-radius * 0.4, radius * 0.2);
+    let engine_pos = center + engine_offset;
+    draw_circle(engine_pos.x, engine_pos.y, 8.0, Color::new(0.3, 0.8, 1.0, 0.8));
+
+    let engine_offset = Vec2::new(radius * 0.4, radius * 0.2);
+    let engine_pos = center + engine_offset;
+    draw_circle(engine_pos.x, engine_pos.y, 8.0, Color::new(0.3, 0.8, 1.0, 0.8));
+
+    // 脉动效果
+    draw_circle(center.x, center.y, radius * 0.6 + 3.0 * (time * 3.0).sin(), Color::new(color.r, color.g, color.b, 0.2));
+}
+
+/// WormholeWarden 渲染（虫洞形状 + 扭曲效果）
+pub fn draw_wormhole_warden(boss: &BossState, offset: Vec2, time: f32) {
+    if boss.kind != BossKind::WormholeWarden {
+        return;
+    }
+
+    let center = boss.position + offset;
+    let radius = WORMHOLE_WARDEN_RADIUS;
+    let color = if boss.is_enraged {
+        Color::new(0.8, 0.2, 0.8, 1.0) // 狂暴时紫色
+    } else {
+        Color::new(0.4, 0.2, 0.9, 1.0) // 正常深蓝紫色
+    };
+
+    // 外层虫洞环
+    let ring_count = 3;
+    for i in 0..ring_count {
+        let ring_radius = radius * (0.3 + 0.2 * (i as f32));
+        let rotation = time * (0.5 + 0.3 * (i as f32)) * if i % 2 == 0 { 1.0 } else { -1.0 };
+        draw_poly_lines(center.x, center.y, 8, ring_radius, rotation, 3.0, color);
+    }
+
+    // 中心漩涡
+    draw_circle(center.x, center.y, radius * 0.15, BLACK);
+
+    // 扭曲光效
+    for i in 0..6 {
+        let angle = (i as f32) * std::f32::consts::PI * 2.0 / 6.0 + time;
+        let dist = radius * 0.8;
+        let x = center.x + angle.cos() * dist;
+        let y = center.y + angle.sin() * dist;
+        draw_circle(x, y, 4.0, Color::new(0.8, 0.4, 1.0, 0.6));
+    }
 }
 
 // ============================================================================
@@ -494,7 +745,7 @@ pub struct RewardPhaseState {
 #[derive(Debug, Clone)]
 pub enum RewardOption {
     /// 卡牌奖励
-    Card(String), // 暂用 String，后续集成 battle_draft::Card
+    Card(Card), // 实际卡牌奖励
     /// 遗物奖励
     Relic(RelicId),
     /// 金币奖励
@@ -527,6 +778,7 @@ pub struct ShopItem {
 pub struct RestPhaseState {
     pub options: Vec<RestOption>,
     pub selected: Option<usize>,
+    pub card_selection: Option<Card>, // 当前选择的卡牌（用于升级/移除）
 }
 
 /// 休息选项
@@ -590,6 +842,8 @@ pub struct RunState {
     pub combo: u32,
     /// 最高连击数
     pub max_combo: u32,
+    /// 上次击杀时间（用于连击衰减）
+    pub last_kill_time: f32,
 }
 
 impl Default for RunState {
@@ -616,6 +870,7 @@ impl RunState {
             boss_damage_taken: false,
             combo: 0,
             max_combo: 0,
+            last_kill_time: 0.0,
         }
     }
 
@@ -670,6 +925,7 @@ impl RunState {
     pub fn record_kill(&mut self) {
         self.total_kills += 1;
         self.combo += 1;
+        self.last_kill_time = self.run_time;
         if self.combo > self.max_combo {
             self.max_combo = self.combo;
         }
@@ -678,6 +934,31 @@ impl RunState {
     /// 重置连击
     pub fn reset_combo(&mut self) {
         self.combo = 0;
+    }
+
+    /// 连击超时时间（秒）
+    const COMBO_TIMEOUT: f32 = 5.0;
+
+    /// 检查并应用连击衰减
+    ///
+    /// 如果距离上次击杀超过 COMBO_TIMEOUT 秒，连击重置为 0
+    pub fn check_combo_decay(&mut self) {
+        if self.combo > 0 && self.run_time - self.last_kill_time > Self::COMBO_TIMEOUT {
+            self.combo = 0;
+        }
+    }
+
+    /// 玩家受伤时调用（重置连击）
+    ///
+    /// 注意：Boss 战受伤标记需要单独设置 `boss_damage_taken = true`
+    pub fn on_player_damage(&mut self) {
+        self.reset_combo();
+    }
+
+    /// 标记 Boss 战中受伤（用于完美封印遗物判定）
+    pub fn mark_boss_damage(&mut self) {
+        self.boss_damage_taken = true;
+        self.reset_combo();
     }
 
     /// 获取遗物加成后的奖励选项数量
@@ -815,15 +1096,12 @@ impl RunState {
         });
     }
 
-    /// 进入休息阶段
-    pub fn enter_rest_phase(&mut self) {
+/// 进入休息阶段
+    pub fn enter_rest_phase(&mut self, options: Vec<RestOption>) {
         self.phase = RunPhase::Rest(RestPhaseState {
-            options: vec![
-                RestOption::Heal,
-                RestOption::UpgradeCard,
-                RestOption::RemoveCard,
-            ],
+            options,
             selected: None,
+            card_selection: None,
         });
     }
 
@@ -1077,14 +1355,10 @@ pub fn generate_reward_options(run: &RunState) -> Vec<RewardOption> {
             }
             RewardOption::Relic(relic)
         } else {
-            // 卡牌占位：后续接 battle_draft::Card
-            let name = match rand::gen_range(0u32, 4u32) {
-                0 => "超频模块",
-                1 => "穿甲弹",
-                2 => "相位爆发",
-                _ => "离子涌流",
-            };
-            RewardOption::Card(name.to_string())
+            // 生成随机卡牌奖励
+            let cards = generate_draft_options();
+            let card = cards[rand::gen_range(0, cards.len())];
+            RewardOption::Card(card)
         };
 
         // 去重：遗物不重复
@@ -1126,8 +1400,10 @@ pub fn generate_shop_items(run: &RunState) -> Vec<ShopItem> {
             }
             (RewardOption::Relic(relic), 45)
         } else {
-            // 卡牌
-            (RewardOption::Card("随机卡牌".to_string()), 30)
+            // 随机卡牌
+            let cards = generate_draft_options();
+            let card = cards[rand::gen_range(0, cards.len())];
+            (RewardOption::Card(card), 30)
         };
 
         items.push(ShopItem {
@@ -1145,16 +1421,73 @@ pub fn apply_reward_option(run: &mut RunState, players: &mut [Player], reward: &
     match reward {
         RewardOption::Gold(amount) => run.add_gold(*amount),
         RewardOption::Relic(relic) => run.add_relic(*relic),
+        RewardOption::Card(card) => {
+            // 为所有玩家应用卡牌效果
+            for player in players.iter_mut() {
+                player.apply_draft_card(*card);
+            }
+        }
         RewardOption::Heal(amount) => {
             let add_lives = (*amount).round().max(1.0) as u32;
             for p in players.iter_mut() {
                 p.lives += add_lives;
             }
         }
-        RewardOption::Card(_name) => {
-            // 占位：后续与 battle_draft 卡牌系统对接
+    }
+}
+
+/// 应用休息选项
+pub fn apply_rest_option(run: &mut RunState, players: &mut [Player], option: RestOption, selected_card: Option<Card>) -> bool {
+    match option {
+        RestOption::Heal => {
+            // 恢复生命（递减效果）
+            for player in players.iter_mut() {
+                if player.lives < 3 {
+                    player.lives += 1;
+                }
+            }
+            true
+        }
+        RestOption::UpgradeCard => {
+            // 升级选中的卡牌
+            if let Some(card) = selected_card {
+                for player in players.iter_mut() {
+                    if player.upgrade_card(card) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        RestOption::RemoveCard => {
+            // 移除选中的卡牌并获得奖励
+            if let Some(card) = selected_card {
+                for player in players.iter_mut() {
+                    if player.remove_card(card) {
+                        // 移除卡牌的奖励：获得金币
+                        run.add_gold(25);
+                        return true;
+                    }
+                }
+            }
+            false
         }
     }
+}
+
+/// 生成休息选项（根据玩家卡牌情况动态调整）
+pub fn generate_rest_options(players: &[Player]) -> Vec<RestOption> {
+    let mut options = vec![RestOption::Heal]; // 始终提供治疗选项
+
+    // 检查是否有玩家拥有卡牌
+    let has_cards = players.iter().any(|p| !p.cards.is_empty());
+    
+    if has_cards {
+        options.push(RestOption::UpgradeCard);
+        options.push(RestOption::RemoveCard);
+    }
+
+    options
 }
 
 /// 购买商店物品（直接操作 RunState）
@@ -1212,11 +1545,11 @@ pub fn reward_display_info(option: &RewardOption) -> (&'static str, String, Stri
             relic.description().to_string(),
             relic.rarity_color(),
         ),
-        RewardOption::Card(name) => (
+        RewardOption::Card(card) => (
             "卡牌",
-            name.clone(),
-            "获得一张构筑卡牌".to_string(),
-            Color::new(0.2, 0.6, 1.0, 1.0),
+            card.name().to_string(),
+            card.description().to_string(),
+            card.rarity().border_color(),
         ),
         RewardOption::Gold(amount) => (
             "金币",

@@ -97,6 +97,7 @@ pub struct Player {
     pub alive: bool,
     pub lives: u32,
     pub modifiers: PlayerModifiers, // 选卡系统属性修改器
+    pub cards: Vec<(Card, u32)>,     // 已获得的卡牌列表（卡牌, 升级次数）
     next_extra_life_at: u32,        // 下一个额外生命的分数阈值
     survival_start: f64,
     survival_end: Option<f64>,
@@ -159,6 +160,7 @@ impl Player {
             alive: true,
             lives: starting_lives,
             modifiers: PlayerModifiers::new(),
+            cards: Vec::new(),
             next_extra_life_at: EXTRA_LIFE_THRESHOLD,
             survival_start: now + INVULNERABLE_DURATION,
             survival_end: None,
@@ -194,45 +196,42 @@ impl Player {
         }
     }
 
-    pub fn reset(&mut self, position: Vec2, now: f64, starting_lives: u32) {
-        self.ship = Ship::reset(position);
+pub fn reset(&mut self, position: Vec2, now: f64, starting_lives: u32) {
+        self.ship.pos = position;
+        self.ship.vel = Vec2::ZERO;
+        self.ship.rot = 0.0;
         self.bullets.clear();
-        self.last_shot = now - 1.0;
+        self.last_shot = 0.0;
         self.score.reset();
-        self.modifiers.reset();
-        self.next_extra_life_at = EXTRA_LIFE_THRESHOLD;
         self.alive = true;
         self.lives = starting_lives;
-        self.survival_start = now + INVULNERABLE_DURATION;
+        self.modifiers.reset();
+        self.cards.clear(); // 清空卡牌列表
+        self.next_extra_life_at = EXTRA_LIFE_THRESHOLD;
+        self.survival_start = now;
         self.survival_end = None;
         self.invulnerable_until = now + INVULNERABLE_DURATION;
-        self.shield_until = now;
-        self.shield_ready = false;
+        self.shield_until = 0.0;
+        self.shield_ready = true;
         self.killstreak = 0;
         self.last_kill_time = 0.0;
+        self.weapon_type = WeaponType::Normal;
         self.weapon_powerup = WeaponPowerUp::None;
-        self.weapon_powerup_until = now;
+        self.weapon_powerup_until = 0.0;
         self.is_thrusting = false;
-        self.dash_cooldown_until = now;
-        self.dash_active_until = now;
-        self.dash_invuln_until = now;
+        self.dash_cooldown_until = 0.0;
+        self.dash_active_until = 0.0;
+        self.dash_invuln_until = 0.0;
         self.dash_direction = Vec2::ZERO;
         self.dash_trail.clear();
-        self.phase_cooldown_until = now;
-        self.phase_invuln_until = now;
-        self.phase_visual_until = now;
+        self.phase_cooldown_until = 0.0;
+        self.phase_invuln_until = 0.0;
+        self.phase_visual_until = 0.0;
         self.phase_trail.clear();
         self.took_damage_this_life = false;
-        self.hyperspace_cooldown_until = now;
+        self.hyperspace_cooldown_until = 0.0;
         self.hyperspace_active = false;
-        self.hyperspace_appear_at = now;
-        // 重置新道具效果
-        self.rapid_fire_until = now;
-        self.piercing_until = now;
-        self.temp_shield_hits = 0;
-        self.ghost_mode_until = now;
-        self.overdrive_until = now;
-        self.teleport_charge_until = now;
+        self.hyperspace_appear_at = 0.0;
     }
 
     /// 增加分数，并在达到阈值时奖励额外生命
@@ -267,10 +266,57 @@ impl Player {
     /// 如果是 ExtraLife 卡牌，除了记录到 modifiers 外，还会立即增加生命值
     pub fn apply_draft_card(&mut self, card: Card) {
         self.modifiers.apply_card(card);
+        self.cards.push((card, 0)); // 初始升级次数为 0
 
         // ExtraLife 需要立即增加生命值
         if matches!(card, Card::ExtraLife) {
             self.lives = self.lives.saturating_add(1);
+        }
+    }
+
+    /// 获取可升级的卡牌列表（用于Rest阶段）
+    #[allow(dead_code)]
+    pub fn get_upgradable_cards(&self) -> Vec<Card> {
+        self.cards.iter().map(|(c, _)| *c).collect()
+    }
+
+    /// 升级指定卡牌（增强效果）
+    ///
+    /// 升级次数会被记录，移除卡牌时会正确回滚
+    pub fn upgrade_card(&mut self, card: Card) -> bool {
+        // 找到该卡牌并增加升级次数
+        if let Some((_, level)) = self.cards.iter_mut().find(|(c, _)| *c == card) {
+            *level += 1;
+            // 应用升级效果
+            self.modifiers.apply_card(card);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 移除指定卡牌（获得奖励）
+    ///
+    /// 移除卡牌后会重新计算 modifiers，确保效果正确回滚。
+    /// 注意：ExtraLife 卡牌移除时不会减少已获得的生命值。
+    pub fn remove_card(&mut self, card: Card) -> bool {
+        if let Some(pos) = self.cards.iter().position(|(c, _)| *c == card) {
+            self.cards.remove(pos);
+
+            // 重新计算 modifiers（从剩余卡牌重建，包括升级次数）
+            self.modifiers.reset();
+            for &(c, level) in &self.cards {
+                // 基础效果
+                self.modifiers.apply_card(c);
+                // 升级效果
+                for _ in 0..level {
+                    self.modifiers.apply_card(c);
+                }
+            }
+
+            true
+        } else {
+            false
         }
     }
 

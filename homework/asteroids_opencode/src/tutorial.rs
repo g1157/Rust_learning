@@ -31,6 +31,8 @@ pub enum TutorialScreen {
     RoguelikeShop,
     /// Roguelike Boss 战
     RoguelikeBoss,
+    /// Roguelike 休息阶段
+    RoguelikeRest,
 }
 
 /// 引导步骤（用于追踪玩家是否完成特定操作）
@@ -107,6 +109,7 @@ impl TutorialState {
             TutorialScreen::RoguelikeReward => "目标：选择一个奖励",
             TutorialScreen::RoguelikeShop => "目标：购买装备或继续",
             TutorialScreen::RoguelikeBoss => "目标：击败 Boss",
+            TutorialScreen::RoguelikeRest => "目标：选择休息选项",
         });
 
         // 首次进入时显示操作提示
@@ -124,6 +127,9 @@ impl TutorialState {
                 TutorialScreen::RoguelikeShop => ("商店：点击商品购买 · R 刷新 · Enter 继续", 5.0),
                 TutorialScreen::RoguelikeBoss => {
                     ("Boss 战：小心 Boss 的攻击模式，狂暴时更危险！", 5.0)
+                }
+                TutorialScreen::RoguelikeRest => {
+                    ("休息站：恢复生命、升级卡牌或移除卡牌", 5.0)
                 }
             };
             self.toast = Some((text.to_string(), now + duration));

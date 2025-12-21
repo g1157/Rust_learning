@@ -2911,3 +2911,226 @@ pub fn draw_shop_ui(
 
     ShopUiAction::None
 }
+
+/// 休息阶段UI动作
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestUiAction {
+    None,
+    SelectOption(usize),
+    #[allow(dead_code)]
+    SelectCard(usize),
+    ConfirmRest,
+}
+
+/// 绘制休息阶段UI
+pub fn draw_rest_ui(
+    rest_state: &mut roguelike::RestPhaseState,
+    players: &[Player],
+    font: Option<&Font>,
+) -> RestUiAction {
+    let mouse = mouse_position();
+
+    // 标题
+    let title = "休息阶段";
+    let tw = measure_text(title, font, 32, 1.0).width;
+    draw_text_ex(
+        title,
+        screen_width() / 2.0 - tw / 2.0,
+        80.0,
+        TextParams {
+            font,
+            font_size: 32,
+            color: WHITE,
+            ..Default::default()
+        },
+    );
+
+    // 说明文字
+    let desc = "选择一个休息选项";
+    let dw = measure_text(desc, font, 18, 1.0).width;
+    draw_text_ex(
+        desc,
+        screen_width() / 2.0 - dw / 2.0,
+        120.0,
+        TextParams {
+            font,
+            font_size: 18,
+            color: LIGHTGRAY,
+            ..Default::default()
+        },
+    );
+
+    let mut hover = None;
+    let start_y = 180.0;
+    let option_h = 60.0;
+    let option_w = 400.0;
+    let option_x = screen_width() / 2.0 - option_w / 2.0;
+
+    // 绘制选项
+    for (i, option) in rest_state.options.iter().enumerate() {
+        let y = start_y + i as f32 * (option_h + 15.0);
+        let rect = Rect::new(option_x, y, option_w, option_h);
+        let is_hover = rect.contains(mouse.into());
+
+        if is_hover {
+            hover = Some(i);
+        }
+
+        // 选项背景
+        let bg_color = if rest_state.selected == Some(i) {
+            Color::new(0.2, 0.4, 0.7, 0.8)
+        } else if is_hover {
+            Color::new(0.15, 0.25, 0.4, 0.8)
+        } else {
+            Color::new(0.1, 0.15, 0.25, 0.8)
+        };
+
+        draw_shadow_panel(option_x, y, option_w, option_h, bg_color);
+        draw_rectangle_lines(option_x, y, option_w, option_h, 2.0, Color::new(0.3, 0.5, 0.8, 0.8));
+
+        // 选项名称
+        let option_name = match option {
+            roguelike::RestOption::Heal => "恢复生命",
+            roguelike::RestOption::UpgradeCard => "升级卡牌",
+            roguelike::RestOption::RemoveCard => "移除卡牌",
+        };
+        draw_text_ex(
+            option_name,
+            option_x + 20.0,
+            y + 25.0,
+            TextParams {
+                font,
+                font_size: 20,
+                color: WHITE,
+                ..Default::default()
+            },
+        );
+
+        // 选项描述
+        let option_desc = match option {
+            roguelike::RestOption::Heal => "恢复1点生命值（最多3点）",
+            roguelike::RestOption::UpgradeCard => "强化一张已拥有的卡牌",
+            roguelike::RestOption::RemoveCard => "移除一张卡牌获得25金币",
+        };
+        draw_text_ex(
+            option_desc,
+            option_x + 20.0,
+            y + 45.0,
+            TextParams {
+                font,
+                font_size: 14,
+                color: LIGHTGRAY,
+                ..Default::default()
+            },
+        );
+    }
+
+    // 如果选择了卡牌相关选项，显示卡牌选择界面
+    if let Some(selected_option) = rest_state.selected {
+        let option = &rest_state.options[selected_option];
+        if matches!(option, roguelike::RestOption::UpgradeCard | roguelike::RestOption::RemoveCard) {
+            // 显示玩家卡牌列表
+            let card_start_y = start_y + rest_state.options.len() as f32 * (option_h + 15.0) + 30.0;
+            draw_text_ex(
+                "选择一张卡牌:",
+                option_x,
+                card_start_y,
+                TextParams {
+                    font,
+                    font_size: 18,
+                    color: WHITE,
+                    ..Default::default()
+                },
+            );
+
+            let mut card_hover = None;
+            for (i, player) in players.iter().enumerate() {
+                for (j, (card, level)) in player.cards.iter().enumerate() {
+                    let card_y = card_start_y + 30.0 + (i * player.cards.len() + j) as f32 * 35.0;
+                    let card_rect = Rect::new(option_x, card_y, option_w, 30.0);
+                    let is_card_hover = card_rect.contains(mouse.into());
+
+                    if is_card_hover {
+                        card_hover = Some((i, j));
+                    }
+
+                    let card_bg = if rest_state.card_selection == Some(*card) {
+                        Color::new(0.3, 0.5, 0.8, 0.8)
+                    } else if is_card_hover {
+                        Color::new(0.2, 0.3, 0.5, 0.8)
+                    } else {
+                        Color::new(0.15, 0.2, 0.3, 0.8)
+                    };
+
+                    draw_rectangle(card_rect.x, card_rect.y, card_rect.w, card_rect.h, card_bg);
+                    draw_rectangle_lines(card_rect.x, card_rect.y, card_rect.w, card_rect.h, 1.0, Color::new(0.4, 0.6, 0.9, 0.8));
+
+                    // 显示卡牌信息，包括升级等级
+                    let level_str = if *level > 0 { format!(" +{}", level) } else { String::new() };
+                    draw_text_ex(
+                        &format!("P{}: {}{} - {}", i + 1, card.name(), level_str, card.description()),
+                        card_rect.x + 10.0,
+                        card_rect.y + 20.0,
+                        TextParams {
+                            font,
+                            font_size: 14,
+                            color: WHITE,
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+
+            // 处理卡牌选择
+            if let Some((player_idx, card_idx)) = card_hover
+                && is_mouse_button_pressed(MouseButton::Left)
+                && let Some((card, _)) = players.get(player_idx).and_then(|p| p.cards.get(card_idx))
+            {
+                rest_state.card_selection = Some(*card);
+            }
+        }
+    }
+
+    // 确认按钮
+    let btn_y = screen_height() - 100.0;
+    let btn_w = 200.0;
+    let btn_h = 40.0;
+    let btn_x = screen_width() / 2.0 - btn_w / 2.0;
+    let btn_rect = Rect::new(btn_x, btn_y, btn_w, btn_h);
+    let btn_hover = btn_rect.contains(mouse.into());
+
+    draw_shadow_panel(btn_x, btn_y, btn_w, btn_h, Color::new(0.1, 0.3, 0.6, 0.8));
+    draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 2.0, Color::new(0.4, 0.7, 0.9, 0.8));
+    draw_text_ex(
+        "确认 [Enter]",
+        btn_x + btn_w / 2.0 - 40.0,
+        btn_y + 25.0,
+        TextParams {
+            font,
+            font_size: 18,
+            color: WHITE,
+            ..Default::default()
+        },
+    );
+
+    // 处理输入
+    if is_key_pressed(KeyCode::Enter) || (btn_hover && is_mouse_button_pressed(MouseButton::Left)) {
+        return RestUiAction::ConfirmRest;
+    }
+
+    // 数字键选择选项
+    if is_key_pressed(KeyCode::Key1) {
+        return RestUiAction::SelectOption(0);
+    } else if is_key_pressed(KeyCode::Key2) && rest_state.options.len() > 1 {
+        return RestUiAction::SelectOption(1);
+    } else if is_key_pressed(KeyCode::Key3) && rest_state.options.len() > 2 {
+        return RestUiAction::SelectOption(2);
+    }
+
+    // 鼠标选择选项
+    if let Some(i) = hover && is_mouse_button_pressed(MouseButton::Left) {
+        return RestUiAction::SelectOption(i);
+    }
+
+    RestUiAction::None
+}

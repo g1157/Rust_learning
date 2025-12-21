@@ -793,6 +793,9 @@ async fn main() {
                 // 更新 Run 时间
                 run_state.run_time += dt as f32;
 
+                // 检查连击衰减
+                run_state.check_combo_decay();
+
                 // 检测暂停键
                 let pause_pressed = input_state.is_key_pressed(KeyCode::Escape)
                     || input_state.is_key_pressed(KeyCode::P);
@@ -1003,9 +1006,85 @@ async fn main() {
                 next_frame().await;
                 continue;
             }
+            GameState::RoguelikeRest { ref mut run_state } => {
+                // 设置引导屏幕
+                tutorial_state.set_screen(tutorial::TutorialScreen::RoguelikeRest, frame_t);
+
+                // 确保休息选项已生成
+                if !matches!(run_state.phase, roguelike::RunPhase::Rest(_)) {
+                    let options = roguelike::generate_rest_options(&players);
+                    run_state.enter_rest_phase(options);
+                }
+
+                // 绘制休息 UI 并获取操作
+                let action = if let roguelike::RunPhase::Rest(ref mut rest_state) = run_state.phase
+                {
+                    ui::draw_rest_ui(
+                        rest_state,
+                        &players,
+                        fonts.get_best(settings.font_choice),
+                    )
+                } else {
+                    ui::RestUiAction::None
+                };
+
+                // 处理操作
+                match action {
+                    ui::RestUiAction::SelectOption(idx) => {
+                        if let roguelike::RunPhase::Rest(ref mut rest_state) = run_state.phase
+                            && idx < rest_state.options.len()
+                        {
+                            rest_state.selected = Some(idx);
+                        }
+                    }
+                    ui::RestUiAction::ConfirmRest => {
+                        if let roguelike::RunPhase::Rest(ref rest_state) = run_state.phase
+                            && let Some(selected_idx) = rest_state.selected
+                        {
+                            let option = rest_state.options[selected_idx];
+                            let selected_card = rest_state.card_selection;
+
+                            if roguelike::apply_rest_option(run_state, &mut players, option, selected_card) {
+                                // 应用成功，播放音效
+                                sounds.play(SoundEffect::PowerUp, settings.sound_volume);
+
+                                // 调用 advance_zone() 进入区域过渡
+                                run_state.advance_zone();
+
+                                // 根据新的 phase 切换 GameState
+                                match &run_state.phase {
+                                    roguelike::RunPhase::ZoneTransition { .. } => {
+                                        // 进入区域过渡动画，由 RoguelikeRun 处理
+                                        state = GameState::RoguelikeRun {
+                                            run_state: run_state.clone(),
+                                        };
+                                    }
+                                    roguelike::RunPhase::Victory => {
+                                        // 已完成所有区域，进入胜利界面
+                                        state = GameState::RoguelikeVictory {
+                                            run_state: run_state.clone(),
+                                        };
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    ui::RestUiAction::None => {}
+                    ui::RestUiAction::SelectCard(_) => {}
+                }
+
+                // 绘制引导提示
+                tutorial_state.draw(frame_t, fonts.get_best(settings.font_choice));
+                next_frame().await;
+                continue;
+            }
             GameState::RoguelikeBoss { ref mut run_state } => {
                 // 更新 Run 时间
                 run_state.run_time += dt as f32;
+
+                // 检查连击衰减
+                run_state.check_combo_decay();
 
                 // 检测玩家全灭
                 let all_dead = players.iter().all(|p| !p.alive);
@@ -1028,8 +1107,8 @@ async fn main() {
                     // 检查狂暴状态（在 AI 更新前，使本帧立即生效）
                     boss.check_enrage();
 
-                    // Boss AI：移动追踪 + 召唤小行星
-                    roguelike::update_boss(boss, &players, &mut asteroids, dt as f32);
+                    // Boss AI：移动追踪 + 召唤（根据boss类型不同）
+                    roguelike::update_boss(boss, &players, &mut asteroids, &mut ufos, dt as f32);
 
                     // 子弹与 Boss 碰撞检测
                     let boss_pos = boss.position;
@@ -1061,11 +1140,21 @@ async fn main() {
                         run_state.trigger_boss_defeat();
                         // 清空召唤的小行星
                         asteroids.clear();
-                        // 进入下一区域或胜利
-                        run_state.advance_zone();
-                        state = GameState::RoguelikeRun {
-                            run_state: run_state.clone(),
-                        };
+                        // 进入休息阶段或胜利
+                        if run_state.zone.next().is_some() {
+                            // 还有下一区域，进入休息阶段
+                            let options = roguelike::generate_rest_options(&players);
+                            run_state.enter_rest_phase(options);
+                            state = GameState::RoguelikeRest {
+                                run_state: run_state.clone(),
+                            };
+                        } else {
+                            // 已完成所有区域，胜利
+                            run_state.phase = roguelike::RunPhase::Victory;
+                            state = GameState::RoguelikeVictory {
+                                run_state: run_state.clone(),
+                            };
+                        }
                         next_frame().await;
                         continue;
                     }
@@ -1088,6 +1177,74 @@ async fn main() {
                     next_frame().await;
                     continue;
                 }
+            }
+            GameState::RoguelikeVictory { ref run_state } => {
+                // 胜利界面：等待玩家按键返回主菜单
+
+                // 先提取需要显示的数据
+                let total_kills = run_state.total_kills;
+                let max_combo = run_state.max_combo;
+                let run_time = run_state.run_time;
+                let gold = run_state.gold;
+
+                // 检测返回主菜单的按键
+                let should_return = input_state.is_key_pressed(KeyCode::Enter)
+                    || input_state.is_key_pressed(KeyCode::Escape)
+                    || input_state.is_key_pressed(KeyCode::Space);
+
+                if should_return {
+                    // 返回主菜单
+                    state = GameState::ModeSelection {
+                        selection: GameMode::Roguelike,
+                    };
+                    // 重置游戏状态
+                    players.clear();
+                    asteroids.clear();
+                    ufos.clear();
+                    powerups.clear();
+                    enemy_bullets.clear();
+                    next_frame().await;
+                    continue;
+                }
+
+                // 绘制背景星空
+                starfield.draw(frame_t as f32);
+
+                // 直接在此处渲染胜利界面（因为 continue 会跳过后面的渲染）
+                roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
+
+                // 显示胜利信息
+                let victory_text = "胜利！你征服了所有区域！";
+                let tw = measure_text(victory_text, None, 48, 1.0).width;
+                draw_text_ex(
+                    victory_text,
+                    screen_width() / 2.0 - tw / 2.0,
+                    screen_height() / 2.0 - 60.0,
+                    TextParams {
+                        font_size: 48,
+                        color: GOLD,
+                        ..Default::default()
+                    },
+                );
+
+                // 显示统计信息
+                let stats = format!(
+                    "总击杀: {}  最高连击: {}  用时: {:.1}s  金币: {}",
+                    total_kills,
+                    max_combo,
+                    run_time,
+                    gold
+                );
+                let sw = measure_text(&stats, None, 24, 1.0).width;
+                draw_text(&stats, screen_width() / 2.0 - sw / 2.0, screen_height() / 2.0, 24.0, WHITE);
+
+                // 提示返回
+                let hint = "按 [Enter] 或 [Escape] 返回主菜单";
+                let hw = measure_text(hint, None, 20, 1.0).width;
+                draw_text(hint, screen_width() / 2.0 - hw / 2.0, screen_height() / 2.0 + 60.0, 20.0, LIGHTGRAY);
+
+                next_frame().await;
+                continue;
             }
             GameState::Paused {
                 selection,
@@ -1504,12 +1661,10 @@ async fn main() {
             // 发送输入到服务器（使用 send_input 支持客户端预测）
             // 记录当前帧的 dt，用于重播时保持物理一致性
             let input_timestamp = get_time();
-            if let Err(err) =
-                network_client.send_input(keys_pressed.clone(), input_timestamp, dt)
+            if let Err(err) = network_client.send_input(keys_pressed.clone(), input_timestamp, dt)
+                && !matches!(err, network::NetworkSendError::RateLimited(_))
             {
-                if !matches!(err, network::NetworkSendError::RateLimited(_)) {
-                    eprintln!("[网络] 输入发送失败: {}", err);
-                }
+                eprintln!("[网络] 输入发送失败: {}", err);
             }
 
             // === 客户端预测：本地立即应用输入 ===
@@ -1975,11 +2130,17 @@ async fn main() {
                 if circle_intersects_triangle(asteroid.pos, asteroid.size, t1, t2, t3) {
                     let lives_before = player.lives;
                     player.mark_dead(frame_t);
-                    // Roguelike：Boss 战受伤标记（用于完美封印等遗物判定）
-                    if player.lives < lives_before
-                        && let GameState::RoguelikeBoss { run_state } = &mut state
-                    {
-                        run_state.boss_damage_taken = true;
+                    // Roguelike：受伤处理（重置连击 + Boss 战标记）
+                    if player.lives < lives_before {
+                        match &mut state {
+                            GameState::RoguelikeBoss { run_state } => {
+                                run_state.mark_boss_damage();
+                            }
+                            GameState::RoguelikeRun { run_state } => {
+                                run_state.on_player_damage();
+                            }
+                            _ => {}
+                        }
                     }
                     // 添加碰撞爆炸效果 - 使用飞船位置而不是小行星位置
                     particles.spawn_explosion(ship_center, asteroid.size, GRAY, frame_t as f32);
@@ -2012,11 +2173,17 @@ async fn main() {
                 if circle_intersects_triangle(ufo.pos, UFO_RADIUS, t1, t2, t3) {
                     let lives_before = player.lives;
                     player.mark_dead(frame_t);
-                    // Roguelike：Boss 战受伤标记
-                    if player.lives < lives_before
-                        && let GameState::RoguelikeBoss { run_state } = &mut state
-                    {
-                        run_state.boss_damage_taken = true;
+                    // Roguelike：受伤处理（重置连击 + Boss 战标记）
+                    if player.lives < lives_before {
+                        match &mut state {
+                            GameState::RoguelikeBoss { run_state } => {
+                                run_state.mark_boss_damage();
+                            }
+                            GameState::RoguelikeRun { run_state } => {
+                                run_state.on_player_damage();
+                            }
+                            _ => {}
+                        }
                     }
                     particles.spawn_explosion(ship_center, UFO_RADIUS, GRAY, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
@@ -2048,11 +2215,17 @@ async fn main() {
                     bullet.collided = true;
                     let lives_before = player.lives;
                     player.mark_dead(frame_t);
-                    // Roguelike：Boss 战受伤标记
-                    if player.lives < lives_before
-                        && let GameState::RoguelikeBoss { run_state } = &mut state
-                    {
-                        run_state.boss_damage_taken = true;
+                    // Roguelike：受伤处理（重置连击 + Boss 战标记）
+                    if player.lives < lives_before {
+                        match &mut state {
+                            GameState::RoguelikeBoss { run_state } => {
+                                run_state.mark_boss_damage();
+                            }
+                            GameState::RoguelikeRun { run_state } => {
+                                run_state.on_player_damage();
+                            }
+                            _ => {}
+                        }
                     }
                     particles.spawn_explosion(ship_center, 20.0, RED, frame_t as f32);
                     sounds.play(SoundEffect::Hit, settings.sound_volume);
@@ -2774,12 +2947,44 @@ async fn main() {
                 GameState::RoguelikeRun { run_state } => {
                     roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
                 }
-                GameState::RoguelikeBoss { run_state } => {
+GameState::RoguelikeBoss { run_state } => {
                     roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
                     if let roguelike::RunPhase::Boss(boss) = &run_state.phase {
-                        roguelike::draw_giant_splitter(boss, shake_offset, frame_t as f32);
+                        roguelike::draw_boss(boss, shake_offset, frame_t as f32);
                         roguelike::draw_boss_health_bar(boss);
                     }
+                }
+                GameState::RoguelikeVictory { run_state } => {
+                    roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
+                    // 显示胜利信息
+                    let victory_text = "胜利！你征服了所有区域！";
+                    let tw = measure_text(victory_text, None, 48, 1.0).width;
+                    draw_text_ex(
+                        victory_text,
+                        screen_width() / 2.0 - tw / 2.0,
+                        screen_height() / 2.0 - 60.0,
+                        TextParams {
+                            font_size: 48,
+                            color: GOLD,
+                            ..Default::default()
+                        },
+                    );
+
+                    // 显示统计信息
+                    let stats = format!(
+                        "总击杀: {}  最高连击: {}  用时: {:.1}s  金币: {}",
+                        run_state.total_kills,
+                        run_state.max_combo,
+                        run_state.run_time,
+                        run_state.gold
+                    );
+                    let sw = measure_text(&stats, None, 24, 1.0).width;
+                    draw_text(&stats, screen_width() / 2.0 - sw / 2.0, screen_height() / 2.0, 24.0, WHITE);
+
+                    // 提示返回
+                    let hint = "按 [Enter] 或 [Escape] 返回主菜单";
+                    let hw = measure_text(hint, None, 20, 1.0).width;
+                    draw_text(hint, screen_width() / 2.0 - hw / 2.0, screen_height() / 2.0 + 60.0, 20.0, LIGHTGRAY);
                 }
                 _ => {}
             }

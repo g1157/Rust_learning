@@ -38,6 +38,7 @@ impl Ship {
     }
 
     /// 重置飞船到指定位置（用于重生）
+    #[allow(dead_code)]
     pub fn reset(position: Vec2) -> Self {
         Self::new(position)
     }
