@@ -778,8 +778,7 @@ fn main() {
             measure_steps,
             sample_period,
         } => {
-            pollster::block_on(run_headless_kappa_sweep(
-                config,
+            let sweep = KappaSweepConfig {
                 kappa_start,
                 kappa_end,
                 kappa_step,
@@ -787,7 +786,8 @@ fn main() {
                 relax_steps,
                 measure_steps,
                 sample_period,
-            ));
+            };
+            pollster::block_on(run_headless_kappa_sweep(config, sweep));
         }
         RunMode::Interactive => {
             let event_loop = EventLoop::new().expect("创建事件循环失败");
@@ -885,17 +885,7 @@ async fn run_headless(config: RunConfig, total_steps: u64, sample_period: u64) {
 
     let grid_len = grid_size(config.nx, config.ny);
     let psi0 = gen_noise(config.seed, grid_len);
-    let alpha_field = gen_alpha(
-        config.seed,
-        config.alpha_default,
-        config.alpha_defect,
-        config.defect_radius,
-        config.defect_count,
-        config.defect_mode,
-        config.defect_spacing,
-        config.nx,
-        config.ny,
-    );
+    let alpha_field = gen_alpha(&config);
     let psi_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("PsiA"),
         contents: bytemuck::cast_slice(&psi0),
@@ -1154,8 +1144,8 @@ async fn run_headless(config: RunConfig, total_steps: u64, sample_period: u64) {
     });
 
     let (xg, yg) = (
-        (config.nx + WORKGROUP_X - 1) / WORKGROUP_X,
-        (config.ny + WORKGROUP_Y - 1) / WORKGROUP_Y,
+        config.nx.div_ceil(WORKGROUP_X),
+        config.ny.div_ceil(WORKGROUP_Y),
     );
     let area = (config.nx as f64) * (config.ny as f64) * (config.dx as f64) * (config.dx as f64);
 
@@ -1331,16 +1321,16 @@ async fn run_headless(config: RunConfig, total_steps: u64, sample_period: u64) {
     );
 }
 
-async fn run_headless_kappa_sweep(
-    config: RunConfig,
-    kappa_start: f32,
-    kappa_end: f32,
-    kappa_step: f32,
-    initial_relax_steps: u64,
-    relax_steps: u64,
-    measure_steps: u64,
-    sample_period: u64,
-) {
+async fn run_headless_kappa_sweep(config: RunConfig, sweep: KappaSweepConfig) {
+    let KappaSweepConfig {
+        kappa_start,
+        kappa_end,
+        kappa_step,
+        initial_relax_steps,
+        relax_steps,
+        measure_steps,
+        sample_period,
+    } = sweep;
     if sample_period == 0 {
         eprintln!("--sample-period must be > 0");
         std::process::exit(2);
@@ -1408,15 +1398,7 @@ async fn run_headless_kappa_sweep(
         "headless_kappa_sweep",
         None,
         None,
-        Some(KappaSweepConfig {
-            kappa_start,
-            kappa_end,
-            kappa_step,
-            initial_relax_steps,
-            relax_steps,
-            measure_steps,
-            sample_period,
-        }),
+        Some(sweep),
     )
     .unwrap_or_else(|e| {
         panic!("写入 config.toml 失败 {:?}: {e}", config.out_dir);
@@ -1553,17 +1535,7 @@ async fn run_headless_kappa_sweep(
 
     let grid_len = grid_size(config.nx, config.ny);
     let psi0 = gen_noise(config.seed, grid_len);
-    let alpha_field = gen_alpha(
-        config.seed,
-        config.alpha_default,
-        config.alpha_defect,
-        config.defect_radius,
-        config.defect_count,
-        config.defect_mode,
-        config.defect_spacing,
-        config.nx,
-        config.ny,
-    );
+    let alpha_field = gen_alpha(&config);
     let psi_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("PsiA"),
         contents: bytemuck::cast_slice(&psi0),
@@ -1711,8 +1683,8 @@ async fn run_headless_kappa_sweep(
     });
 
     let (xg, yg) = (
-        (config.nx + WORKGROUP_X - 1) / WORKGROUP_X,
-        (config.ny + WORKGROUP_Y - 1) / WORKGROUP_Y,
+        config.nx.div_ceil(WORKGROUP_X),
+        config.ny.div_ceil(WORKGROUP_Y),
     );
     let area = (config.nx as f64) * (config.ny as f64) * (config.dx as f64) * (config.dx as f64);
 
@@ -2157,10 +2129,7 @@ fn bench_grid(
         ],
     });
 
-    let (xg, yg) = (
-        (n + WORKGROUP_X - 1) / WORKGROUP_X,
-        (n + WORKGROUP_Y - 1) / WORKGROUP_Y,
-    );
+    let (xg, yg) = (n.div_ceil(WORKGROUP_X), n.div_ceil(WORKGROUP_Y));
 
     // 预热
     for i in 0..10 {
@@ -2320,17 +2289,7 @@ impl State {
         // Buffers
         let grid_len = grid_size(run_config.nx, run_config.ny);
         let psi0 = gen_noise(run_config.seed, grid_len);
-        let alpha_field = gen_alpha(
-            run_config.seed,
-            run_config.alpha_default,
-            run_config.alpha_defect,
-            run_config.defect_radius,
-            run_config.defect_count,
-            run_config.defect_mode,
-            run_config.defect_spacing,
-            run_config.nx,
-            run_config.ny,
-        );
+        let alpha_field = gen_alpha(&run_config);
         let psi_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("PsiA"),
             contents: bytemuck::cast_slice(&psi0),
@@ -2734,8 +2693,8 @@ impl State {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let (xg, yg) = (
-            (self.params.nx + WORKGROUP_X - 1) / WORKGROUP_X,
-            (self.params.ny + WORKGROUP_Y - 1) / WORKGROUP_Y,
+            self.params.nx.div_ceil(WORKGROUP_X),
+            self.params.ny.div_ceil(WORKGROUP_Y),
         );
         {
             let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
@@ -2924,7 +2883,7 @@ impl State {
         }
         self.queue.submit(Some(enc.finish()));
         frame.present();
-        if self.step_count % 100 == 0 {
+        if self.step_count.is_multiple_of(100) {
             log::info!("步数: {}", self.step_count);
         }
     }
@@ -2951,24 +2910,24 @@ fn defect_count_effective(
         DefectMode::Random => defect_count,
         DefectMode::SquareLattice => {
             let spacing = defect_spacing.max(1) as u32;
-            let nx_sites = (nx + spacing - 1) / spacing;
-            let ny_sites = (ny + spacing - 1) / spacing;
+            let nx_sites = nx.div_ceil(spacing);
+            let ny_sites = ny.div_ceil(spacing);
             (nx_sites * ny_sites) as usize
         }
     }
 }
 
-fn gen_alpha(
-    seed: u64,
-    alpha_default: f32,
-    alpha_defect: f32,
-    defect_radius: i32,
-    defect_count: usize,
-    defect_mode: DefectMode,
-    defect_spacing: i32,
-    nx: u32,
-    ny: u32,
-) -> Vec<f32> {
+fn gen_alpha(config: &RunConfig) -> Vec<f32> {
+    let nx = config.nx;
+    let ny = config.ny;
+    let alpha_default = config.alpha_default;
+    let alpha_defect = config.alpha_defect;
+    let defect_radius = config.defect_radius;
+    let defect_count = config.defect_count;
+    let defect_mode = config.defect_mode;
+    let defect_spacing = config.defect_spacing;
+    let seed = config.seed;
+
     let mut field = vec![alpha_default; grid_size(nx, ny)];
 
     let apply_disk = |field: &mut [f32], cx: i32, cy: i32| {

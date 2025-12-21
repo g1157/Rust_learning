@@ -1,7 +1,7 @@
 <!--
 ASCII-only header (keep this block) to avoid a Windows apply_patch UTF-8 slicing bug.
 File encoding: UTF-8.
-Last updated: 2025-12-18.
+Last updated: 2025-12-21.
  Synced with: CLI flags (--flux-n/--b/--dt/--dx), magnetic periodic BC, gauge-invariant winding, energy diagnostics, drive kappa, pinned/velocity observables, out-dir, optional vortex position dump, kappa sweep, analysis scripts.
 Doc note: vortices.csv now includes energy columns.
 Doc note: add --seed for reproducible init/defects; vortices.csv has comment metadata lines.
@@ -27,6 +27,8 @@ Pad2: 00000000000000000000000000000000000000000000000000000000000000000000000000
 -->
 
 # Rust + wgpu TDGL 超导涡旋模拟
+
+课程期末作业论文见 `REPORT.md`（摘要/介绍/正文/讨论/参考文献）。
 
 基于 Rust + wgpu(WebGPU) 的 GPU 加速二维 TDGL 方程求解器，用于研究超导涡旋与钉扎现象（交互可视化 + headless 批处理 + 数据/脚本/AI 闭环）。
 

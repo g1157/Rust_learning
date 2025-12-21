@@ -49,7 +49,7 @@ def main() -> None:
 
     ax1.plot(
         random_df["b_over_bphi"],
-        random_df["pinned_net"],
+        random_df["pinned_v"],
         "o-",
         linewidth=2,
         markersize=8,
@@ -58,7 +58,7 @@ def main() -> None:
     )
     ax1.plot(
         lattice_df["b_over_bphi"],
-        lattice_df["pinned_net"],
+        lattice_df["pinned_v"],
         "s-",
         linewidth=2,
         markersize=8,
@@ -72,7 +72,7 @@ def main() -> None:
         ax1.text(m, ax1.get_ylim()[1] * 0.95, f"B/B_φ={m}", ha="center", fontsize=9, alpha=0.7)
 
     ax1.set_xlabel("B/B_φ (Matching field ratio)", fontsize=12)
-    ax1.set_ylabel("Pinned vortex count (net)", fontsize=12)
+    ax1.set_ylabel("Pinned vortex count", fontsize=12)
     ax1.set_title("Matching Field Effect: Random vs Periodic Pinning Arrays\n(Ref: Reichhardt et al. PRB 64, 052503 (2001))", fontsize=11)
     ax1.legend(loc="upper left", fontsize=10)
     ax1.grid(True, alpha=0.3)
@@ -88,12 +88,12 @@ def main() -> None:
 
     # 合并数据计算增强比
     merged = pd.merge(
-        random_df[["flux_n", "b_over_bphi", "pinned_net"]],
-        lattice_df[["flux_n", "pinned_net"]],
+        random_df[["flux_n", "b_over_bphi", "pinned_v"]],
+        lattice_df[["flux_n", "pinned_v"]],
         on="flux_n",
         suffixes=("_random", "_lattice"),
     )
-    merged["enhancement"] = merged["pinned_net_lattice"] / merged["pinned_net_random"].replace(0, np.nan)
+    merged["enhancement"] = merged["pinned_v_lattice"] / merged["pinned_v_random"].replace(0, np.nan)
 
     ax2.bar(
         merged["b_over_bphi"],
@@ -198,8 +198,8 @@ def main() -> None:
         table_data.append([
             f"{b_ratio:.1f}",
             f"{int(row['flux_n'])}",
-            f"{int(row['pinned_net_random'])}",
-            f"{int(row['pinned_net_lattice'])}",
+            f"{int(row['pinned_v_random'])}",
+            f"{int(row['pinned_v_lattice'])}",
             f"{row['enhancement']:.2f}×",
             interpretations.get(b_ratio, ""),
         ])

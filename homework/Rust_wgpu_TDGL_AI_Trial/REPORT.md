@@ -1,7 +1,7 @@
 <!--
 ASCII-only header (keep this block) to avoid a Windows apply_patch UTF-8 slicing bug.
 File encoding: UTF-8.
-Last updated: 2025-12-18.
+Last updated: 2025-12-21.
 Synced with: phi/flux-n, magnetic periodic BC, gauge-invariant vortex winding, energy output, drive kappa+sweep, kappa initial relax, pinned/velocity observables, out-dir, optional vortex position dump, phase diagram scripts, matching field/S(k) scripts, AI inversion baseline, AI closed loop runner.
 Doc note: updated CLI usage + CSV columns + vortex detection notes (+ pinned/velocity columns).
 Doc note: add --seed and write CSV metadata as # comments (+ kappa).
@@ -33,6 +33,7 @@ Pad: 000000000000000000000000000000000000000000000000000000000000000000000000000
 > **学号**：[202332021221]
 > **姓名**：[刘凤祥]
 > **日期**：2024年12月
+> **版本更新**：2025年12月21日
 
 ---
 
@@ -47,13 +48,17 @@ Pad: 000000000000000000000000000000000000000000000000000000000000000000000000000
 
 ---
 
-## 一、研究目标
+## 介绍
 
-### 1.1 项目概述
+### 1.1 背景与相关工作
+
+超导涡旋动力学与钉扎是经典而仍活跃的话题。Ginzburg–Landau 理论建立了序参量的唯象框架 [1]，Abrikosov 证明 II 类超导体存在涡旋晶格 [2]。随后 de Gennes 的专著 [10]、Tinkham 的教材 [11] 与 Blatter 等人的综述 [12] 系统总结了涡旋物理与钉扎机制。数值上，TDGL 被广泛用于涡旋动力学模拟 [3]，而人工周期钉扎阵列与 matching field 效应在实验与模拟中都有丰富现象 [6–9]。这些经典文献年代较早，但对课程作业的物理理解与模型构建非常有帮助。
+
+### 1.2 项目概述
 
 用 **Rust + wgpu(WebGPU)** 在 GPU 上并行求解二维 **时间依赖 Ginzburg–Landau（TDGL）** 方程，构建可复现的涡旋研究平台，并围绕钉扎/去钉扎与缺陷几何开展参数研究与自动化分析。
 
-### 1.2 研究问题
+### 1.3 研究问题
 
 1. **外场自洽与拓扑一致性**：在 torus 上实现均匀外场并验证净涡旋数与总磁通量子数 `flux_n` 的一致性（规范不变统计）。
 2. **去钉扎（depinning）阈值**：通过 κ 驱动与 κ sweep 提取临界 κ_c，并研究其随缺陷强度/密度/几何的变化（相图）。
@@ -61,7 +66,7 @@ Pad: 000000000000000000000000000000000000000000000000000000000000000000000000000
 4. **结构量定量**：从涡旋位置计算结构因子 S(k)，区分 Abrikosov 晶格/无序态，并与缺陷几何关联。
 5. **自动化与 AI 闭环**：将“数据生成→提取→建模→选点→回仿真”闭环落地为脚本工具链，支持离线运行。
 
-### 1.3 交付成果
+### 1.4 工作贡献与文章结构
 
 - 实时可视化（|ψ| 热力图）与 headless 批处理（可生成可复现实验目录）
 - κ sweep / κ_c 提取脚本与相图（`phase_diagram.csv` + heatmap）
@@ -69,8 +74,13 @@ Pad: 000000000000000000000000000000000000000000000000000000000000000000000000000
 - 结构因子 S(k) 后处理与主峰指标（有序性定量）
 - AI 反演（baseline）与 AI 闭环 active learning（自动选点→回填）
 - 完整的技术报告与文档（README/REPORT/doc）
+- **本文结构**：正文依次介绍物理原理、数值方法、GPU 实现与实验结果；讨论部分总结难点、代码质量与改进方向。
 
 ---
+
+## 正文
+
+本节给出物理模型、数值方法、实现细节与实验结果，并配套可复现实验数据与脚本。
 
 ## 二、物理原理
 
@@ -227,7 +237,7 @@ $$
 |:----:|:----:|:----:|
 | 空间并行 | 每个 GPU 线程处理一个网格点 | 充分利用 GPU 并行性 |
 | Ping-pong buffer | 双缓冲交替读写 | 避免数据竞争 |
-| 无 CPU 回读 | Fragment shader 直接采样 | 消除传输瓶颈 |
+| 渲染路径无 CPU 回读 | Fragment shader 直接采样 | 减少传输瓶颈 |
 
 ### 3.2 Workgroup 配置
 
@@ -282,7 +292,7 @@ Rust_wgpu_TDGL_AI_Trial/
 ├── requirements.txt
 ├── .gitignore
 ├── src/
-│   └── main.rs              # 主程序（~2800 行）
+│   └── main.rs              # 主程序（~3300 行）
 ├── scripts/
 │   ├── plot_vortices.py              # 涡旋时间序列曲线
 │   ├── plot_kappa_sweep.py           # depinning 曲线（order parameter vs kappa）
@@ -424,6 +434,8 @@ python scripts/plot_kappa_sweep.py runs/kappa_sweep/kappa_sweep.csv --order-para
 step,time,kappa,vortices,antivortices,net,energy,energy_density,pinned_v,pinned_av,pinned_net,mean_vx,mean_vy,mean_speed
 ```
 
+其中 `pinned_v` 表示钉扎涡旋数，`pinned_net = pinned_v - pinned_av` 表示净钉扎数；sweep 输出中的 `pinned_net_mean` 为其时间均值。本文 κ sweep 表格的 `pinned_v` 由 `vortices.csv` 按 kappa 分组求均值得到。
+
 Note: with `--dump-positions`, also writes `vortex_positions.csv` (`step,time,kappa,x_cell,y_cell,sign`).
 Also writes `kappa_sweep.csv` in sweep mode: `kappa,samples,mean_speed,mean_vx,mean_vy,net_mean,pinned_net_mean,energy_density_mean`.
 
@@ -500,11 +512,11 @@ python scripts/plot_structure_factor.py runs/structure_factor_demo/vortex_positi
 
 #### 实验 2b: B=0 有缺陷（钉扎效应）
 
-| 时间 t | 步数 | 涡旋数 | 反涡旋数 | 净涡旋 | 钉扎净数 |
+| 时间 t | 步数 | 涡旋数 | 反涡旋数 | 净涡旋 | 钉扎涡旋数 |
 |:------:|:----:|:------:|:--------:|:------:|:--------:|
-| 10.0 | 1000 | 151 | 151 | 0 | -1 |
-| 50.0 | 5000 | 48 | 48 | 0 | 1 |
-| 100.0 | 10000 | 34 | 34 | 0 | 0 |
+| 10.0 | 1000 | 151 | 151 | 0 | 7 |
+| 50.0 | 5000 | 48 | 48 | 0 | 5 |
+| 100.0 | 10000 | 34 | 34 | 0 | 5 |
 
 **物理分析**：
 - net = 0 仍严格保持（拓扑守恒不受缺陷影响）
@@ -516,16 +528,16 @@ python scripts/plot_structure_factor.py runs/structure_factor_demo/vortex_positi
 
 #### 实验 2c: B≠0 (flux_n=64) 有缺陷（外场自洽验证）
 
-| 时间 t | 步数 | 涡旋数 | 反涡旋数 | 净涡旋 | 钉扎净数 |
+| 时间 t | 步数 | 涡旋数 | 反涡旋数 | 净涡旋 | 钉扎涡旋数 |
 |:------:|:----:|:------:|:--------:|:------:|:--------:|
-| 10.0 | 1000 | 174 | 110 | **64** | 9 |
-| 50.0 | 5000 | 89 | 25 | **64** | 6 |
-| 100.0 | 10000 | 75 | 11 | **64** | 8 |
+| 10.0 | 1000 | 174 | 110 | **64** | 13 |
+| 50.0 | 5000 | 89 | 25 | **64** | 10 |
+| 100.0 | 10000 | 75 | 11 | **64** | 11 |
 
 **关键结论**：
 - **净涡旋数 net = 64 = flux_n**，完美验证磁通量量子化与 MPBC 的正确性
 - 外磁场显著增加涡旋数量（75 vs 34），符合 Type-II 超导体物理预期
-- 钉扎涡旋数稳定在 6-9 个
+- 钉扎涡旋数稳定在 10-13 个
 
 ![实验2c: B≠0 有缺陷涡旋动力学](./runs/exp2c_B64_with_defect/vortices_plot.png)
 
@@ -552,24 +564,24 @@ RTX 4060 Laptop GPU 测试结果（2024-12-19 实测）：
 
 #### 实验 3a: 随机缺陷 (flux_n=64, defect_count=50)
 
-| κ | mean_speed | mean_vx | pinned_net |
+| κ | mean_speed | mean_vx | pinned_v |
 |:---:|:----------:|:-------:|:----------:|
-| 0.000 | 0.0416 | 0.0038 | 6.6 |
-| 0.005 | 0.0263 | 0.0026 | 8.7 |
-| 0.010 | 0.0180 | -0.0005 | 9.8 |
-| 0.015 | 0.0117 | -0.0048 | 10.0 |
-| 0.020 | 0.0122 | -0.0042 | 10.0 |
-| 0.025 | 0.0127 | -0.0074 | 11.0 |
-| 0.030 | 0.0188 | **-0.0149** | 11.2 |
-| 0.035 | 0.0154 | -0.0106 | 13.0 |
+| 0.000 | 0.0416 | 0.0038 | 9.9 |
+| 0.005 | 0.0263 | 0.0026 | 9.7 |
+| 0.010 | 0.0180 | -0.0005 | 10.8 |
+| 0.015 | 0.0117 | -0.0048 | 11.0 |
+| 0.020 | 0.0122 | -0.0042 | 11.0 |
+| 0.025 | 0.0127 | -0.0074 | 12.0 |
+| 0.030 | 0.0188 | **-0.0149** | 12.2 |
+| 0.035 | 0.0154 | -0.0106 | 14.0 |
 
 #### 实验 3b: 周期阵列缺陷 (flux_n=64, spacing=32, N_pins=64)
 
-| κ | mean_speed | mean_vx | pinned_net |
+| κ | mean_speed | mean_vx | pinned_v |
 |:---:|:----------:|:-------:|:----------:|
-| 0.000 | 0.0405 | -0.0030 | 11.3 |
-| 0.005 | 0.0333 | -0.0046 | 15.4 |
-| 0.010 | 0.0224 | -0.0047 | 17.3 |
+| 0.000 | 0.0405 | -0.0030 | 13.6 |
+| 0.005 | 0.0333 | -0.0046 | 16.4 |
+| 0.010 | 0.0224 | -0.0047 | 18.3 |
 | 0.015 | 0.0195 | -0.0048 | 19.0 |
 | 0.020 | 0.0148 | -0.0065 | 19.7 |
 | 0.025 | 0.0124 | -0.0054 | **20.0** |
@@ -577,8 +589,8 @@ RTX 4060 Laptop GPU 测试结果（2024-12-19 实测）：
 | 0.035 | 0.0153 | -0.0097 | 20.7 |
 
 **物理分析**：
-- **周期阵列钉扎更强**：在相同 κ 下，周期阵列的 pinned_net 显著高于随机缺陷（20 vs 11）
-- **匹配场效应**：flux_n=64 = N_pins，涡旋数与缺陷数匹配，周期阵列可钉扎约 31%（20/64）的涡旋
+- **周期阵列钉扎更强**：在相同 κ 下，周期阵列的钉扎涡旋数（pinned_v）显著高于随机缺陷（20 vs 12）
+- **匹配场效应**：flux_n=64 = N_pins，钉扎涡旋数约占 flux_n 的 31%（pinned_v=20/64）
 - **去钉扎阈值**：|mean_vx| 在 κ≈0.025-0.030 开始显著增大，表明涡旋开始整体漂移
 
 ![实验3a: 随机缺陷 κ sweep](./runs/exp3a_kappa_sweep_random/kappa_sweep_plot.png)
@@ -595,16 +607,16 @@ RTX 4060 Laptop GPU 测试结果（2024-12-19 实测）：
 
 **参考文献**：Reichhardt et al. PRB 64, 052503 (2001) [8]
 
-| flux_n | B/B_φ | 涡旋数 (random) | pinned (random) | 涡旋数 (lattice) | pinned (lattice) | 增强比 |
+| flux_n | B/B_φ | 涡旋数 (random) | 钉扎涡旋数 (random) | 涡旋数 (lattice) | 钉扎涡旋数 (lattice) | 增强比 |
 |:------:|:-----:|:---------------:|:---------------:|:----------------:|:----------------:|:------:|
-| 32 | 0.5 | 55 | 10 | 54 | 11 | 1.10× |
-| 64 | **1.0** | 78 | 12 | 77 | **19** | **1.58×** |
-| 96 | 1.5 | 102 | 15 | 107 | 19 | 1.27× |
-| 128 | 2.0 | 132 | 19 | 130 | **32** | **1.68×** |
+| 32 | 0.5 | 55 | 13 | 54 | 14 | 1.08× |
+| 64 | **1.0** | 78 | 15 | 77 | **20** | **1.33×** |
+| 96 | 1.5 | 102 | 16 | 107 | 21 | 1.31× |
+| 128 | 2.0 | 132 | 21 | 130 | **33** | **1.57×** |
 
 **关键发现**：
-- **整数匹配场效应**：在 B/B_φ=1.0 和 2.0 时，周期阵列钉扎显著增强（1.58×和1.68×）
-- **B/B_φ=2.0 时周期阵列钉扎 32 个涡旋**：恰好等于 N_pins/2，说明每个缺陷平均钉扎 0.5 个涡旋
+- **整数匹配场效应**：在 B/B_φ=1.0 和 2.0 时，周期阵列钉扎涡旋数显著增强（1.33×和1.57×）
+- **B/B_φ=2.0 时钉扎涡旋数为 33（pinned_v）**：接近 N_pins/2，提示半填充的整体钉扎特征
 - **非整数匹配场**：B/B_φ=0.5 和 1.5 时增强效应较弱
 
 **与 Reichhardt 2001 [8] 对比**：
@@ -630,7 +642,9 @@ RTX 4060 Laptop GPU 测试结果（2024-12-19 实测）：
 
 ![Matching Field: 汇总表](./runs/lit_compare/lit_compare_summary_table.png)
 
-*图2e: Matching field 实验汇总表，与 Reichhardt et al. PRB 64, 052503 (2001) 对比。*
+*图2e: Matching field 实验钉扎涡旋数汇总表，与 Reichhardt et al. PRB 64, 052503 (2001) 对比。*
+
+注：图2c-2e可通过 `scripts/plot_lit_compare.py` 重新生成，当前脚本默认使用 `pinned_v` 指标。
 
 ### 6.5 收敛性验证实验
 
@@ -657,7 +671,7 @@ RTX 4060 Laptop GPU 测试结果（2024-12-19 实测）：
 
 *图3: 结构因子 S(k) 示例（2D FFT 热图）。*
 
-### 6.8 AI 反演与 AI 闭环（创新扩展）
+### 6.7 AI 反演与 AI 闭环（创新扩展）
 
 - baseline：`scripts/ai_inverse_design.py` 对 `phase_diagram.csv` 训练 ridge 代理模型并做离散网格反演（给定目标 κ_c 搜索缺陷参数）。
 - 闭环：`scripts/ai_closed_loop.py` 基于 bootstrap ridge 估计不确定性，使用 acquisition 自动选点→回仿真→回填数据集，输出 `loop_log.jsonl` 与 `loop_progress.png`。
@@ -692,7 +706,7 @@ python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_dia
 
 *图4b: AI target 反演示例（best-so-far for |κ_c-target|）。*
 
-### 6.9 收敛性（dt/dx）与有限尺寸效应（可信度加固）
+### 6.8 收敛性（dt/dx）与有限尺寸效应（可信度加固）
 
 本项目提供 `scripts/run_convergence_study.py` 对 **dt/dx 收敛**与**有限尺寸效应**进行可复现实验，并用 `scripts/validate_run.py` 做单次运行的 schema + sanity checks（例如 `net≈flux_n`、能量下降）。
 
@@ -729,7 +743,7 @@ python scripts/evaluate_ai_inversion.py runs/phase_diagram_ai_eval_128/phase_dia
 | V3: B=量子化 有缺陷 | N_net≈flux_n | **net=64=flux_n** | 实验2c ✓ |
 | V4: dt 收敛性 | dt/2 时统计量一致 | 76/12/64 完全一致 | 实验5 ✓ |
 | V5: 能量单调下降 | F(t) 整体下降 | -0.41→-0.48 | 实验2a ✓ |
-| V6: 匹配场效应 | 周期阵列增强钉扎 | 20 vs 11 (+75%) | 实验4 ✓ |
+| V6: 匹配场效应 | 周期阵列钉扎增强 | 20 vs 15 (+33%) | 实验4 ✓ |
 
 ### 7.2 磁周期边界条件（MPBC）的数学推导
 
@@ -834,11 +848,11 @@ $$F = \sum_{i,j}\left(|U_x\psi_{i+1,j} - \psi_{i,j}|^2 + |U_y\psi_{i,j+1} - \psi
 
 ---
 
-## 九、结论
+## 讨论
 
-本项目成功构建了一个基于 Rust + wgpu 的 GPU 加速二维 TDGL 超导涡旋模拟研究平台，实现了从"能跑能看"到"能回答科学问题"的跨越。
+本节对结果进行总结，并从课程评分维度（有趣程度、讨论深度、题目难度、代码质量）给出对应说明。
 
-### 9.1 核心成果
+### 讨论要点与结果总结
 
 1. **物理正确性**：
    - 实现磁通量量子化 + 磁周期边界条件（MPBC），在 torus 拓扑上自洽定义均匀磁场
@@ -848,7 +862,7 @@ $$F = \sum_{i,j}\left(|U_x\psi_{i+1,j} - \psi_{i,j}|^2 + |U_y\psi_{i,j+1} - \psi
 2. **计算性能**：
    - 256×256 网格实时可视化流畅（~28k steps/s）
    - 1024×1024 网格吞吐量达 14 Gcells/s
-   - 纯 GPU 渲染路径，无 CPU 回读瓶颈
+   - 渲染路径无 CPU 回读瓶颈
 
 3. **研究工具链**：
    - κ 驱动与 κ sweep 自动化，支持 depinning 阈值 κ_c 提取
@@ -862,13 +876,18 @@ $$F = \sum_{i,j}\left(|U_x\psi_{i+1,j} - \psi_{i,j}|^2 + |U_y\psi_{i,j+1} - \psi
    - CSV 文件含元信息注释，便于追溯实验条件
    - 支持 `--seed` 固定随机数种子
 
-### 9.2 科学贡献
+### 选题有趣性与难度
 
-- 验证了周期缺陷阵列在匹配场条件下的钉扎增强效应（与文献 [6-9] 一致）
-- 建立了"仿真→提取→建模→选点→回仿真"的 AI 闭环框架
-- 提供了完整的数值验证清单与收敛性实验方法
+- **有趣程度**：将经典 TDGL 与 GPU 并行和结构因子/AI 闭环结合，既有传统物理问题（涡旋与钉扎），又有工程与数据链路的跨学科元素。
+- **题目难度**：实现磁周期边界 + 规范不变绕数、GPU 端并行更新、批处理/相图/匹配场/结构因子脚本联动，综合了物理建模、数值稳定性与工程实现难点。
 
-### 9.3 未来工作
+### 代码质量与工程性
+
+- **结构与可读性**：Rust 强类型 + 显式参数，核心数值步骤均有注释；脚本与主程序职责清晰（仿真/后处理分离）。
+- **可复现性**：统一输出 `config.toml`/`meta.json`/CSV，支持 `--seed` 固定随机数；提供 `scripts/validate_run.py` 做单次运行自检。
+- **质量控制**：支持 `cargo fmt`/`cargo clippy` 基础规范化；当前自动化测试较少，后续可补充单元测试与集成测试。
+
+### 未来工作
 
 | 方向 | 描述 | 预期收益 |
 |:----:|:----:|:--------:|
@@ -898,3 +917,9 @@ $$F = \sum_{i,j}\left(|U_x\psi_{i+1,j} - \psi_{i,j}|^2 + |U_y\psi_{i,j+1} - \psi
 8. Reichhardt, C., Zimányi, G. T., Scalettar, R. T., Hoffmann, A., & Schuller, I. K. (2001). Individual and multiple vortex pinning in systems with periodic pinning arrays. *Physical Review B*, 64, 052503. https://doi.org/10.1103/PhysRevB.64.052503
 
 9. Field, S. B., James, S. S., Barentine, J., Metlushko, V., Crabtree, G. W., Shtrikman, H., Ilic, B., & Brueck, S. R. J. (2002). Vortex Configurations, Matching, and Domain Structure in Large Arrays of Artificial Pinning Centers. *Physical Review Letters*, 88, 067003. https://doi.org/10.1103/PhysRevLett.88.067003
+
+10. de Gennes, P. G. (1966). *Superconductivity of Metals and Alloys*.
+
+11. Tinkham, M. (1996). *Introduction to Superconductivity* (2nd ed.).
+
+12. Blatter, G., Feigel'man, M. V., Geshkenbein, V. B., Larkin, A. I., & Vinokur, V. M. (1994). Vortices in high-temperature superconductors. *Reviews of Modern Physics*, 66(4), 1125-1388. https://doi.org/10.1103/RevModPhys.66.1125
