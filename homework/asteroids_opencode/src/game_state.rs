@@ -456,6 +456,9 @@ pub enum GameState {
     RoguelikeRun {
         run_state: roguelike::RunState,
     },
+    RoguelikeChallengeOffer {
+        run_state: roguelike::RunState,
+    },
     RoguelikeReward {
         run_state: roguelike::RunState,
     },
@@ -463,6 +466,12 @@ pub enum GameState {
         run_state: roguelike::RunState,
     },
     RoguelikeBoss {
+        run_state: roguelike::RunState,
+    },
+    RoguelikeRest {
+        run_state: roguelike::RunState,
+    },
+    RoguelikeVictory {
         run_state: roguelike::RunState,
     },
 }

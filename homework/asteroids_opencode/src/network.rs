@@ -593,20 +593,17 @@ impl NetworkClient {
                 }
                 WsEvent::Message(msg) => match msg {
                     WsMessage::Text(text) => {
-                        if let Err(err) = self.handle_raw_message(&text) {
-                            if self.handle_parse_error(err) {
-                                return;
-                            }
+                        if let Err(err) = self.handle_raw_message(&text) && self.handle_parse_error(err) {
+                            return;
                         }
                     }
                     WsMessage::Binary(data) => {
                         // 尝试将二进制数据解析为 UTF-8 文本
-                        if let Ok(text) = String::from_utf8(data) {
-                            if let Err(err) = self.handle_raw_message(&text) {
-                                if self.handle_parse_error(err) {
-                                    return;
-                                }
-                            }
+                        if let Ok(text) = String::from_utf8(data)
+                            && let Err(err) = self.handle_raw_message(&text)
+                            && self.handle_parse_error(err)
+                        {
+                            return;
                         }
                     }
                     WsMessage::Ping(_) => {

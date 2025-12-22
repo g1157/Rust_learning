@@ -722,6 +722,97 @@ impl RelicId {
 // Run 阶段状态机
 // ============================================================================
 
+/// 挑战类型（可组合）
+#[derive(Debug, Clone)]
+pub enum ChallengeType {
+    /// 敌人数量增加
+    EnemyCountBoost { multiplier: f32 },
+    /// 限时击杀
+    TimeLimit { seconds: f32 },
+    /// 无护盾
+    NoShield,
+}
+
+impl ChallengeType {
+    pub fn description(&self) -> String {
+        match self {
+            ChallengeType::EnemyCountBoost { multiplier } => {
+                format!("敌人数量 +{}%", ((multiplier - 1.0) * 100.0).round() as u32)
+            }
+            ChallengeType::TimeLimit { seconds } => format!("限时击杀 {} 秒", *seconds as u32),
+            ChallengeType::NoShield => "无护盾".to_string(),
+        }
+    }
+}
+
+/// 挑战状态
+#[derive(Debug, Clone)]
+pub struct ChallengeState {
+    pub wave_in_zone: u32,
+    pub modifiers: Vec<ChallengeType>,
+    pub started_at: Option<f32>,
+    pub penalty_gold_ratio: f32,
+}
+
+impl ChallengeState {
+    pub fn elite_offer(wave_in_zone: u32) -> Self {
+        Self {
+            wave_in_zone,
+            modifiers: vec![
+                ChallengeType::EnemyCountBoost { multiplier: 1.5 },
+                ChallengeType::TimeLimit { seconds: 30.0 },
+                ChallengeType::NoShield,
+            ],
+            started_at: None,
+            penalty_gold_ratio: 0.25,
+        }
+    }
+
+    pub fn start(&mut self, now: f32) {
+        self.started_at = Some(now);
+    }
+
+    pub fn enemy_multiplier(&self) -> f32 {
+        self.modifiers.iter().fold(1.0, |acc, m| {
+            if let ChallengeType::EnemyCountBoost { multiplier } = m {
+                acc * multiplier
+            } else {
+                acc
+            }
+        })
+    }
+
+    pub fn time_limit(&self) -> Option<f32> {
+        self.modifiers.iter().find_map(|m| {
+            if let ChallengeType::TimeLimit { seconds } = m {
+                Some(*seconds)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn no_shield(&self) -> bool {
+        self.modifiers
+            .iter()
+            .any(|m| matches!(m, ChallengeType::NoShield))
+    }
+
+    pub fn time_remaining(&self, now: f32) -> Option<f32> {
+        let limit = self.time_limit()?;
+        let start = self.started_at.unwrap_or(now);
+        Some((limit - (now - start)).max(0.0))
+    }
+
+    pub fn is_time_up(&self, now: f32) -> bool {
+        self.time_remaining(now).map(|t| t <= 0.0).unwrap_or(false)
+    }
+
+    pub fn description_lines(&self) -> Vec<String> {
+        self.modifiers.iter().map(|m| m.description()).collect()
+    }
+}
+
 /// 战斗阶段状态
 #[derive(Debug, Clone)]
 pub struct CombatPhaseState {
@@ -729,6 +820,7 @@ pub struct CombatPhaseState {
     pub enemies_remaining: u32,
     pub spawn_timer: f32,
     pub wave_start_time: f32,
+    pub challenge: Option<ChallengeState>,
 }
 
 /// 奖励阶段状态
@@ -797,6 +889,8 @@ pub enum RestOption {
 pub enum RunPhase {
     /// 战斗阶段
     Combat(CombatPhaseState),
+    /// 挑战选择阶段
+    ChallengeOffer(ChallengeState),
     /// 奖励选择阶段
     Reward(RewardPhaseState),
     /// 商店阶段
@@ -862,6 +956,7 @@ impl RunState {
                 enemies_remaining: 0,
                 spawn_timer: 0.0,
                 wave_start_time: 0.0,
+                challenge: None,
             }),
             relics: HashSet::new(),
             gold: 0,
@@ -905,7 +1000,13 @@ impl RunState {
         if let RunPhase::Combat(ref state) = self.phase {
             let base = self.zone.base_asteroid_count();
             let increment = self.zone.asteroid_increment();
-            base + increment * (state.wave_in_zone - 1) as usize
+            let base_count = base + increment * (state.wave_in_zone - 1) as usize;
+            let multiplier = state
+                .challenge
+                .as_ref()
+                .map(|c| c.enemy_multiplier())
+                .unwrap_or(1.0);
+            ((base_count as f32) * multiplier).round() as usize
         } else {
             self.zone.base_asteroid_count()
         }
@@ -1038,6 +1139,74 @@ impl RunState {
         }
     }
 
+    /// 进入挑战选择阶段
+    pub fn enter_challenge_offer(&mut self) {
+        if let RunPhase::Combat(ref state) = self.phase {
+            self.phase = RunPhase::ChallengeOffer(ChallengeState::elite_offer(state.wave_in_zone));
+        }
+    }
+
+    /// 接受挑战并开始挑战波
+    pub fn start_challenge(&mut self, now: f32) -> bool {
+        if let RunPhase::ChallengeOffer(mut offer) = std::mem::replace(
+            &mut self.phase,
+            RunPhase::Combat(CombatPhaseState {
+                wave_in_zone: 1,
+                enemies_remaining: 0,
+                spawn_timer: 0.0,
+                wave_start_time: 0.0,
+                challenge: None,
+            }),
+        ) {
+            offer.start(now);
+            self.phase = RunPhase::Combat(CombatPhaseState {
+                wave_in_zone: offer.wave_in_zone,
+                enemies_remaining: 0,
+                spawn_timer: 0.0,
+                wave_start_time: now,
+                challenge: Some(offer),
+            });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 当前挑战（仅在 Combat 阶段有效）
+    pub fn active_challenge(&self) -> Option<&ChallengeState> {
+        if let RunPhase::Combat(ref state) = self.phase {
+            state.challenge.as_ref()
+        } else {
+            None
+        }
+    }
+
+    /// 取出当前挑战
+    pub fn take_active_challenge(&mut self) -> Option<ChallengeState> {
+        if let RunPhase::Combat(ref mut state) = self.phase {
+            state.challenge.take()
+        } else {
+            None
+        }
+    }
+
+    /// 挑战是否禁用护盾
+    pub fn challenge_disables_shield(&self) -> bool {
+        self.active_challenge().map(|c| c.no_shield()).unwrap_or(false)
+    }
+
+    /// 挑战剩余时间
+    pub fn challenge_time_remaining(&self) -> Option<f32> {
+        self.active_challenge()
+            .and_then(|c| c.time_remaining(self.run_time))
+    }
+
+    /// 挑战失败惩罚：损失部分金币
+    pub fn apply_challenge_failure_penalty(&mut self, challenge: &ChallengeState) {
+        let penalty = (self.gold as f32 * challenge.penalty_gold_ratio).round() as u32;
+        self.gold = self.gold.saturating_sub(penalty);
+    }
+
     /// 进入下一波
     pub fn advance_wave(&mut self) {
         if let RunPhase::Combat(ref mut state) = self.phase {
@@ -1046,6 +1215,7 @@ impl RunState {
                 state.wave_in_zone += 1;
                 state.spawn_timer = 0.0;
                 state.wave_start_time = 0.0;
+                state.challenge = None;
             } else {
                 // 进入 Boss 战
                 let boss_kind = match self.zone {
@@ -1126,6 +1296,7 @@ impl RunState {
             enemies_remaining: 0,
             spawn_timer: 0.0,
             wave_start_time: 0.0,
+            challenge: None,
         });
     }
 
@@ -1169,6 +1340,36 @@ pub fn draw_run_hud(run: &RunState, font: Option<&Font>) {
                 ..Default::default()
             },
         );
+
+        // 挑战提示
+        if let Some(challenge) = &state.challenge {
+            if let Some(remaining) = challenge.time_remaining(run.run_time) {
+                draw_text_ex(
+                    &format!("挑战剩余: {:.1}s", remaining),
+                    10.0,
+                    hud_y + 120.0,
+                    TextParams {
+                        font,
+                        font_size: 18,
+                        color: ORANGE,
+                        ..Default::default()
+                    },
+                );
+            }
+            if challenge.no_shield() {
+                draw_text_ex(
+                    "挑战：无护盾",
+                    10.0,
+                    hud_y + 140.0,
+                    TextParams {
+                        font,
+                        font_size: 18,
+                        color: RED,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
     }
 
     // 金币
@@ -1331,6 +1532,18 @@ const ALL_RELICS: [RelicId; 10] = [
     RelicId::MagneticCore,
 ];
 
+/// 挑战奖励遗物池
+const CHALLENGE_RELICS: [RelicId; 5] = [
+    RelicId::PhaseAmplifier,
+    RelicId::LuckyDice,
+    RelicId::MagneticCore,
+    RelicId::ShieldBattery,
+    RelicId::ComboAmulet,
+];
+
+/// 挑战成功金币奖励
+const CHALLENGE_GOLD_REWARD: u32 = 40;
+
 /// 生成奖励选项
 pub fn generate_reward_options(run: &RunState) -> Vec<RewardOption> {
     let mut options: Vec<RewardOption> = Vec::new();
@@ -1370,6 +1583,34 @@ pub fn generate_reward_options(run: &RunState) -> Vec<RewardOption> {
     }
 
     options
+}
+
+/// 生成挑战成功奖励（稀有卡牌/强遗物/双倍金币）
+pub fn generate_challenge_reward_options(run: &RunState) -> Vec<RewardOption> {
+    use crate::battle_draft::CardRarity;
+
+    // 稀有或史诗卡牌
+    let cards = generate_draft_options();
+    let rare_card = cards
+        .iter()
+        .find(|c| matches!(c.rarity(), CardRarity::Rare | CardRarity::Epic))
+        .copied()
+        .unwrap_or(cards[0]);
+
+    // 强遗物（尽量避免已拥有）
+    let mut relic = CHALLENGE_RELICS[rand::gen_range(0usize, CHALLENGE_RELICS.len())];
+    for _ in 0..8 {
+        if !run.has_relic(relic) {
+            break;
+        }
+        relic = CHALLENGE_RELICS[rand::gen_range(0usize, CHALLENGE_RELICS.len())];
+    }
+
+    vec![
+        RewardOption::Card(rare_card),
+        RewardOption::Relic(relic),
+        RewardOption::Gold(CHALLENGE_GOLD_REWARD),
+    ]
 }
 
 /// 生成商店物品

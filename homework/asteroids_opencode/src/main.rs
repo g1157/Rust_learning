@@ -859,6 +859,24 @@ async fn main() {
                     continue;
                 }
 
+                // 挑战超时判定
+                if let Some(remaining) = run_state.challenge_time_remaining()
+                    && remaining <= 0.0
+                {
+                    let challenge = run_state.take_active_challenge();
+                    if let Some(ref c) = challenge {
+                        run_state.apply_challenge_failure_penalty(c);
+                    }
+                    asteroids.clear();
+                    let options = roguelike::generate_reward_options(run_state);
+                    run_state.enter_reward_phase(options);
+                    state = GameState::RoguelikeReward {
+                        run_state: run_state.clone(),
+                    };
+                    next_frame().await;
+                    continue;
+                }
+
                 // 检测波次清空
                 if asteroids.is_empty() {
                     // 触发遗物效果
@@ -867,16 +885,93 @@ async fn main() {
                     run_state.add_gold(5);
 
                     if let roguelike::RunPhase::Combat(_) = run_state.phase {
-                        // 不提前调用 advance_wave()，保持当前波次信息
-                        // 在 Shop 结束时再决定进入下一波还是 Boss
-                        state = GameState::RoguelikeReward {
-                            run_state: run_state.clone(),
-                        };
+                        // 检查是否有挑战
+                        if let Some(_challenge) = run_state.take_active_challenge() {
+                            // 挑战成功
+                            let options = roguelike::generate_challenge_reward_options(run_state);
+                            run_state.enter_reward_phase(options);
+                            state = GameState::RoguelikeReward {
+                                run_state: run_state.clone(),
+                            };
+                        } else {
+                            // 普通波次清空，进入挑战选择
+                            run_state.enter_challenge_offer();
+                            state = GameState::RoguelikeChallengeOffer {
+                                run_state: run_state.clone(),
+                            };
+                        }
                         next_frame().await;
                         continue;
                     }
                 }
                 // HUD 在后面的 render_scene 之后统一绘制（第 3130 行）
+            }
+            GameState::RoguelikeChallengeOffer { ref mut run_state } => {
+                // 确保处于挑战选择阶段
+                if !matches!(run_state.phase, roguelike::RunPhase::ChallengeOffer(_)) {
+                    run_state.enter_challenge_offer();
+                }
+
+                let action = if let roguelike::RunPhase::ChallengeOffer(ref challenge_state) =
+                    run_state.phase
+                {
+                    ui::draw_challenge_offer(
+                        challenge_state,
+                        &input_state,
+                        fonts.get_best(settings.font_choice),
+                    )
+                } else {
+                    ui::ChallengeOfferAction::None
+                };
+
+                match action {
+                    ui::ChallengeOfferAction::Accept => {
+                        // 检查是否禁用护盾
+                        let no_shield = if let roguelike::RunPhase::ChallengeOffer(ref c) =
+                            run_state.phase
+                        {
+                            c.no_shield()
+                        } else {
+                            false
+                        };
+
+                        if no_shield {
+                            for player in players.iter_mut() {
+                                player.clear_shields();
+                            }
+                            powerups.retain(|p| {
+                                !matches!(
+                                    p.powerup_type,
+                                    powerup::PowerUpType::Shield | powerup::PowerUpType::TempShield
+                                )
+                            });
+                        }
+
+                        run_state.start_challenge(run_state.run_time);
+                        let asteroid_count = run_state.current_asteroid_count();
+                        let difficulty = run_state.current_difficulty();
+                        asteroids = spawn_wave_with_speed(
+                            Vec2::new(screen_width() / 2., screen_height() / 2.),
+                            screen_width().min(screen_height()),
+                            asteroid_count,
+                            difficulty * settings.asteroid_speed_multiplier,
+                        );
+                        state = GameState::RoguelikeRun {
+                            run_state: run_state.clone(),
+                        };
+                    }
+                    ui::ChallengeOfferAction::Skip => {
+                        let options = roguelike::generate_reward_options(run_state);
+                        run_state.enter_reward_phase(options);
+                        state = GameState::RoguelikeReward {
+                            run_state: run_state.clone(),
+                        };
+                    }
+                    ui::ChallengeOfferAction::None => {}
+                }
+
+                next_frame().await;
+                continue;
             }
             GameState::RoguelikeReward { ref mut run_state } => {
                 // 设置引导屏幕
@@ -974,6 +1069,7 @@ async fn main() {
                                 enemies_remaining: 0,
                                 spawn_timer: 0.0,
                                 wave_start_time: 0.0,
+                                challenge: None,
                             });
 
                         if is_last_wave {

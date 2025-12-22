@@ -2637,6 +2637,128 @@ pub fn draw_reward_selection(
 }
 
 // ============================================================================
+// Roguelike：挑战选择 UI
+// ============================================================================
+
+/// 挑战选择操作
+pub enum ChallengeOfferAction {
+    None,
+    Accept,
+    Skip,
+}
+
+/// 绘制挑战选择界面
+pub fn draw_challenge_offer(
+    challenge_state: &roguelike::ChallengeState,
+    input: &Input,
+    font: Option<&Font>,
+) -> ChallengeOfferAction {
+    // 半透明背景
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::new(0.04, 0.05, 0.07, 0.95),
+    );
+
+    // 标题
+    let title = "精英挑战";
+    let title_w = measure_text(title, font, 44, 1.0).width;
+    draw_text_ex(
+        title,
+        screen_width() / 2.0 - title_w / 2.0,
+        90.0,
+        TextParams {
+            font,
+            font_size: 44,
+            color: Color::new(0.9, 0.85, 0.6, 1.0),
+            ..Default::default()
+        },
+    );
+
+    let subtitle = format!("波次 {} - 可选挑战", challenge_state.wave_in_zone);
+    let subtitle_w = measure_text(&subtitle, font, 22, 1.0).width;
+    draw_text_ex(
+        &subtitle,
+        screen_width() / 2.0 - subtitle_w / 2.0,
+        122.0,
+        TextParams {
+            font,
+            font_size: 22,
+            color: Color::new(0.7, 0.75, 0.85, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 条件说明
+    let mut y = 170.0;
+    for line in challenge_state.description_lines() {
+        draw_text_ex(
+            &format!("• {}", line),
+            screen_width() / 2.0 - 240.0,
+            y,
+            TextParams {
+                font,
+                font_size: 22,
+                color: Color::new(0.85, 0.9, 0.98, 1.0),
+                ..Default::default()
+            },
+        );
+        y += 28.0;
+    }
+
+    // 奖励与惩罚
+    draw_text_ex(
+        "成功奖励：稀有卡牌 / 强遗物 / 双倍金币",
+        screen_width() / 2.0 - 240.0,
+        y + 20.0,
+        TextParams {
+            font,
+            font_size: 20,
+            color: GOLD,
+            ..Default::default()
+        },
+    );
+    let penalty_pct = (challenge_state.penalty_gold_ratio * 100.0).round() as u32;
+    draw_text_ex(
+        &format!("失败惩罚：损失 {}% 金币（不影响生命）", penalty_pct),
+        screen_width() / 2.0 - 240.0,
+        y + 50.0,
+        TextParams {
+            font,
+            font_size: 20,
+            color: Color::new(0.95, 0.5, 0.5, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 操作提示
+    let hint = "按 1 接受挑战 / 按 2 跳过";
+    let hint_w = measure_text(hint, font, 22, 1.0).width;
+    draw_text_ex(
+        hint,
+        screen_width() / 2.0 - hint_w / 2.0,
+        screen_height() - 90.0,
+        TextParams {
+            font,
+            font_size: 22,
+            color: Color::new(0.6, 0.65, 0.78, 1.0),
+            ..Default::default()
+        },
+    );
+
+    if input.is_key_pressed(KeyCode::Key1) || input.is_key_pressed(KeyCode::Enter) {
+        return ChallengeOfferAction::Accept;
+    }
+    if input.is_key_pressed(KeyCode::Key2) || input.is_key_pressed(KeyCode::Escape) {
+        return ChallengeOfferAction::Skip;
+    }
+
+    ChallengeOfferAction::None
+}
+
+// ============================================================================
 // Roguelike：商店 UI
 // ============================================================================
 

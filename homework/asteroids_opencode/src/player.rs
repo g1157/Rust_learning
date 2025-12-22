@@ -636,6 +636,13 @@ pub fn reset(&mut self, position: Vec2, now: f64, starting_lives: u32) {
         }
     }
 
+    /// 清除护盾（用于挑战波）
+    pub fn clear_shields(&mut self) {
+        self.shield_until = 0.0;
+        self.shield_ready = false;
+        self.temp_shield_hits = 0;
+    }
+
     pub fn grant_shield(&mut self, time: f64) {
         self.shield_ready = true;
         // 应用护盾持续时间修改器
