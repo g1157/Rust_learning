@@ -12,7 +12,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Instant};
 
 use bytemuck::{Pod, Zeroable};
 use rand::rngs::StdRng;
@@ -30,11 +30,16 @@ use winit::window::{Window, WindowId};
 use egui_wgpu::ScreenDescriptor;
 
 mod ui;
+mod utils;
 use ui::apply_dark_theme;
 use ui::panels::params_panel::{UiParams, SimState, draw_params_panel};
 use ui::panels::stats_panel::{SimStats, draw_stats_panel};
 use ui::panels::status_bar::draw_status_bar;
+use ui::panels::history_panel::{HistoryState, draw_history_panel};
 use ui::components::time_series::{TimeSeriesData, draw_time_series};
+use ui::components::depinning_curve::{DepinningCurveData, draw_depinning_curve};
+use utils::presets::PresetsState;
+use utils::animation::PulseAnimation;
 
 // Grid parameters
 const NX: u32 = 512;
@@ -2210,6 +2215,21 @@ struct State {
     ui_params: UiParams,
     sim_stats: SimStats,
     time_series: TimeSeriesData,
+    depinning_curve: DepinningCurveData,
+    history_state: HistoryState,
+    presets_state: PresetsState,
+    // Animation
+    run_button_pulse: PulseAnimation,
+    // Performance tracking
+    last_fps_update: Instant,
+    frames_since_update: u64,
+    steps_since_update: u64,
+    // κ Sweep state
+    sweep_step_count: u64,
+    sweep_kappa_index: usize,
+    sweep_in_relax: bool,
+    sweep_speed_sum: f64,
+    sweep_speed_samples: u64,
 }
 
 impl ApplicationHandler for App {
@@ -2690,8 +2710,10 @@ impl State {
             defect_spacing: run_config.defect_spacing,
             alpha_defect: run_config.alpha_defect,
             defect_radius: run_config.defect_radius,
-            sim_state: SimState::Running,
+            sim_state: SimState::Idle,  // 默认就绪/重置状态
             reset_requested: false,
+            sweep_params: Default::default(),
+            start_sweep_requested: false,
         };
 
         Self {
@@ -2725,6 +2747,18 @@ impl State {
             ui_params,
             sim_stats: SimStats::default(),
             time_series: TimeSeriesData::default(),
+            depinning_curve: DepinningCurveData::default(),
+            history_state: HistoryState::default(),
+            presets_state: PresetsState::default(),
+            run_button_pulse: PulseAnimation::new(1.5),
+            last_fps_update: Instant::now(),
+            frames_since_update: 0,
+            steps_since_update: 0,
+            sweep_step_count: 0,
+            sweep_kappa_index: 0,
+            sweep_in_relax: true,
+            sweep_speed_sum: 0.0,
+            sweep_speed_samples: 0,
         }
     }
 
@@ -2776,8 +2810,29 @@ impl State {
     }
 
     fn update(&mut self) {
-        // 只在运行状态下执行仿真
-        if self.ui_params.sim_state != SimState::Running {
+        // 处理 κ Sweep 开始请求
+        if self.ui_params.start_sweep_requested {
+            self.ui_params.start_sweep_requested = false;
+            self.sweep_step_count = 0;
+            self.sweep_kappa_index = 0;
+            self.sweep_in_relax = true;
+            self.sweep_speed_sum = 0.0;
+            self.sweep_speed_samples = 0;
+            self.depinning_curve.points.clear();
+            self.depinning_curve.kappa_c = None;
+            // 设置初始 κ
+            let kappa = self.ui_params.sweep_params.kappa_start;
+            self.params.kappa = kappa;
+            self.ui_params.kappa = kappa;
+            self.ui_params.sweep_params.current_kappa = kappa;
+            self.ui_params.sweep_params.current_phase = "弛豫".to_string();
+            self.queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&self.params));
+        }
+
+        // 只在运行或 Sweep 状态下执行仿真
+        let is_running = self.ui_params.sim_state == SimState::Running;
+        let is_sweep = self.ui_params.sim_state == SimState::KappaSweep;
+        if !is_running && !is_sweep {
             return;
         }
 
@@ -2800,8 +2855,84 @@ impl State {
                 cp.dispatch_workgroups(xg, yg, 1);
                 self.ping_is_a = !self.ping_is_a;
                 self.step_count += 1;
+                self.steps_since_update += 1;
+                if is_sweep {
+                    self.sweep_step_count += 1;
+                }
             }
         }
+
+        // 更新 steps/s 统计（每秒更新一次）
+        self.frames_since_update += 1;
+        let elapsed = self.last_fps_update.elapsed();
+        if elapsed.as_secs_f32() >= 1.0 {
+            self.sim_stats.steps_per_sec = self.steps_since_update as f32 / elapsed.as_secs_f32();
+            self.steps_since_update = 0;
+            self.frames_since_update = 0;
+            self.last_fps_update = Instant::now();
+        }
+
+        // κ Sweep 逻辑
+        if is_sweep {
+            let relax_steps = self.ui_params.sweep_params.relax_steps;
+            let measure_steps = self.ui_params.sweep_params.measure_steps;
+            let kappa_start = self.ui_params.sweep_params.kappa_start;
+            let kappa_end = self.ui_params.sweep_params.kappa_end;
+            let kappa_step = self.ui_params.sweep_params.kappa_step;
+            let total_per_kappa = relax_steps + measure_steps;
+
+            // 计算总 κ 值数量
+            let num_kappa = ((kappa_end - kappa_start) / kappa_step).ceil() as usize + 1;
+
+            // 更新进度
+            let total_steps = num_kappa as u64 * total_per_kappa;
+            let current_total = self.sweep_kappa_index as u64 * total_per_kappa + self.sweep_step_count;
+            self.ui_params.sweep_params.progress = current_total as f32 / total_steps as f32;
+
+            // 检查阶段转换
+            if self.sweep_in_relax && self.sweep_step_count >= relax_steps {
+                // 从弛豫转到测量
+                self.sweep_in_relax = false;
+                self.sweep_step_count = 0;
+                self.sweep_speed_sum = 0.0;
+                self.sweep_speed_samples = 0;
+                self.ui_params.sweep_params.current_phase = "测量".to_string();
+            } else if !self.sweep_in_relax && self.sweep_step_count >= measure_steps {
+                // 测量完成，记录数据点
+                let mean_speed = if self.sweep_speed_samples > 0 {
+                    (self.sweep_speed_sum / self.sweep_speed_samples as f64) as f32
+                } else {
+                    self.sim_stats.mean_speed
+                };
+                self.depinning_curve.add_point(self.params.kappa, mean_speed);
+
+                // 移动到下一个 κ
+                self.sweep_kappa_index += 1;
+                if self.sweep_kappa_index >= num_kappa {
+                    // Sweep 完成
+                    self.ui_params.sim_state = SimState::Paused;
+                    self.ui_params.sweep_params.progress = 1.0;
+                    self.ui_params.sweep_params.current_phase = "完成".to_string();
+                } else {
+                    // 设置下一个 κ
+                    let next_kappa = kappa_start + (self.sweep_kappa_index as f32) * kappa_step;
+                    self.params.kappa = next_kappa;
+                    self.ui_params.kappa = next_kappa;
+                    self.ui_params.sweep_params.current_kappa = next_kappa;
+                    self.queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&self.params));
+                    self.sweep_step_count = 0;
+                    self.sweep_in_relax = true;
+                    self.ui_params.sweep_params.current_phase = "弛豫".to_string();
+                }
+            }
+
+            // 在测量阶段累积速度
+            if !self.sweep_in_relax {
+                self.sweep_speed_sum += self.sim_stats.mean_speed as f64;
+                self.sweep_speed_samples += 1;
+            }
+        }
+
         // 涡旋检测采样
         let should_sample = self.step_count >= self.last_vortex_sample + VORTEX_SAMPLE_PERIOD;
         if should_sample {
@@ -2980,16 +3111,28 @@ impl State {
                 .default_width(280.0)
                 .resizable(true)
                 .show(ctx, |ui| {
-                    draw_params_panel(
-                        ui,
-                        &mut self.ui_params,
-                        self.step_count,
-                        self.params.dt,
-                        self.params.nx,
-                        self.params.ny,
-                        self.params.dx,
-                        b_field,
-                    );
+                    egui::ScrollArea::vertical()
+                        .id_salt("left_panel_scroll")
+                        .show(ui, |ui| {
+                        draw_params_panel(
+                            ui,
+                            &mut self.ui_params,
+                            &mut self.presets_state,
+                            self.step_count,
+                            self.params.dt,
+                            self.params.nx,
+                            self.params.ny,
+                            self.params.dx,
+                            b_field,
+                        );
+                        ui.separator();
+                        egui::CollapsingHeader::new("运行历史")
+                            .default_open(false)
+                            .show(ui, |ui| {
+                                let runs_dir = Path::new("runs");
+                                draw_history_panel(ui, &mut self.history_state, runs_dir);
+                            });
+                    });
                 });
 
             // 右侧统计面板
@@ -2997,13 +3140,23 @@ impl State {
                 .default_width(260.0)
                 .resizable(true)
                 .show(ctx, |ui| {
-                    draw_stats_panel(ui, &self.sim_stats, self.run_config.flux_n);
-                    ui.separator();
-                    egui::CollapsingHeader::new("▼ 时间序列")
-                        .default_open(true)
+                    egui::ScrollArea::vertical()
+                        .id_salt("right_panel_scroll")
                         .show(ui, |ui| {
-                            draw_time_series(ui, &self.time_series);
-                        });
+                        draw_stats_panel(ui, &self.sim_stats, self.run_config.flux_n);
+                        ui.separator();
+                        egui::CollapsingHeader::new("时间序列")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                draw_time_series(ui, &self.time_series);
+                            });
+                        ui.separator();
+                        egui::CollapsingHeader::new("Depinning 曲线")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                draw_depinning_curve(ui, &self.depinning_curve);
+                            });
+                    });
                 });
 
             // 底部状态栏

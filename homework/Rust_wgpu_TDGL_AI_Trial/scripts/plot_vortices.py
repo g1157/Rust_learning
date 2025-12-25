@@ -2,20 +2,43 @@
 """
 Plot time series from vortices.csv produced by Rust_wgpu_TDGL_AI_Trial.
 
+This script visualizes vortex dynamics over time, including:
+- Vortex and antivortex counts
+- Net vortex count
+- Pinned vortex count
+- Energy density (on secondary y-axis)
+- Mean vortex speed (on secondary y-axis)
+
 Usage:
-  python scripts/plot_vortices.py runs/my_run/vortices.csv --no-show
+    python scripts/plot_vortices.py runs/my_run/vortices.csv --no-show
+
+Example:
+    # Plot with default settings
+    python scripts/plot_vortices.py vortices.csv
+
+    # Plot specific kappa value
+    python scripts/plot_vortices.py vortices.csv --kappa 0.02
+
+    # Save without displaying
+    python scripts/plot_vortices.py vortices.csv --out output.png --no-show
 """
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Returns:
+        Parsed arguments namespace.
+    """
     p = argparse.ArgumentParser(description="Plot vortex-count time series from vortices.csv")
     p.add_argument(
         "csv",
@@ -36,7 +59,19 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _pick_kappa(df: pd.DataFrame, kappa: float, tol: float) -> tuple[pd.DataFrame, float | None]:
+def _pick_kappa(df: pd.DataFrame, kappa: float, tol: float) -> tuple[pd.DataFrame, Optional[float]]:
+    """Select rows for a specific kappa value from the DataFrame.
+
+    Args:
+        df: Input DataFrame containing a 'kappa' column.
+        kappa: Target kappa value to select (NaN to auto-select).
+        tol: Tolerance for kappa matching.
+
+    Returns:
+        Tuple of (filtered_df, chosen_kappa) where:
+        - filtered_df: DataFrame filtered to the chosen kappa.
+        - chosen_kappa: The kappa value that was selected, or None if no kappa column.
+    """
     if "kappa" not in df.columns:
         return df, None
 
@@ -57,6 +92,11 @@ def _pick_kappa(df: pd.DataFrame, kappa: float, tol: float) -> tuple[pd.DataFram
 
 
 def main() -> None:
+    """Main entry point for the vortex plotting script.
+
+    Loads vortices.csv, filters by kappa if specified, and generates
+    a time series plot of vortex counts and related observables.
+    """
     args = parse_args()
     csv_path = Path(args.csv)
 

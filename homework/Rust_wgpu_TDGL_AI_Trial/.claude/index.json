@@ -1,0 +1,131 @@
+{
+  "created_at": "2025-12-25T08:43:44+08:00",
+  "updated_at": "2025-12-25T08:50:00+08:00",
+  "project_name": "Rust_wgpu_TDGL_AI_Trial",
+  "project_type": "rust_single_binary",
+  "description": "基于 Rust + wgpu(WebGPU) 的 GPU 加速二维 TDGL 方程求解器，用于研究超导涡旋与钉扎现象",
+  "modules": [
+    {
+      "name": "root",
+      "path": ".",
+      "type": "rust_binary",
+      "entry_points": ["src/main.rs"],
+      "key_files": [
+        "Cargo.toml",
+        "README.md",
+        "REPORT.md",
+        "CLAUDE.md",
+        "LICENSE",
+        "requirements.txt"
+      ],
+      "dependencies": {
+        "rust": ["wgpu", "winit", "pollster", "bytemuck", "rand", "env_logger", "log", "anyhow"],
+        "python": ["numpy", "pandas", "matplotlib", "scikit-learn", "scipy"]
+      },
+      "test_files": ["src/main.rs (inline #[cfg(test)] module)"],
+      "config_files": [".gitignore", "Cargo.toml"],
+      "coverage": {
+        "scanned_files": 20,
+        "total_estimated_files": 35,
+        "percentage": 57.1
+      }
+    },
+    {
+      "name": "scripts",
+      "path": "scripts",
+      "type": "python_scripts",
+      "entry_points": [
+        "plot_vortices.py",
+        "plot_kappa_sweep.py",
+        "run_depinning_phase_diagram.py",
+        "plot_phase_diagram.py",
+        "ai_inverse_design.py",
+        "ai_closed_loop.py",
+        "run_matching_field_scan.py",
+        "plot_matching_field.py",
+        "plot_structure_factor.py",
+        "run_convergence_study.py",
+        "plot_convergence_study.py",
+        "validate_run.py",
+        "evaluate_ai_inversion.py",
+        "plot_lit_compare.py"
+      ],
+      "key_files": [],
+      "dependencies": {
+        "python": ["numpy", "pandas", "matplotlib", "scikit-learn", "scipy"]
+      },
+      "test_files": [],
+      "config_files": [],
+      "coverage": {
+        "scanned_files": 14,
+        "total_estimated_files": 14,
+        "percentage": 100.0
+      }
+    },
+    {
+      "name": "doc",
+      "path": "doc",
+      "type": "documentation",
+      "entry_points": ["README.md"],
+      "key_files": [
+        "RESEARCH_ROADMAP.md",
+        "IMPLEMENTATION_LOG.md",
+        "Rust_wgpu_TDGL_AI_Trial_Doc.md"
+      ],
+      "dependencies": {},
+      "test_files": [],
+      "config_files": [],
+      "coverage": {
+        "scanned_files": 4,
+        "total_estimated_files": 4,
+        "percentage": 100.0
+      }
+    }
+  ],
+  "ignored_patterns": [
+    "target/**",
+    "runs/**",
+    ".git/**",
+    ".github/**",
+    "*.lock",
+    "*.log",
+    "*.bin",
+    "*.pdf",
+    "*.png",
+    "*.jpg",
+    "*.jpeg",
+    "*.gif",
+    "*.mp4",
+    "*.zip",
+    "*.tar",
+    "*.gz",
+    "__pycache__/**",
+    ".vscode/**",
+    ".idea/**",
+    ".DS_Store",
+    "Thumbs.db"
+  ],
+  "gaps": [
+    "Python 脚本部分函数仍缺少类型注解"
+  ],
+  "truncated": false,
+  "scan_summary": {
+    "total_files_scanned": 38,
+    "total_files_estimated": 53,
+    "coverage_percentage": 71.7,
+    "scan_date": "2025-12-25T08:50:00+08:00"
+  },
+  "claude_md_files": [
+    {
+      "path": "CLAUDE.md",
+      "type": "root",
+      "generated_at": "2025-12-25T08:43:44+08:00"
+    }
+  ],
+  "recent_updates": [
+    {
+      "date": "2025-12-25T08:50:00+08:00",
+      "description": "添加 Rust 单元测试 (29 个测试用例) 和 Python 脚本 docstring/类型注解"
+    }
+  ]
+}

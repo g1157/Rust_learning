@@ -91,5 +91,10 @@ pub fn apply_dark_theme(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
     style.spacing.item_spacing = egui::vec2(8.0, 4.0);
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
+    // 禁用 debug 显示
+    style.debug.debug_on_hover = false;
+    style.debug.show_expand_width = false;
+    style.debug.show_expand_height = false;
+    style.debug.show_resize = false;
     ctx.set_style(style);
 }

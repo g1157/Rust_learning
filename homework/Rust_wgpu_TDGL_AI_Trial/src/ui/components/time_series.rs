@@ -4,6 +4,7 @@ use egui::Ui;
 use egui_plot::{Line, Plot, PlotPoints};
 
 const BUFFER_SIZE: usize = 1000;
+const DISPLAY_POINTS: usize = 200; // Downsample for display performance
 
 /// Ring buffer for time series data
 #[derive(Clone)]
@@ -43,6 +44,24 @@ impl RingBuffer {
             [i as f64, self.data[idx]]
         })
     }
+
+    /// Downsampled iterator for display performance
+    pub fn iter_downsampled(&self, max_points: usize) -> impl Iterator<Item = [f64; 2]> + '_ {
+        let step = if self.len > max_points {
+            self.len / max_points
+        } else {
+            1
+        };
+        let start = if self.len < BUFFER_SIZE {
+            0
+        } else {
+            self.head
+        };
+        (0..self.len).step_by(step).map(move |i| {
+            let idx = (start + i) % BUFFER_SIZE;
+            [i as f64, self.data[idx]]
+        })
+    }
 }
 
 /// Time series data storage
@@ -59,9 +78,10 @@ impl TimeSeriesData {
     }
 }
 
-/// Draw time series plot
+/// Draw time series plot with downsampling for performance
 pub fn draw_time_series(ui: &mut Ui, data: &TimeSeriesData) {
-    let vortex_points: PlotPoints = data.vortices.iter().collect();
+    // Use downsampled data for better performance
+    let vortex_points: PlotPoints = data.vortices.iter_downsampled(DISPLAY_POINTS).collect();
     let vortex_line = Line::new(vortex_points)
         .name("涡旋数")
         .color(egui::Color32::from_rgb(0x4f, 0xc3, 0xf7));

@@ -10,6 +10,21 @@ We fit a simple ridge-regression surrogate:
 
 Then we invert by searching a discrete candidate set to match a target kappa_c.
 This is intentionally dependency-light (numpy/pandas only) to work offline.
+
+Usage:
+    # Train surrogate model
+    python scripts/ai_inverse_design.py train phase_diagram.csv
+
+    # Invert to find parameters for target kappa_c
+    python scripts/ai_inverse_design.py invert phase_diagram.csv --target 0.03 --search-from-data
+
+Example:
+    >>> from scripts.ai_inverse_design import _fit_ridge, _predict
+    >>> import numpy as np
+    >>> x = np.array([[1, 2], [3, 4], [5, 6]])
+    >>> y = np.array([1.0, 2.0, 3.0])
+    >>> w = _fit_ridge(x, y, lam=1.0)
+    >>> pred = _predict(x, w)
 """
 
 from __future__ import annotations
@@ -18,13 +33,32 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable, TypeVar
 
 import numpy as np
 import pandas as pd
 
+# Type variable for generic parsing
+T = TypeVar("T")
 
-def _parse_list(text: str, cast):
-    items = []
+
+def _parse_list(text: str, cast: Callable[[str], T]) -> list[T]:
+    """Parse a comma-separated string into a list of typed values.
+
+    Args:
+        text: Comma-separated string (e.g., "1,2,3" or "a,b,c").
+        cast: Function to convert each string part to the desired type.
+
+    Returns:
+        List of parsed values.
+
+    Example:
+        >>> _parse_list("1,2,3", int)
+        [1, 2, 3]
+        >>> _parse_list("a, b, c", str)
+        ['a', 'b', 'c']
+    """
+    items: list[T] = []
     for part in (p.strip() for p in text.split(",")):
         if not part:
             continue
@@ -33,6 +67,17 @@ def _parse_list(text: str, cast):
 
 
 def _parse_filters(filters: list[str]) -> list[tuple[str, str]]:
+    """Parse filter strings in 'key=value' format.
+
+    Args:
+        filters: List of filter strings (e.g., ["flux_n=209", "seed=1234"]).
+
+    Returns:
+        List of (key, value) tuples.
+
+    Raises:
+        SystemExit: If any filter string is malformed.
+    """
     parsed: list[tuple[str, str]] = []
     for f in filters:
         if "=" not in f:
@@ -47,6 +92,18 @@ def _parse_filters(filters: list[str]) -> list[tuple[str, str]]:
 
 
 def _apply_filters(df: pd.DataFrame, filters: list[tuple[str, str]]) -> pd.DataFrame:
+    """Apply equality filters to a DataFrame.
+
+    Args:
+        df: Input DataFrame.
+        filters: List of (column_name, value) tuples to filter by.
+
+    Returns:
+        Filtered DataFrame containing only rows matching all filters.
+
+    Raises:
+        SystemExit: If a filter column doesn't exist in the DataFrame.
+    """
     out = df
     for key, value in filters:
         if key not in out.columns:
@@ -63,6 +120,18 @@ def _apply_filters(df: pd.DataFrame, filters: list[tuple[str, str]]) -> pd.DataF
 
 
 def _load_dataset(csv_path: Path, filters: list[tuple[str, str]]) -> pd.DataFrame:
+    """Load and preprocess a phase diagram CSV file.
+
+    Args:
+        csv_path: Path to the phase_diagram.csv file.
+        filters: List of (column_name, value) tuples to filter by.
+
+    Returns:
+        Preprocessed DataFrame with numeric kappa_c values.
+
+    Raises:
+        SystemExit: If the file is empty, missing required columns, or has no valid data.
+    """
     df = pd.read_csv(csv_path)
     if df.empty:
         raise SystemExit(f"No rows in: {csv_path}")
@@ -97,6 +166,21 @@ class FeatureSpec:
 
 
 def _defect_count_effective_row(defect_mode: str, defect_count: float, defect_spacing: float, nx: int, ny: int) -> float:
+    """Calculate effective defect count for a single row.
+
+    For lattice mode, computes the number of lattice sites based on grid size and spacing.
+    For random mode, returns the original defect_count.
+
+    Args:
+        defect_mode: Either "lattice" or "random".
+        defect_count: Number of defects (used for random mode).
+        defect_spacing: Lattice spacing in cells (used for lattice mode).
+        nx: Grid size in x direction.
+        ny: Grid size in y direction.
+
+    Returns:
+        Effective number of defects.
+    """
     if defect_mode == "lattice":
         if defect_spacing <= 0:
             return float("nan")
@@ -107,6 +191,22 @@ def _defect_count_effective_row(defect_mode: str, defect_count: float, defect_sp
 
 
 def _build_design_matrix(df: pd.DataFrame, spec: FeatureSpec, degree: int) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Build feature matrix X and target vector y from DataFrame.
+
+    Args:
+        df: Input DataFrame with feature columns and kappa_c.
+        spec: Feature specification defining which columns to use.
+        degree: Polynomial degree (1 for linear, 2 for quadratic with interactions).
+
+    Returns:
+        Tuple of (X, y, feature_names) where:
+        - X: Feature matrix of shape (n_samples, n_features).
+        - y: Target vector of shape (n_samples,).
+        - feature_names: List of feature names corresponding to columns of X.
+
+    Raises:
+        SystemExit: If degree is not 1 or 2, or if required columns are missing.
+    """
     if degree not in (1, 2):
         raise SystemExit("--degree must be 1 or 2")
 
@@ -174,6 +274,17 @@ def _build_design_matrix(df: pd.DataFrame, spec: FeatureSpec, degree: int) -> tu
 
 
 def _standardize(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Standardize features to zero mean and unit variance.
+
+    Args:
+        x: Feature matrix of shape (n_samples, n_features).
+
+    Returns:
+        Tuple of (x_standardized, mean, std) where:
+        - x_standardized: Standardized feature matrix.
+        - mean: Mean of each feature.
+        - std: Standard deviation of each feature (with floor of 1e-12).
+    """
     mu = x.mean(axis=0)
     sigma = x.std(axis=0)
     sigma = np.where(sigma <= 1e-12, 1.0, sigma)
@@ -181,6 +292,21 @@ def _standardize(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def _fit_ridge(x: np.ndarray, y: np.ndarray, lam: float) -> np.ndarray:
+    """Fit a ridge regression model.
+
+    Solves: min_w ||Xw - y||^2 + lambda * ||w||^2 (excluding intercept).
+
+    Args:
+        x: Standardized feature matrix of shape (n_samples, n_features).
+        y: Target vector of shape (n_samples,).
+        lam: Ridge regularization parameter (lambda >= 0).
+
+    Returns:
+        Weight vector of shape (n_features + 1,) where w[0] is the intercept.
+
+    Raises:
+        SystemExit: If lambda is negative.
+    """
     if lam < 0.0:
         raise SystemExit("--lambda must be >= 0")
     n = x.shape[0]
@@ -194,15 +320,42 @@ def _fit_ridge(x: np.ndarray, y: np.ndarray, lam: float) -> np.ndarray:
 
 
 def _predict(x: np.ndarray, w: np.ndarray) -> np.ndarray:
+    """Predict using fitted ridge regression weights.
+
+    Args:
+        x: Standardized feature matrix of shape (n_samples, n_features).
+        w: Weight vector from _fit_ridge of shape (n_features + 1,).
+
+    Returns:
+        Predictions of shape (n_samples,).
+    """
     xb = np.column_stack([np.ones(x.shape[0], dtype=float), x])
     return xb @ w
 
 
 def _rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Calculate Root Mean Squared Error.
+
+    Args:
+        y_true: Ground truth values.
+        y_pred: Predicted values.
+
+    Returns:
+        RMSE value.
+    """
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
 def _r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Calculate R-squared (coefficient of determination).
+
+    Args:
+        y_true: Ground truth values.
+        y_pred: Predicted values.
+
+    Returns:
+        R² value, or NaN if variance is zero.
+    """
     denom = float(np.sum((y_true - float(np.mean(y_true))) ** 2))
     if denom <= 1e-12:
         return float("nan")
