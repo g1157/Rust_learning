@@ -3,7 +3,7 @@
 //! NOTE: The ASCII-only header above avoids a Windows apply_patch UTF-8 slicing bug.
 //! (Chinese content continues below.)
 //!
-//! TDGL 阶段 2+3+4：缺陷/钉扎势 + 可视化 + 涡旋检测
+//! TDGL Phase 2+3+4: defects/pinning potential + visualization + vortex detection
 
 use std::borrow::Cow;
 use std::f32::consts::PI;
@@ -26,9 +26,19 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-// 网格参数
-const NX: u32 = 256;
-const NY: u32 = 256;
+// egui UI framework
+use egui_wgpu::ScreenDescriptor;
+
+mod ui;
+use ui::apply_dark_theme;
+use ui::panels::params_panel::{UiParams, SimState, draw_params_panel};
+use ui::panels::stats_panel::{SimStats, draw_stats_panel};
+use ui::panels::status_bar::draw_status_bar;
+use ui::components::time_series::{TimeSeriesData, draw_time_series};
+
+// Grid parameters
+const NX: u32 = 512;
+const NY: u32 = 512;
 
 fn grid_size(nx: u32, ny: u32) -> usize {
     (nx as usize) * (ny as usize)
@@ -2181,6 +2191,7 @@ struct State {
     params: Params,
     run_config: RunConfig,
     alpha_field: Vec<f32>,
+    alpha_buf: wgpu::Buffer,
     ping_is_a: bool,
     step_count: u64,
     // 涡旋检测
@@ -2192,6 +2203,13 @@ struct State {
     prev_pos_vortices: Option<Vec<(u32, u32)>>,
     prev_pos_step: Option<u64>,
     last_vortex_sample: u64,
+    // egui UI
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
+    ui_params: UiParams,
+    sim_stats: SimStats,
+    time_series: TimeSeriesData,
 }
 
 impl ApplicationHandler for App {
@@ -2209,7 +2227,7 @@ impl ApplicationHandler for App {
                 .create_window(
                     Window::default_attributes()
                         .with_title(title)
-                        .with_inner_size(PhysicalSize::new(512, 512)),
+                        .with_inner_size(PhysicalSize::new(1280, 720)),
                 )
                 .expect("创建窗口失败"),
         );
@@ -2221,6 +2239,15 @@ impl ApplicationHandler for App {
             Some(s) => s,
             None => return,
         };
+
+        // 让 egui 先处理事件
+        let egui_response = state.egui_state.on_window_event(&state.window, &event);
+        if egui_response.consumed {
+            // egui 消费了事件，请求重绘
+            state.window.request_redraw();
+            return;
+        }
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => state.resize(size),
@@ -2293,7 +2320,7 @@ impl State {
         let psi_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("PsiA"),
             contents: bytemuck::cast_slice(&psi0),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         });
         let psi_b = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("PsiB"),
@@ -2406,7 +2433,7 @@ impl State {
         let alpha_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Alpha"),
             contents: bytemuck::cast_slice(&alpha_field),
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
         let params = Params {
             nx: run_config.nx,
@@ -2641,6 +2668,32 @@ impl State {
             ],
         });
 
+        // 初始化 egui
+        let egui_ctx = egui::Context::default();
+        apply_dark_theme(&egui_ctx);
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui_ctx.viewport_id(),
+            &window,
+            None,
+            None,
+            None,
+        );
+        let egui_renderer = egui_wgpu::Renderer::new(&device, format, None, 1, false);
+
+        // 初始化 UI 参数
+        let ui_params = UiParams {
+            flux_n: run_config.flux_n,
+            kappa: run_config.kappa,
+            defect_mode_lattice: matches!(run_config.defect_mode, DefectMode::SquareLattice),
+            defect_count: run_config.defect_count,
+            defect_spacing: run_config.defect_spacing,
+            alpha_defect: run_config.alpha_defect,
+            defect_radius: run_config.defect_radius,
+            sim_state: SimState::Running,
+            reset_requested: false,
+        };
+
         Self {
             window,
             device,
@@ -2655,6 +2708,7 @@ impl State {
             params,
             run_config,
             alpha_field,
+            alpha_buf,
             ping_is_a: true,
             step_count: 0,
             psi_a,
@@ -2665,6 +2719,12 @@ impl State {
             prev_pos_vortices: None,
             prev_pos_step: None,
             last_vortex_sample: 0,
+            egui_ctx,
+            egui_state,
+            egui_renderer,
+            ui_params,
+            sim_stats: SimStats::default(),
+            time_series: TimeSeriesData::default(),
         }
     }
 
@@ -2688,7 +2748,39 @@ impl State {
         );
     }
 
+    fn reinit_psi(&mut self) {
+        let grid_len = grid_size(self.params.nx, self.params.ny);
+        let new_seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        let psi0 = gen_noise(new_seed, grid_len);
+        self.queue.write_buffer(&self.psi_a, 0, bytemuck::cast_slice(&psi0));
+        self.ping_is_a = true;
+
+        // 根据 UI 参数更新 run_config 并重新生成 alpha 场
+        self.run_config.defect_mode = if self.ui_params.defect_mode_lattice {
+            DefectMode::SquareLattice
+        } else {
+            DefectMode::Random
+        };
+        self.run_config.defect_count = self.ui_params.defect_count;
+        self.run_config.defect_spacing = self.ui_params.defect_spacing;
+        self.run_config.alpha_defect = self.ui_params.alpha_defect;
+        self.run_config.defect_radius = self.ui_params.defect_radius;
+        self.run_config.seed = new_seed;
+
+        // 重新生成 alpha 场
+        self.alpha_field = gen_alpha(&self.run_config);
+        self.queue.write_buffer(&self.alpha_buf, 0, bytemuck::cast_slice(&self.alpha_field));
+    }
+
     fn update(&mut self) {
+        // 只在运行状态下执行仿真
+        if self.ui_params.sim_state != SimState::Running {
+            return;
+        }
+
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -2803,6 +2895,22 @@ impl State {
             self.prev_pos_vortices = Some(curr_pos_vortices);
             self.prev_pos_step = Some(self.step_count);
 
+            // 更新 UI 统计数据
+            self.sim_stats.vortices = vort;
+            self.sim_stats.antivortices = anti;
+            self.sim_stats.net = vort - anti;
+            self.sim_stats.pinned_v = pinned_v;
+            self.sim_stats.pinned_av = pinned_av;
+            self.sim_stats.pinned_net = pinned_net;
+            self.sim_stats.energy = energy;
+            self.sim_stats.energy_density = energy_density;
+            self.sim_stats.mean_vx = mean_vx as f32;
+            self.sim_stats.mean_vy = mean_vy as f32;
+            self.sim_stats.mean_speed = mean_speed as f32;
+
+            // 更新时间序列数据
+            self.time_series.push(vort - anti, energy_density);
+
             if let Some(file) = self.positions_csv.as_mut() {
                 for cell in &detection.cells {
                     writeln!(
@@ -2862,9 +2970,113 @@ impl State {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
+        // 运行 egui，构建 UI
+        let raw_input = self.egui_state.take_egui_input(&self.window);
+        let b_field = b_field_from_phi(self.params.phi, self.params.dx);
+        let full_output = self.egui_ctx.run(raw_input, |ctx| {
+            // 左侧参数面板
+            egui::SidePanel::left("params_panel")
+                .default_width(280.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    draw_params_panel(
+                        ui,
+                        &mut self.ui_params,
+                        self.step_count,
+                        self.params.dt,
+                        self.params.nx,
+                        self.params.ny,
+                        self.params.dx,
+                        b_field,
+                    );
+                });
+
+            // 右侧统计面板
+            egui::SidePanel::right("stats_panel")
+                .default_width(260.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    draw_stats_panel(ui, &self.sim_stats, self.run_config.flux_n);
+                    ui.separator();
+                    egui::CollapsingHeader::new("▼ 时间序列")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            draw_time_series(ui, &self.time_series);
+                        });
+                });
+
+            // 底部状态栏
+            egui::TopBottomPanel::bottom("status_bar")
+                .show(ctx, |ui| {
+                    let sim_time = self.step_count as f32 * self.params.dt;
+                    draw_status_bar(
+                        ui,
+                        self.step_count,
+                        None,
+                        sim_time,
+                        self.sim_stats.steps_per_sec,
+                        "GPU",
+                    );
+                });
+        });
+
+        // 同步 UI 参数到仿真参数
+        if (self.ui_params.kappa - self.params.kappa).abs() > 1e-6 {
+            self.params.kappa = self.ui_params.kappa;
+            self.queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&self.params));
+        }
+
+        // 处理重置请求
+        if self.ui_params.reset_requested {
+            self.ui_params.reset_requested = false;
+            self.step_count = 0;
+            self.last_vortex_sample = 0;
+            self.time_series = TimeSeriesData::default();
+            self.sim_stats = SimStats::default();
+            // 重新初始化 psi 场（随机初始化）
+            self.reinit_psi();
+        }
+
+        // 处理 egui 平台输出
+        self.egui_state
+            .handle_platform_output(&self.window, full_output.platform_output);
+
+        // 准备 egui 渲染数据
+        let paint_jobs = self
+            .egui_ctx
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
+
+        let screen_descriptor = ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: full_output.pixels_per_point,
+        };
+
+        // 更新 egui 纹理
+        for (id, image_delta) in &full_output.textures_delta.set {
+            self.egui_renderer
+                .update_texture(&self.device, &self.queue, *id, image_delta);
+        }
+
+        // 使用单独的 encoder 更新 egui buffers
+        let mut egui_encoder =
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("egui_encoder"),
+                });
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut egui_encoder,
+            &paint_jobs,
+            &screen_descriptor,
+        );
+
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+        // 第一个 render pass: 绘制热力图
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2881,7 +3093,31 @@ impl State {
             rp.set_bind_group(0, &self.render_bgs[if self.ping_is_a { 0 } else { 1 }], &[]);
             rp.draw(0..3, 0..1);
         }
-        self.queue.submit(Some(enc.finish()));
+
+        // 第二个 render pass: 绘制 egui UI
+        {
+            let rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // 保留热力图
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            self.egui_renderer
+                .render(&mut rp.forget_lifetime(), &paint_jobs, &screen_descriptor);
+        }
+
+        self.queue.submit([egui_encoder.finish(), enc.finish()]);
+
+        // 清理 egui 纹理
+        for id in &full_output.textures_delta.free {
+            self.egui_renderer.free_texture(id);
+        }
+
         frame.present();
         if self.step_count.is_multiple_of(100) {
             log::info!("步数: {}", self.step_count);
@@ -3247,4 +3483,405 @@ fn energy_functional(
         }
     }
     f_total
+}
+
+// ============================================================================
+// Unit Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // Complex number operations tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_complex_conjugate() {
+        let z = Complex { re: 3.0, im: 4.0 };
+        let conj = cconj(z);
+        assert_eq!(conj.re, 3.0);
+        assert_eq!(conj.im, -4.0);
+    }
+
+    #[test]
+    fn test_complex_multiply() {
+        // (1 + 2i) * (3 + 4i) = 3 + 4i + 6i + 8i^2 = 3 + 10i - 8 = -5 + 10i
+        let a = Complex { re: 1.0, im: 2.0 };
+        let b = Complex { re: 3.0, im: 4.0 };
+        let result = cmul(a, b);
+        assert!((result.re - (-5.0)).abs() < 1e-6);
+        assert!((result.im - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_complex_subtract() {
+        let a = Complex { re: 5.0, im: 3.0 };
+        let b = Complex { re: 2.0, im: 1.0 };
+        let result = csub(a, b);
+        assert_eq!(result.re, 3.0);
+        assert_eq!(result.im, 2.0);
+    }
+
+    #[test]
+    fn test_complex_norm_squared() {
+        let z = Complex { re: 3.0, im: 4.0 };
+        let norm2 = cnorm2(z);
+        assert!((norm2 - 25.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cis_function() {
+        // cis(0) = 1 + 0i
+        let z0 = cis(0.0);
+        assert!((z0.re - 1.0).abs() < 1e-6);
+        assert!(z0.im.abs() < 1e-6);
+
+        // cis(π/2) = 0 + 1i
+        let z1 = cis(PI / 2.0);
+        assert!(z1.re.abs() < 1e-6);
+        assert!((z1.im - 1.0).abs() < 1e-6);
+
+        // cis(π) = -1 + 0i
+        let z2 = cis(PI);
+        assert!((z2.re - (-1.0)).abs() < 1e-6);
+        assert!(z2.im.abs() < 1e-6);
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase wrapping tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_wrap_phase_in_range() {
+        // Values already in (-π, π] should remain unchanged
+        assert!((wrap_phase(0.0) - 0.0).abs() < 1e-6);
+        assert!((wrap_phase(1.0) - 1.0).abs() < 1e-6);
+        assert!((wrap_phase(-1.0) - (-1.0)).abs() < 1e-6);
+        assert!((wrap_phase(PI) - PI).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_wrap_phase_positive_overflow() {
+        // 2π should wrap to ~0
+        let wrapped = wrap_phase(2.0 * PI);
+        assert!(wrapped.abs() < 1e-5);
+
+        // 3π should wrap to ~π
+        let wrapped2 = wrap_phase(3.0 * PI);
+        assert!((wrapped2 - PI).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_wrap_phase_negative_overflow() {
+        // -2π should wrap to ~0
+        let wrapped = wrap_phase(-2.0 * PI);
+        assert!(wrapped.abs() < 1e-5);
+
+        // -3π should wrap to ~-π (or close to π due to boundary)
+        let wrapped2 = wrap_phase(-3.0 * PI);
+        assert!((wrapped2.abs() - PI).abs() < 1e-5);
+    }
+
+    // -------------------------------------------------------------------------
+    // Link variable tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_link_ux_interior() {
+        // Interior points (x + 1 != nx) should return 1 + 0i
+        let ux = link_ux(0.1, 10, 5, 3);
+        assert!((ux.re - 1.0).abs() < 1e-6);
+        assert!(ux.im.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_link_ux_boundary() {
+        // At x = nx - 1, should return exp(i * phi * nx * y)
+        let phi = 0.1;
+        let nx = 10u32;
+        let y = 3u32;
+        let ux = link_ux(phi, nx, nx - 1, y);
+        let expected_angle = phi * (nx as f32) * (y as f32);
+        assert!((ux.re - expected_angle.cos()).abs() < 1e-6);
+        assert!((ux.im - expected_angle.sin()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_link_uy() {
+        let phi = 0.1;
+        let kappa = 0.05;
+        let x = 5u32;
+        let uy = link_uy(phi, kappa, x);
+        let expected_angle = -(phi * (x as f32) + kappa);
+        assert!((uy.re - expected_angle.cos()).abs() < 1e-6);
+        assert!((uy.im - expected_angle.sin()).abs() < 1e-6);
+    }
+
+    // -------------------------------------------------------------------------
+    // Flux quantization tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_phi_from_flux_n() {
+        // phi = 2π * n / (nx * ny)
+        let phi = phi_from_flux_n(1, 10, 10);
+        let expected = 2.0 * PI / 100.0;
+        assert!((phi - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_flux_n_from_b_field() {
+        // Round-trip test: B -> flux_n -> phi -> B should be close
+        let b_target = 0.02;
+        let nx = 256u32;
+        let ny = 256u32;
+        let dx = 1.0f32;
+
+        let flux_n = flux_n_from_b_field(b_target, nx, ny, dx);
+        let phi = phi_from_flux_n(flux_n, nx, ny);
+        let b_recovered = b_field_from_phi(phi, dx);
+
+        // Should be within one quantum
+        let quantum = 2.0 * PI / ((nx * ny) as f32 * dx * dx);
+        assert!((b_recovered - b_target).abs() < quantum);
+    }
+
+    #[test]
+    fn test_b_field_from_phi() {
+        let phi = 0.01;
+        let dx = 1.0;
+        let b = b_field_from_phi(phi, dx);
+        assert!((b - phi).abs() < 1e-6); // When dx=1, B = phi
+    }
+
+    // -------------------------------------------------------------------------
+    // Vortex detection tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_detect_vortices_uniform_field() {
+        // Uniform psi = 1 + 0i everywhere should have no vortices
+        let nx = 8u32;
+        let ny = 8u32;
+        let psi: Vec<Complex> = vec![Complex { re: 1.0, im: 0.0 }; (nx * ny) as usize];
+        let detection = detect_vortices(&psi, nx, ny, 0.0, 0.0);
+        assert_eq!(detection.vortices, 0);
+        assert_eq!(detection.antivortices, 0);
+    }
+
+    #[test]
+    fn test_detect_vortices_single_vortex() {
+        // Create a single vortex at the center by setting phase winding
+        let nx = 16u32;
+        let ny = 16u32;
+        let cx = (nx / 2) as f32;
+        let cy = (ny / 2) as f32;
+
+        let psi: Vec<Complex> = (0..ny)
+            .flat_map(|y| {
+                (0..nx).map(move |x| {
+                    let dx = (x as f32) - cx;
+                    let dy = (y as f32) - cy;
+                    let r = (dx * dx + dy * dy).sqrt().max(0.1);
+                    let theta = dy.atan2(dx); // Single winding
+                    let mag = (1.0 - (-r / 3.0).exp()).min(1.0); // Vortex core profile
+                    Complex {
+                        re: mag * theta.cos(),
+                        im: mag * theta.sin(),
+                    }
+                })
+            })
+            .collect();
+
+        let detection = detect_vortices(&psi, nx, ny, 0.0, 0.0);
+        // Should detect at least one vortex (exact count depends on discretization)
+        assert!(
+            detection.vortices >= 1 || detection.antivortices >= 1,
+            "Expected at least one vortex, got v={} av={}",
+            detection.vortices,
+            detection.antivortices
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Energy functional tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_energy_functional_ground_state() {
+        // For uniform psi = sqrt(alpha) and alpha > 0, energy should be negative (stable)
+        let nx = 8u32;
+        let ny = 8u32;
+        let alpha_val = 1.0f32;
+        let psi_mag = alpha_val.sqrt();
+        let psi: Vec<Complex> = vec![
+            Complex {
+                re: psi_mag,
+                im: 0.0
+            };
+            (nx * ny) as usize
+        ];
+        let alpha: Vec<f32> = vec![alpha_val; (nx * ny) as usize];
+
+        let energy = energy_functional(&psi, &alpha, nx, ny, 1.0, 0.0, 0.0);
+        // Ground state energy should be negative
+        assert!(
+            energy < 0.0,
+            "Ground state energy should be negative, got {}",
+            energy
+        );
+    }
+
+    #[test]
+    fn test_energy_functional_zero_field() {
+        // psi = 0 everywhere should give zero energy
+        let nx = 8u32;
+        let ny = 8u32;
+        let psi: Vec<Complex> = vec![Complex { re: 0.0, im: 0.0 }; (nx * ny) as usize];
+        let alpha: Vec<f32> = vec![1.0; (nx * ny) as usize];
+
+        let energy = energy_functional(&psi, &alpha, nx, ny, 1.0, 0.0, 0.0);
+        assert!(
+            energy.abs() < 1e-10,
+            "Zero field should have zero energy, got {}",
+            energy
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Pinning detection tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_is_pinned_cell_uniform_alpha() {
+        // Uniform alpha = 1.0 everywhere, no cell should be pinned
+        let nx = 8u32;
+        let ny = 8u32;
+        let alpha: Vec<f32> = vec![1.0; (nx * ny) as usize];
+        assert!(!is_pinned_cell(&alpha, nx, ny, 3, 3, 1.0));
+    }
+
+    #[test]
+    fn test_is_pinned_cell_with_defect() {
+        // Create a defect at (3, 3)
+        let nx = 8u32;
+        let ny = 8u32;
+        let mut alpha: Vec<f32> = vec![1.0; (nx * ny) as usize];
+        alpha[(3 * nx + 3) as usize] = -0.5; // Defect
+
+        assert!(is_pinned_cell(&alpha, nx, ny, 3, 3, 1.0));
+        assert!(is_pinned_cell(&alpha, nx, ny, 2, 3, 1.0)); // Adjacent cell also affected
+        assert!(is_pinned_cell(&alpha, nx, ny, 3, 2, 1.0)); // Adjacent cell also affected
+    }
+
+    // -------------------------------------------------------------------------
+    // Velocity tracking tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_mean_velocity_empty_input() {
+        let prev: Vec<(u32, u32)> = vec![];
+        let curr: Vec<(u32, u32)> = vec![(5, 5)];
+        let (vx, vy, speed) = mean_velocity_from_cells(&prev, &curr, 16, 16, 1.0, 1.0);
+        assert_eq!(vx, 0.0);
+        assert_eq!(vy, 0.0);
+        assert_eq!(speed, 0.0);
+    }
+
+    #[test]
+    fn test_mean_velocity_stationary() {
+        // Same positions -> zero velocity
+        let prev = vec![(5, 5), (10, 10)];
+        let curr = vec![(5, 5), (10, 10)];
+        let (vx, vy, speed) = mean_velocity_from_cells(&prev, &curr, 16, 16, 1.0, 1.0);
+        assert!(vx.abs() < 1e-6);
+        assert!(vy.abs() < 1e-6);
+        assert!(speed.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mean_velocity_uniform_motion() {
+        // All vortices move +1 in x direction
+        let prev = vec![(5, 5), (10, 10)];
+        let curr = vec![(6, 5), (11, 10)];
+        let dx = 1.0;
+        let dt = 1.0;
+        let (vx, vy, speed) = mean_velocity_from_cells(&prev, &curr, 16, 16, dx, dt);
+        assert!((vx - 1.0).abs() < 1e-6, "Expected vx=1.0, got {}", vx);
+        assert!(vy.abs() < 1e-6, "Expected vy=0.0, got {}", vy);
+        assert!(
+            (speed - 1.0).abs() < 1e-6,
+            "Expected speed=1.0, got {}",
+            speed
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Defect generation tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_defect_count_effective_random() {
+        let count = defect_count_effective(DefectMode::Random, 50, 32, 256, 256);
+        assert_eq!(count, 50);
+    }
+
+    #[test]
+    fn test_defect_count_effective_lattice() {
+        // For 256x256 grid with spacing 32: ceil(256/32) * ceil(256/32) = 8 * 8 = 64
+        let count = defect_count_effective(DefectMode::SquareLattice, 50, 32, 256, 256);
+        assert_eq!(count, 64);
+    }
+
+    // -------------------------------------------------------------------------
+    // JSON/TOML escape tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_json_escape() {
+        assert_eq!(json_escape("hello"), "hello");
+        assert_eq!(json_escape("hello\"world"), "hello\\\"world");
+        assert_eq!(json_escape("line1\nline2"), "line1\\nline2");
+        assert_eq!(json_escape("path\\to\\file"), "path\\\\to\\\\file");
+    }
+
+    #[test]
+    fn test_escape_toml_string() {
+        assert_eq!(escape_toml_string("hello"), "hello");
+        assert_eq!(escape_toml_string("hello\"world"), "hello\\\"world");
+        assert_eq!(escape_toml_string("line1\nline2"), "line1\\nline2");
+    }
+
+    // -------------------------------------------------------------------------
+    // DefectMode parsing tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_defect_mode_parse() {
+        assert!(matches!(
+            DefectMode::parse("random"),
+            Some(DefectMode::Random)
+        ));
+        assert!(matches!(
+            DefectMode::parse("lattice"),
+            Some(DefectMode::SquareLattice)
+        ));
+        assert!(matches!(
+            DefectMode::parse("square"),
+            Some(DefectMode::SquareLattice)
+        ));
+        assert!(matches!(
+            DefectMode::parse("square_lattice"),
+            Some(DefectMode::SquareLattice)
+        ));
+        assert!(DefectMode::parse("invalid").is_none());
+    }
+
+    #[test]
+    fn test_defect_mode_as_str() {
+        assert_eq!(DefectMode::Random.as_str(), "random");
+        assert_eq!(DefectMode::SquareLattice.as_str(), "lattice");
+    }
 }
