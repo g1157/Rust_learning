@@ -1,7 +1,7 @@
 <!--
 ASCII-only header (keep this block) to avoid a Windows apply_patch UTF-8 slicing bug.
 File encoding: UTF-8.
-Last updated: 2025-12-21.
+Last updated: 2025-12-27.
  Synced with: CLI flags (--flux-n/--b/--dt/--dx), magnetic periodic BC, gauge-invariant winding, energy diagnostics, drive kappa, pinned/velocity observables, out-dir, optional vortex position dump, kappa sweep, analysis scripts.
 Doc note: vortices.csv now includes energy columns.
 Doc note: add --seed for reproducible init/defects; vortices.csv has comment metadata lines.
@@ -36,6 +36,7 @@ Pad2: 00000000000000000000000000000000000000000000000000000000000000000000000000
 
 - GPU 并行求解 TDGL 方程（compute shader）
 - 实时可视化 |ψ| 热力图（无 CPU 回读）
+- **egui Dashboard UI**：交互式参数控制、实时统计、时间序列图表
 - 空间变化的钉扎势 α(r)
 - 缺陷几何：随机缺陷 vs 周期缺陷阵列（matching field）
 - 涡旋检测与统计（规范不变绕数 / gauge-invariant winding）
@@ -43,6 +44,8 @@ Pad2: 00000000000000000000000000000000000000000000000000000000000000000000000000
 - κ 驱动与 κ sweep（去钉扎曲线、自动提取 κ_c）
 - 批处理脚本：相图 / matching field / 结构因子 S(k)
 - AI 工具链：反演（baseline）+ 闭环 active learning
+- 材料预设库（NbSe2、YBCO、MgB2 等超导材料参数）
+- 仿真验证报告生成
 - 性能基准测试
 
 ## 项目总结（研究闭环）
@@ -107,7 +110,18 @@ python scripts/plot_kappa_sweep.py runs/kappa_sweep/kappa_sweep.csv --order-para
 ### 交互控制
 
 - `A` 键：切换显示 |ψ| / α 场
+- `D` 键：切换 Dashboard UI 显示/隐藏
 - 关闭窗口退出
+
+### Dashboard UI 功能
+
+交互式 egui Dashboard 提供以下面板：
+
+- **参数面板**：实时调整 κ、dt、材料预设等参数
+- **统计面板**：显示涡旋计数、能量密度、平均速度等
+- **历史面板**：时间序列图表（涡旋数、能量、速度）
+- **验证面板**：物理一致性检查与验证报告
+- **状态栏**：仿真步数、FPS、GPU 信息
 
 ## 输出文件
 
@@ -221,10 +235,29 @@ Rust_wgpu_TDGL_AI_Trial/
 ├── Cargo.toml
 ├── README.md
 ├── REPORT.md
+├── CLAUDE.md
 ├── LICENSE
 ├── requirements.txt
 ├── src/
-│   └── main.rs          # 主程序（compute + render + vortex detection）
+│   ├── main.rs              # 主程序（compute + render + vortex detection）
+│   ├── ui/                  # egui Dashboard UI 模块
+│   │   ├── mod.rs
+│   │   ├── theme.rs         # UI 主题配置
+│   │   ├── components/      # 可复用 UI 组件
+│   │   │   ├── depinning_curve.rs   # Depinning 曲线图表
+│   │   │   ├── param_slider.rs      # 参数滑块
+│   │   │   └── time_series.rs       # 时间序列图表
+│   │   └── panels/          # Dashboard 面板
+│   │       ├── params_panel.rs      # 参数控制面板
+│   │       ├── stats_panel.rs       # 统计显示面板
+│   │       ├── history_panel.rs     # 历史数据面板
+│   │       ├── validation_panel.rs  # 验证面板
+│   │       └── status_bar.rs        # 状态栏
+│   └── utils/               # 工具模块
+│       ├── animation.rs     # 动画工具
+│       ├── materials.rs     # 材料预设库
+│       ├── presets.rs       # 仿真预设
+│       └── validation_report.rs  # 验证报告生成
 ├── scripts/
 │   ├── plot_vortices.py               # vortices.csv 时间序列
 │   ├── plot_kappa_sweep.py            # kappa_sweep.csv depinning 曲线 + κ_c
@@ -232,6 +265,7 @@ Rust_wgpu_TDGL_AI_Trial/
 │   ├── plot_phase_diagram.py          # phase_diagram.csv 热图
 │   ├── run_convergence_study.py       # 收敛性(dt/dx)与有限尺寸效应（kappa sweep 汇总）
 │   ├── plot_convergence_study.py      # convergence_study.csv -> 曲线
+│   ├── plot_lit_compare.py            # 文献对比图
 │   ├── validate_run.py                # 单次运行输出自检（schema + sanity checks）
 │   ├── evaluate_ai_inversion.py       # AI 反演精度评估（离线）
 │   ├── run_matching_field_scan.py     # matching field: scan flux_n (random vs lattice)
@@ -239,6 +273,10 @@ Rust_wgpu_TDGL_AI_Trial/
 │   ├── plot_structure_factor.py       # vortex_positions.csv -> 2D S(k)
 │   ├── ai_inverse_design.py           # AI 反演/逆向设计（baseline）
 │   └── ai_closed_loop.py              # AI 闭环（active learning）
+├── docs/
+│   ├── epic-dashboard-ui.md           # Dashboard UI Epic 文档
+│   ├── front-end-spec.md              # 前端规格说明
+│   └── stories/                       # 用户故事
 ├── doc/
 │   ├── README.md                 # 文档索引
 │   ├── IMPLEMENTATION_LOG.md     # 实施日志
@@ -256,6 +294,9 @@ Rust_wgpu_TDGL_AI_Trial/
 ```toml
 wgpu = "23"
 winit = "0.30"
+egui = "0.30"
+egui-wgpu = "0.30"
+egui-winit = "0.30"
 pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
 rand = "0.8"
@@ -296,6 +337,9 @@ log = "0.4"
 - [x] 结构因子 S(k)：`vortex_positions.csv` → FFT 热图
 - [x] AI 反演 baseline + AI 闭环 active learning（自动选点→回仿真→回填）
 - [x] 收敛性实验：dt/dx（至少 dt vs dt/2）与有限尺寸效应
+- [x] **egui Dashboard UI**：交互式参数控制、实时统计、时间序列图表
+- [x] **材料预设库**：NbSe2、YBCO、MgB2 等超导材料参数
+- [x] **仿真验证面板**：物理一致性检查与验证报告
 - [ ] 热噪声（Langevin）与 T-sweep 相图（玻璃态/蠕变）
 - [ ] 更丰富的结构量：g(r)、S(k) 峰宽/主峰跟踪（与 matching field 联动）
 - [ ] AI 反演增强：从图像/时间序列反演缺陷参数（带不确定性）
