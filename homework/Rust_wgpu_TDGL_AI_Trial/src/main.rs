@@ -36,6 +36,7 @@ use ui::panels::params_panel::{UiParams, SimState, draw_params_panel};
 use ui::panels::stats_panel::{SimStats, draw_stats_panel};
 use ui::panels::status_bar::draw_status_bar;
 use ui::panels::history_panel::{HistoryState, draw_history_panel};
+use ui::panels::validation_panel::{ValidationData, draw_validation_panel};
 use ui::components::time_series::{TimeSeriesData, draw_time_series};
 use ui::components::depinning_curve::{DepinningCurveData, draw_depinning_curve};
 use utils::presets::PresetsState;
@@ -2218,6 +2219,7 @@ struct State {
     depinning_curve: DepinningCurveData,
     history_state: HistoryState,
     presets_state: PresetsState,
+    validation_data: ValidationData,
     // Animation
     run_button_pulse: PulseAnimation,
     // Performance tracking
@@ -2750,6 +2752,7 @@ impl State {
             depinning_curve: DepinningCurveData::default(),
             history_state: HistoryState::default(),
             presets_state: PresetsState::default(),
+            validation_data: ValidationData::default(),
             run_button_pulse: PulseAnimation::new(1.5),
             last_fps_update: Instant::now(),
             frames_since_update: 0,
@@ -3042,6 +3045,34 @@ impl State {
             // 更新时间序列数据
             self.time_series.push(vort - anti, energy_density);
 
+            // 更新验证数据 - 只使用正涡旋位置进行晶格验证
+            let vortex_positions: Vec<(f32, f32)> = detection.cells.iter()
+                .filter(|c| c.sign > 0)  // 只取正涡旋
+                .map(|c| (c.x as f32, c.y as f32))
+                .collect();
+            let defect_count = defect_count_effective(
+                self.run_config.defect_mode,
+                self.run_config.defect_count,
+                self.run_config.defect_spacing,
+                self.run_config.nx,
+                self.run_config.ny,
+            );
+            self.validation_data.update(
+                &vortex_positions,
+                self.run_config.flux_n,  // 目标涡旋数（用于理论间距）
+                vort,                     // 实际正涡旋数（用于 Matching Field）
+                defect_count as i32,
+                self.run_config.nx,
+                self.run_config.ny,
+                energy_density,
+                self.step_count,
+            );
+
+            // 从 depinning 曲线更新 β 指数
+            if let Some(fit) = &self.depinning_curve.power_law_fit {
+                self.validation_data.update_beta(fit.beta, fit.r_squared);
+            }
+
             if let Some(file) = self.positions_csv.as_mut() {
                 for cell in &detection.cells {
                     writeln!(
@@ -3156,6 +3187,8 @@ impl State {
                             .show(ui, |ui| {
                                 draw_depinning_curve(ui, &self.depinning_curve);
                             });
+                        ui.separator();
+                        draw_validation_panel(ui, &mut self.validation_data);
                     });
                 });
 

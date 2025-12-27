@@ -8,7 +8,17 @@
       "WebFetch(domain:journals.aps.org)",
       "mcp__exa__web_search_exa",
       "Bash(git commit:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(mkdir:*)",
+      "Bash(taskkill:*)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:www.cmt.ua.ac.be)",
+      "WebFetch(domain:www.nature.com)",
+      "WebFetch(domain:www.pnas.org)",
+      "mcp__mcp-deepwiki__deepwiki_fetch",
+      "Skill(BMad:agents:po)",
+      "Skill(collaborating-with-codex)",
+      "Skill(collaborating-with-gemini)"
     ]
   }
 }
