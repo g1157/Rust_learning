@@ -25,16 +25,19 @@ mod battle_draft;
 mod bullet;
 mod chain_lightning;
 mod collision;
+mod collision_handler;  // 新增：碰撞处理模块
 mod constants;
 mod dash_trail;
 mod duel;
 mod effects;
 mod font;
 mod game;
+mod game_loop;           // 新增：游戏循环辅助模块
 mod game_state;
 mod input;
 mod interpolation;
 mod network;
+mod online_handler;      // 新增：在线模式处理模块
 mod particle;
 mod performance;
 mod player;
@@ -44,15 +47,20 @@ mod render;
 mod roguelike;
 mod score;
 mod ship;
+mod skill_system;        // 新增：技能系统模块
 mod sound;
 mod storage;
 mod tutorial;
 mod ufo;
 mod ui;
 mod ui_achievements;
+mod ui_common;           // 新增：UI通用组件模块
+mod ui_hud;              // 新增：HUD组件模块
+mod ui_menu;             // 新增：菜单UI模块
 mod utils;
 mod vortex;
 mod wasm_input;
+mod weapon_system;       // 新增：武器系统模块
 
 use achievement::{AchievementId, AchievementManager};
 use asteroid::{Asteroid, spawn_wave_with_speed};
