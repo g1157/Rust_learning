@@ -626,20 +626,48 @@ pub fn draw_mode_selection(
     // 可用于卡片的高度
     let available_height = sh - title_area_height - hint_area_height;
 
+    // Section header 布局参数
+    let section_header_height = 28.0 * scale;
+    let section_gap = 12.0 * scale;
+    let num_sections = 3.0;
+    let total_section_overhead = section_header_height * num_sections + section_gap * (num_sections - 1.0);
+
     // 卡片尺寸响应式计算
     let num_cards = 7.0;
-    let base_spacing = 10.0 * scale;
+    let base_spacing = 8.0 * scale;
     let total_spacing = base_spacing * (num_cards - 1.0);
-    // 卡片高度 = (可用高度 - 间距总和) / 卡片数
-    let card_height = ((available_height - total_spacing) / num_cards).clamp(60.0, 120.0);
+    // 卡片高度 = (可用高度 - 间距总和 - section overhead) / 卡片数
+    let card_height = ((available_height - total_spacing - total_section_overhead) / num_cards).clamp(50.0, 100.0);
     // 卡片宽度：小屏用更多宽度，大屏限制最大宽度
     let card_width = (sw * 0.75).min(800.0).max(sw * 0.5);
     let spacing = base_spacing;
 
     // 重新计算实际总高度并居中
-    let total_height = card_height * num_cards + spacing * (num_cards - 1.0);
+    let total_height = card_height * num_cards + spacing * (num_cards - 1.0) + total_section_overhead;
     let start_y = title_area_height + (available_height - total_height) / 2.0;
     let card_x = (sw - card_width) / 2.0;
+
+    // Section Y 坐标计算
+    let game_modes_header_y = start_y;
+    let game_modes_cards_start_y = game_modes_header_y + section_header_height;
+
+    let progress_header_y = game_modes_cards_start_y + (card_height + spacing) * 5.0 + section_gap;
+    let progress_cards_start_y = progress_header_y + section_header_height;
+
+    let system_header_y = progress_cards_start_y + (card_height + spacing) * 1.0 + section_gap;
+    let system_cards_start_y = system_header_y + section_header_height;
+
+    // Section 颜色定义
+    let game_modes_color = Color::new(0.30, 0.60, 0.95, 1.0);  // 宇宙蓝
+    let progress_color = Color::new(1.0, 0.84, 0.0, 1.0);       // 金色
+    let system_color = Color::new(0.30, 0.85, 0.45, 1.0);       // 翡翠绿
+
+    // 判断各 section 是否激活
+    let game_modes_active = matches!(selection,
+        GameMode::Survival | GameMode::Duel | GameMode::TimeAttack |
+        GameMode::Roguelike | GameMode::Online);
+    let progress_active = matches!(selection, GameMode::Achievements);
+    let system_active = matches!(selection, GameMode::Settings);
 
     // === 边缘暗角效果（突出星空深度）===
     let vignette_alpha = 0.35;
@@ -753,6 +781,11 @@ pub fn draw_mode_selection(
 
     // 卡片布局已在上方响应式计算
 
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 1: GAME MODES
+    // ═══════════════════════════════════════════════════════════════
+    draw_section_header("GAME MODES", game_modes_header_y, card_width, card_x, game_modes_color, game_modes_active, scale, font);
+
     // Survival 卡片 - 显示玩家数量
     let survival_desc = match settings.player_count {
         crate::PlayerCount::One => "Solo challenge - survive as long as you can alone!",
@@ -770,7 +803,7 @@ pub fn draw_mode_selection(
     };
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y,
+        y: game_modes_cards_start_y,
         width: card_width,
         height: card_height,
         title: "Survival",
@@ -786,7 +819,7 @@ pub fn draw_mode_selection(
     // Duel 卡片
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing),
+        y: game_modes_cards_start_y + (card_height + spacing),
         width: card_width,
         height: card_height,
         title: "Duel",
@@ -806,7 +839,7 @@ pub fn draw_mode_selection(
     );
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 2.,
+        y: game_modes_cards_start_y + (card_height + spacing) * 2.,
         width: card_width,
         height: card_height,
         title: "Time Attack",
@@ -822,7 +855,7 @@ pub fn draw_mode_selection(
     // Roguelike 卡片
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 3.,
+        y: game_modes_cards_start_y + (card_height + spacing) * 3.,
         width: card_width,
         height: card_height,
         title: "Roguelike",
@@ -858,7 +891,7 @@ pub fn draw_mode_selection(
         };
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 4.,
+        y: game_modes_cards_start_y + (card_height + spacing) * 4.,
         width: card_width,
         height: card_height,
         title: online_title,
@@ -871,12 +904,17 @@ pub fn draw_mode_selection(
         scale,
     });
 
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 2: PROGRESS
+    // ═══════════════════════════════════════════════════════════════
+    draw_section_header("PROGRESS", progress_header_y, card_width, card_x, progress_color, progress_active, scale, font);
+
     // Achievements 卡片
     let (unlocked, total) = achievements.get_stats();
     let achievements_summary = format!("Unlocked: {} / {} achievements", unlocked, total);
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 5.,
+        y: progress_cards_start_y,
         width: card_width,
         height: card_height,
         title: "Achievements",
@@ -889,6 +927,11 @@ pub fn draw_mode_selection(
         scale,
     });
 
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 3: SYSTEM
+    // ═══════════════════════════════════════════════════════════════
+    draw_section_header("SYSTEM", system_header_y, card_width, card_x, system_color, system_active, scale, font);
+
     // Settings 卡片
     let settings_summary = format!(
         "Lives: {} | Ship: {:.1}x | Asteroids: {:.1}x",
@@ -896,7 +939,7 @@ pub fn draw_mode_selection(
     );
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 6.,
+        y: system_cards_start_y,
         width: card_width,
         height: card_height,
         title: "Settings",
@@ -934,6 +977,102 @@ pub fn draw_mode_selection(
             hint_size as f32,
             Color::new(0.65, 0.7, 0.8, 1.0),
         );
+    }
+}
+
+/// 绘制分区标题（带渐变分隔线）
+fn draw_section_header(
+    text: &str,
+    y: f32,
+    card_width: f32,
+    card_x: f32,
+    color: Color,
+    is_active: bool,
+    scale: f32,
+    font: Option<&Font>,
+) {
+    let header_size = ((16.0 * scale) as u16).max(12);
+    let alpha = if is_active { 1.0 } else { 0.7 };
+    let text_color = Color::new(color.r, color.g, color.b, alpha);
+
+    // 测量文字宽度
+    let text_width = if let Some(f) = font {
+        measure_text(text, Some(f), header_size, 1.0).width
+    } else {
+        measure_text(text, None, header_size, 1.0).width
+    };
+
+    let center_x = card_x + card_width / 2.0;
+    let text_x = center_x - text_width / 2.0;
+    let line_y = y + 8.0 * scale;
+
+    // 左侧渐变线
+    let line_padding = 12.0 * scale;
+    let left_line_end = text_x - line_padding;
+    let left_line_start = card_x + 20.0 * scale;
+    let line_length = left_line_end - left_line_start;
+
+    if line_length > 10.0 {
+        let segments = 8;
+        let seg_width = line_length / segments as f32;
+        for i in 0..segments {
+            let t = i as f32 / segments as f32;
+            let seg_alpha = t * 0.5 * alpha;
+            draw_rectangle(
+                left_line_start + i as f32 * seg_width,
+                line_y,
+                seg_width + 0.5,
+                1.5,
+                Color::new(color.r, color.g, color.b, seg_alpha),
+            );
+        }
+    }
+
+    // 右侧渐变线（镜像）
+    let right_line_start = text_x + text_width + line_padding;
+    let right_line_end = card_x + card_width - 20.0 * scale;
+    let right_line_length = right_line_end - right_line_start;
+
+    if right_line_length > 10.0 {
+        let segments = 8;
+        let seg_width = right_line_length / segments as f32;
+        for i in 0..segments {
+            let t = 1.0 - (i as f32 / segments as f32);
+            let seg_alpha = t * 0.5 * alpha;
+            draw_rectangle(
+                right_line_start + i as f32 * seg_width,
+                line_y,
+                seg_width + 0.5,
+                1.5,
+                Color::new(color.r, color.g, color.b, seg_alpha),
+            );
+        }
+    }
+
+    // 菱形装饰符
+    let diamond = "◆";
+    let diamond_spacing = 6.0 * scale;
+    let diamond_size = ((12.0 * scale) as u16).max(10);
+    let diamond_color = Color::new(color.r, color.g, color.b, alpha * 0.6);
+
+    // 绘制标题文字
+    if let Some(f) = font {
+        // 左菱形
+        draw_text_ex(diamond, text_x - diamond_spacing - 10.0 * scale, y + 12.0 * scale, TextParams {
+            font: Some(f), font_size: diamond_size, color: diamond_color, ..Default::default()
+        });
+        // 标题
+        draw_text_ex(text, text_x, y + 12.0 * scale, TextParams {
+            font: Some(f), font_size: header_size, color: text_color, ..Default::default()
+        });
+        // 右菱形
+        draw_text_ex(diamond, text_x + text_width + diamond_spacing, y + 12.0 * scale, TextParams {
+            font: Some(f), font_size: diamond_size, color: diamond_color, ..Default::default()
+        });
+    } else {
+        draw_text(diamond, text_x - diamond_spacing - 10.0 * scale, y + 12.0 * scale, diamond_size as f32, diamond_color);
+        draw_text(text, text_x, y + 12.0 * scale, header_size as f32, text_color);
+        draw_text(diamond, text_x + text_width + diamond_spacing, y + 12.0 * scale, diamond_size as f32, diamond_color);
     }
 }
 

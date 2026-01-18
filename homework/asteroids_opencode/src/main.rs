@@ -1629,11 +1629,9 @@ async fn main() {
 
                 // ESC 返回主菜单
                 if input_state.is_key_pressed(KeyCode::Escape) {
-                    if let Err(err) = network_client.send(network::ClientMessage::LeaveQueue) {
-                        eprintln!("[网络] 离开队列发送失败: {}", err);
-                    }
-                    state = GameState::OnlineLobby {
-                        nickname_input: false,
+                    network_client.disconnect();
+                    state = GameState::ModeSelection {
+                        selection: GameMode::Online,
                     };
                     next_frame().await;
                     continue;
