@@ -28,6 +28,18 @@ pub mod slow_motion {
     pub const LIGHT: (f32, f32) = (1.5, 0.6);
 }
 
+/// Hit stop (freeze frame) effect parameters.
+pub mod hit_stop {
+    /// Duration of hit stop for large asteroid destruction (seconds).
+    pub const LARGE_ASTEROID: f32 = 0.08;
+    /// Duration of hit stop for boss damage (seconds).
+    pub const BOSS_HIT: f32 = 0.05;
+    /// Duration of hit stop for player death (seconds).
+    pub const PLAYER_DEATH: f32 = 0.12;
+    /// Duration of hit stop for chain lightning (seconds).
+    pub const CHAIN_LIGHTNING: f32 = 0.03;
+}
+
 /// Core gameplay tuning: streak bonuses, wave pacing, scoring.
 pub mod gameplay {
     /// Starting asteroid count for wave one.
@@ -116,6 +128,41 @@ pub mod phase_dash {
     pub const TRAIL_SAMPLE_STEP: f32 = 25.0;
     /// 相位半透明 alpha 值（闪现瞬间的透明度）
     pub const PHASE_ALPHA: f32 = 0.4;
+}
+
+/// Flux 能量系统参数
+/// 统一管理 Dash/Phase Dash/Hyperspace 的资源消耗
+pub mod flux {
+    /// 最大 Flux 值
+    pub const MAX: f32 = 100.0;
+    /// 初始 Flux 值
+    pub const INITIAL: f32 = 100.0;
+    /// 每秒自然回复量
+    pub const REGEN_PER_SEC: f32 = 8.0;
+    /// 击杀回复量
+    pub const KILL_REGEN: f32 = 10.0;
+    /// 连击额外回复（每层连击）
+    pub const COMBO_BONUS_REGEN: f32 = 2.0;
+
+    // 技能消耗
+    /// Dash 消耗
+    pub const DASH_COST: f32 = 20.0;
+    /// Phase Dash 消耗
+    pub const PHASE_DASH_COST: f32 = 40.0;
+    /// Hyperspace 消耗
+    pub const HYPERSPACE_COST: f32 = 60.0;
+
+    // 状态阈值
+    /// 高能量阈值（触发增益效果）
+    pub const HIGH_THRESHOLD: f32 = 80.0;
+    /// 低能量阈值（触发减益效果）
+    pub const LOW_THRESHOLD: f32 = 20.0;
+
+    // 状态效果
+    /// 高能量时射速加成
+    pub const HIGH_FIRE_RATE_BONUS: f32 = 0.3;
+    /// 低能量时移动速度惩罚
+    pub const LOW_SPEED_PENALTY: f32 = 0.2;
 }
 
 /// Timing and pacing constants.
@@ -222,11 +269,11 @@ pub mod powerup {
 /// Particle system counts and lifetime ranges.
 pub mod particles {
     /// Maximum particle pool capacity.
-    pub const MAX_PARTICLES: usize = 1000;
+    pub const MAX_PARTICLES: usize = 500;
     /// Base explosion particle count (scaled by asteroid size).
-    pub const EXPLOSION_BASE_COUNT: usize = 20;
+    pub const EXPLOSION_BASE_COUNT: usize = 12;
     /// Thruster particles spawned per frame.
-    pub const THRUSTER_COUNT: usize = 3;
+    pub const THRUSTER_COUNT: usize = 2;
 
     /// Explosion particle size range (min, max).
     pub const EXPLOSION_SIZE_RANGE: (f32, f32) = (1.0, 4.0);

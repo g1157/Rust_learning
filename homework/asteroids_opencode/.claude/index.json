@@ -1,0 +1,131 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-01-17T22:59:10+08:00",
+  "project": {
+    "name": "asteroids_opencode",
+    "type": "rust-game",
+    "edition": "2024",
+    "engine": "macroquad",
+    "version": "0.3.0"
+  },
+  "modules": [
+    {
+      "name": "client",
+      "path": "src/",
+      "language": "rust",
+      "entry_file": "src/main.rs",
+      "test_directory": null,
+      "has_tests": true,
+      "config_files": ["Cargo.toml"],
+      "important_files": [
+        "src/main.rs",
+        "src/player.rs",
+        "src/bullet.rs",
+        "src/network.rs",
+        "src/constants.rs",
+        "src/game_state.rs",
+        "src/roguelike.rs",
+        "src/interpolation.rs"
+      ],
+      "interfaces": {
+        "game_modes": ["Survival", "TimeAttack", "Duel", "Roguelike", "Online"],
+        "weapon_types": ["Normal", "Spread", "Penetrating", "Homing", "ChainIon"],
+        "game_states": ["ModeSelection", "Playing", "Paused", "GameOver", "VictoryPause", "RoguelikeRun"]
+      },
+      "coverage": {
+        "scanned_files": 36,
+        "total_files": 36,
+        "percent": 100
+      }
+    },
+    {
+      "name": "server",
+      "path": "server/",
+      "language": "rust",
+      "entry_file": "server/src/main.rs",
+      "test_directory": null,
+      "has_tests": false,
+      "config_files": ["server/Cargo.toml"],
+      "important_files": [
+        "server/src/main.rs"
+      ],
+      "interfaces": {
+        "client_messages": ["JoinQueue", "LeaveQueue", "GameInput", "Ready", "LeaveRoom", "Ping"],
+        "server_messages": ["Connected", "MatchFound", "GameStart", "GameState", "PlayerDisconnected", "GameOver", "Error", "Pong", "RoomUpdate"]
+      },
+      "coverage": {
+        "scanned_files": 1,
+        "total_files": 1,
+        "percent": 100
+      }
+    },
+    {
+      "name": "web",
+      "path": "web/",
+      "language": "javascript",
+      "entry_file": "web/index.html",
+      "test_directory": null,
+      "has_tests": false,
+      "config_files": [],
+      "important_files": [
+        "web/index.html",
+        "web/mq_js_bundle.js",
+        "web/websocket_client.js",
+        "web/input_handler.js"
+      ],
+      "interfaces": {},
+      "coverage": {
+        "scanned_files": 6,
+        "total_files": 10,
+        "percent": 60
+      }
+    }
+  ],
+  "documentation": {
+    "root_claude_md": "CLAUDE.md",
+    "module_claude_mds": [
+      "server/CLAUDE.md"
+    ],
+    "other_docs": [
+      "README.md",
+      "docs/PHASE_ROADMAP.md",
+      "docs/adr/0001-ecs-choice.md",
+      "docs/adr/0002-network-protocol.md",
+      "docs/perf.md"
+    ]
+  },
+  "coverage_summary": {
+    "estimated_total_files": 47,
+    "scanned_files": 43,
+    "coverage_percent": 91.5,
+    "ignored_patterns": [
+      "target/**",
+      "*.wasm",
+      "*.ttf",
+      "*.ttc",
+      "*.wav",
+      "*.log"
+    ],
+    "skipped_directories": [
+      "target/",
+      "assets/fonts/",
+      "assets/sounds/"
+    ]
+  },
+  "gaps": {
+    "missing_tests": [
+      "server/src/main.rs",
+      "src/roguelike.rs",
+      "src/ui.rs"
+    ],
+    "missing_docs": [],
+    "incomplete_modules": []
+  },
+  "next_steps": [
+    "Add unit tests for server/src/main.rs",
+    "Add integration tests for network protocol",
+    "Consider splitting server/src/main.rs into smaller modules",
+    "Add WASM-specific testing documentation"
+  ],
+  "truncated": false
+}
