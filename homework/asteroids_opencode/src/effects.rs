@@ -78,6 +78,59 @@ impl Default for SlowMotion {
     }
 }
 
+/// 命中停顿系统 (Hit Stop / Freeze Frame)
+/// 在重大打击时短暂冻结游戏，增加打击感
+#[derive(Clone, Copy)]
+pub struct HitStop {
+    active: bool,
+    end_time: f32,
+}
+
+impl HitStop {
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            end_time: 0.0,
+        }
+    }
+
+    /// 触发命中停顿
+    pub fn trigger(&mut self, now: f32, duration: f32) {
+        // 如果已有停顿且剩余时间更长，不覆盖
+        if self.active && self.end_time > now + duration {
+            return;
+        }
+        self.active = true;
+        self.end_time = now + duration;
+    }
+
+    /// 检查是否处于停顿状态
+    pub fn is_frozen(&self, now: f32) -> bool {
+        self.active && now < self.end_time
+    }
+
+    /// 更新并返回时间缩放（0.0 = 完全冻结，1.0 = 正常）
+    pub fn update(&mut self, now: f32) -> f32 {
+        if !self.active {
+            return 1.0;
+        }
+
+        if now >= self.end_time {
+            self.active = false;
+            return 1.0;
+        }
+
+        // 完全冻结
+        0.0
+    }
+}
+
+impl Default for HitStop {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// 屏幕震动系统
 #[derive(Clone, Copy)]
 pub struct ScreenShake {

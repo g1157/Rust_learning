@@ -24,8 +24,11 @@ use crate::utils::wrap_around;
 pub const INVULNERABLE_DURATION: f64 = 3.0; // 秒
 pub const HIT_INVULNERABLE_DURATION: f64 = 1.0; // 秒
 pub const SHIELD_DURATION: f64 = 5.0; // 秒
-pub const SHOOT_COOLDOWN: f64 = 0.5; // 秒
+pub const SHOOT_COOLDOWN: f64 = 0.15; // 秒 (提高射速: 0.5s → 0.15s，约 6-7 发/秒)
 pub const WEAPON_POWERUP_DURATION: f64 = 10.0; // 武器道具持续时间
+
+// 射击后坐力常量
+pub const RECOIL_FORCE: f32 = 15.0; // 后坐力强度（像素/秒）
 
 // 额外生命奖励阈值
 pub const EXTRA_LIFE_THRESHOLD: u32 = 10_000; // 每 10000 分获得一条额外生命
@@ -138,6 +141,8 @@ pub struct Player {
     pub ghost_mode_until: f64,      // 幽灵模式结束时间
     pub overdrive_until: f64,       // 超速模式结束时间
     pub teleport_charge_until: f64, // 传送充能结束时间
+    // Flux 能量系统
+    pub flux: f32, // 当前 Flux 能量值 (0-100)
 }
 
 impl Player {
@@ -193,6 +198,8 @@ impl Player {
             ghost_mode_until: now,
             overdrive_until: now,
             teleport_charge_until: now,
+            // Flux 能量系统
+            flux: crate::constants::flux::INITIAL,
         }
     }
 
@@ -232,6 +239,8 @@ pub fn reset(&mut self, position: Vec2, now: f64, starting_lives: u32) {
         self.hyperspace_cooldown_until = 0.0;
         self.hyperspace_active = false;
         self.hyperspace_appear_at = 0.0;
+        // Flux 能量系统重置
+        self.flux = crate::constants::flux::INITIAL;
     }
 
     /// 增加分数，并在达到阈值时奖励额外生命
@@ -326,6 +335,10 @@ pub fn reset(&mut self, position: Vec2, now: f64, starting_lives: u32) {
 
     pub fn record_shot(&mut self, position: Vec2, direction: Vec2, now: f64) -> u32 {
         self.last_shot = now;
+
+        // 应用射击后坐力：射击方向的反方向推动飞船
+        let recoil_dir = -direction.normalize_or_zero();
+        self.ship.vel += recoil_dir * RECOIL_FORCE;
 
         // 检查武器道具是否过期
         if now >= self.weapon_powerup_until {
@@ -777,6 +790,9 @@ pub fn reset(&mut self, position: Vec2, now: f64, starting_lives: u32) {
 
         self.killstreak += 1;
         self.last_kill_time = time;
+
+        // 击杀回复 Flux 能量
+        self.flux_on_kill();
     }
 
     /// 检查并重置过期的连击
@@ -837,6 +853,62 @@ pub fn reset(&mut self, position: Vec2, now: f64, starting_lives: u32) {
         } else {
             base_turn
         }
+    }
+
+    // ========== Flux 能量系统 ==========
+
+    /// 更新 Flux 能量（每帧调用）
+    pub fn update_flux(&mut self, dt: f32) {
+        use crate::constants::flux;
+        // 自然回复
+        self.flux = (self.flux + flux::REGEN_PER_SEC * dt).min(flux::MAX);
+    }
+
+    /// 消耗 Flux 能量
+    pub fn spend_flux(&mut self, amount: f32) -> bool {
+        if self.flux >= amount {
+            self.flux -= amount;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 击杀时回复 Flux
+    pub fn flux_on_kill(&mut self) {
+        use crate::constants::flux;
+        let bonus = flux::KILL_REGEN + self.killstreak as f32 * flux::COMBO_BONUS_REGEN;
+        self.flux = (self.flux + bonus).min(flux::MAX);
+    }
+
+    /// 检查是否处于高能量状态
+    pub fn is_flux_high(&self) -> bool {
+        self.flux >= crate::constants::flux::HIGH_THRESHOLD
+    }
+
+    /// 检查是否处于低能量状态
+    pub fn is_flux_low(&self) -> bool {
+        self.flux < crate::constants::flux::LOW_THRESHOLD
+    }
+
+    /// 获取 Flux 百分比 (0.0 - 1.0)
+    pub fn flux_percent(&self) -> f32 {
+        self.flux / crate::constants::flux::MAX
+    }
+
+    /// 检查是否有足够 Flux 使用 Dash
+    pub fn can_flux_dash(&self) -> bool {
+        self.flux >= crate::constants::flux::DASH_COST
+    }
+
+    /// 检查是否有足够 Flux 使用 Phase Dash
+    pub fn can_flux_phase_dash(&self) -> bool {
+        self.flux >= crate::constants::flux::PHASE_DASH_COST
+    }
+
+    /// 检查是否有足够 Flux 使用 Hyperspace
+    pub fn can_flux_hyperspace(&self) -> bool {
+        self.flux >= crate::constants::flux::HYPERSPACE_COST
     }
 
     /// 获取连击等级描述

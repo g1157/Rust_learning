@@ -83,6 +83,37 @@ pub fn draw_achievements_screen(
         );
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 进度条 (Progress Bar)
+    // ═══════════════════════════════════════════════════════════════
+    let bar_width = screen_width() * 0.5;
+    let bar_height = 12.0;
+    let bar_x = screen_width() / 2. - bar_width / 2.;
+    let bar_y = 125.0;
+    let fill_ratio = if total > 0 { unlocked as f32 / total as f32 } else { 0.0 };
+
+    // 进度条背景
+    draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::new(0.15, 0.18, 0.25, 0.8));
+    draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, Color::new(0.3, 0.4, 0.5, 0.6));
+
+    // 进度条填充（渐变效果）
+    let fill_width = bar_width * fill_ratio;
+    if fill_width > 0.0 {
+        // 基础填充
+        draw_rectangle(bar_x, bar_y, fill_width, bar_height, Color::new(0.9, 0.7, 0.2, 0.9));
+        // 高光层
+        draw_rectangle(bar_x, bar_y, fill_width, bar_height * 0.4, Color::new(1.0, 0.9, 0.5, 0.3));
+        // 动态光效
+        let pulse = 0.7 + 0.3 * (time * 2.0).sin();
+        draw_rectangle(
+            bar_x + fill_width - 3.0,
+            bar_y,
+            3.0,
+            bar_height,
+            Color::new(1.0, 1.0, 0.8, 0.5 * pulse),
+        );
+    }
+
     // 分类显示（应用滚动偏移）
     let categories = vec![
         AchievementCategory::Beginner,
@@ -105,8 +136,14 @@ pub fn draw_achievements_screen(
             continue;
         }
 
-        // 分类标题
-        draw_category_header(category, panel_x, y_offset, panel_width, font);
+        // 计算该分类的解锁数量
+        let category_unlocked = achievements.iter()
+            .filter(|&&id| manager.get_progress(id).map(|p| p.unlocked).unwrap_or(false))
+            .count();
+        let category_total = achievements.len();
+
+        // 分类标题（带解锁计数）
+        draw_category_header_with_count(category, category_unlocked, category_total, panel_x, y_offset, panel_width, font);
         y_offset += 50.0;
 
         // 成就卡片（每行显示4个）
@@ -155,7 +192,120 @@ pub fn draw_achievements_screen(
     }
 }
 
-/// 绘制分类标题 - 适配深色背景
+/// 绘制分类标题（带解锁计数）- 适配深色背景
+fn draw_category_header_with_count(
+    category: AchievementCategory,
+    unlocked: usize,
+    total: usize,
+    x: f32,
+    y: f32,
+    width: f32,
+    font: Option<&Font>,
+) {
+    let name = category.name();
+    let count_text = format!("({}/{})", unlocked, total);
+    let is_complete = unlocked == total && total > 0;
+
+    // 背景颜色根据完成状态变化
+    let bg_color = if is_complete {
+        Color::new(0.12, 0.18, 0.14, 0.85) // 完成时带绿色调
+    } else {
+        Color::new(0.1, 0.12, 0.18, 0.8)
+    };
+
+    let border_color = if is_complete {
+        Color::new(0.4, 0.8, 0.5, 0.7) // 完成时绿色边框
+    } else {
+        Color::new(0.4, 0.5, 0.7, 0.6)
+    };
+
+    draw_rectangle(x, y, width, 40.0, bg_color);
+    draw_rectangle_lines(x, y, width, 40.0, 1.5, border_color);
+
+    // 分类图标
+    let icon = category_icon(category);
+    draw_text_ex(
+        icon,
+        x + 15.0,
+        y + 28.0,
+        TextParams {
+            font,
+            font_size: 22,
+            color: if is_complete {
+                Color::new(0.5, 0.9, 0.6, 1.0)
+            } else {
+                Color::new(0.6, 0.7, 0.85, 1.0)
+            },
+            ..Default::default()
+        },
+    );
+
+    // 分类名称
+    draw_text_ex(
+        name,
+        x + 45.0,
+        y + 28.0,
+        TextParams {
+            font,
+            font_size: 26,
+            color: Color::new(0.7, 0.8, 0.95, 1.0),
+            ..Default::default()
+        },
+    );
+
+    // 解锁计数
+    let count_color = if is_complete {
+        Color::new(0.5, 0.9, 0.6, 1.0) // 完成时绿色
+    } else if unlocked > 0 {
+        Color::new(0.9, 0.8, 0.4, 1.0) // 部分完成时金色
+    } else {
+        Color::new(0.5, 0.55, 0.65, 0.8) // 未开始时灰色
+    };
+
+    let name_width = measure_text(name, font, 26, 1.0).width;
+    draw_text_ex(
+        &count_text,
+        x + 50.0 + name_width,
+        y + 28.0,
+        TextParams {
+            font,
+            font_size: 20,
+            color: count_color,
+            ..Default::default()
+        },
+    );
+
+    // 完成标记
+    if is_complete {
+        draw_text_ex(
+            "✓",
+            x + width - 35.0,
+            y + 28.0,
+            TextParams {
+                font,
+                font_size: 24,
+                color: Color::new(0.5, 0.9, 0.6, 1.0),
+                ..Default::default()
+            },
+        );
+    }
+}
+
+/// 获取分类图标
+fn category_icon(category: AchievementCategory) -> &'static str {
+    match category {
+        AchievementCategory::Beginner => "🎯",
+        AchievementCategory::Combo => "🔥",
+        AchievementCategory::Survival => "💪",
+        AchievementCategory::Duel => "⚔️",
+        AchievementCategory::Perfectionist => "✨",
+        AchievementCategory::Explorer => "🔍",
+        AchievementCategory::Veteran => "🏆",
+        AchievementCategory::Hidden => "🔮",
+    }
+}
+
+/// 绘制分类标题 - 适配深色背景 (保留原版供兼容)
 fn draw_category_header(
     category: AchievementCategory,
     x: f32,
@@ -179,7 +329,7 @@ fn draw_category_header(
     );
 }
 
-/// 绘制单个成就卡片 - 适配深色背景
+/// 绘制单个成就卡片 - 增强视觉效果
 fn draw_achievement_card(
     manager: &AchievementManager,
     id: AchievementId,
@@ -191,27 +341,84 @@ fn draw_achievement_card(
 ) {
     let achievement = Achievement::get(id);
     let progress = manager.get_progress(id);
-
     let unlocked = progress.map(|p| p.unlocked).unwrap_or(false);
+    let time = macroquad::time::get_time() as f32;
 
-    // 背景颜色 - 深色半透明适配星空背景
-    let bg_color = if unlocked {
-        Color::new(0.12, 0.14, 0.2, 0.92)
+    // ═══════════════════════════════════════════════════════════════
+    // 卡片深度效果
+    // ═══════════════════════════════════════════════════════════════
+
+    if unlocked {
+        // 解锁卡片：外发光效果
+        let tier_color = achievement.tier.color();
+        let glow_pulse = 0.6 + 0.4 * (time * 1.5 + id as u8 as f32 * 0.5).sin();
+
+        // 外发光层
+        for i in 1..=2 {
+            let offset = i as f32 * 2.0;
+            let glow_alpha = 0.08 * glow_pulse / i as f32;
+            draw_rectangle(
+                x - offset,
+                y - offset,
+                width + offset * 2.0,
+                height + offset * 2.0,
+                Color::new(tier_color.r, tier_color.g, tier_color.b, glow_alpha),
+            );
+        }
+
+        // 阴影
+        draw_rectangle(x + 3.0, y + 3.0, width, height, Color::new(0.0, 0.0, 0.0, 0.25));
     } else {
-        Color::new(0.08, 0.1, 0.14, 0.75)
+        // 锁定卡片：轻微阴影
+        draw_rectangle(x + 2.0, y + 2.0, width, height, Color::new(0.0, 0.0, 0.0, 0.15));
+    }
+
+    // 背景颜色 - 解锁卡片更亮
+    let bg_color = if unlocked {
+        Color::new(0.14, 0.16, 0.24, 0.95)
+    } else {
+        Color::new(0.06, 0.08, 0.12, 0.7)
     };
 
-    // 直接绘制矩形，不使用阴影面板
     draw_rectangle(x, y, width, height, bg_color);
+
+    // 解锁卡片顶部高光
+    if unlocked {
+        draw_rectangle(x, y, width, 3.0, Color::new(1.0, 1.0, 1.0, 0.1));
+    }
 
     // 边框（根据等级显示不同颜色）
     let border_color = if unlocked {
         achievement.tier.color()
     } else {
-        Color::new(0.4, 0.45, 0.5, 0.6)
+        Color::new(0.3, 0.35, 0.4, 0.5)
     };
+    let border_width = if unlocked { 2.5 } else { 1.5 };
 
-    draw_rectangle_lines(x, y, width, height, 2.0, border_color);
+    draw_rectangle_lines(x, y, width, height, border_width, border_color);
+
+    // ═══════════════════════════════════════════════════════════════
+    // 锁定标识
+    // ═══════════════════════════════════════════════════════════════
+
+    if !unlocked {
+        // 锁定图标覆盖层
+        draw_rectangle(x, y, width, height, Color::new(0.0, 0.0, 0.0, 0.2));
+
+        // 锁定图标
+        let lock_icon = if achievement.hidden { "🔮" } else { "🔒" };
+        draw_text_ex(
+            lock_icon,
+            x + width - 28.0,
+            y + 24.0,
+            TextParams {
+                font,
+                font_size: 18,
+                color: Color::new(0.5, 0.55, 0.6, 0.8),
+                ..Default::default()
+            },
+        );
+    }
 
     // 图标 - 适配深色背景
     let icon = if achievement.hidden && !unlocked {

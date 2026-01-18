@@ -19,6 +19,7 @@ use crate::background::Starfield;
 use crate::bullet::WeaponType;
 use crate::duel::DuelState;
 use crate::player::Player;
+use crate::theme::{colors, typography, spacing, draw_lives_icons, draw_arc_progress};
 use crate::{GameMode, GameSettings, PauseSelection, SettingOption};
 
 pub enum HudMode {
@@ -26,74 +27,264 @@ pub enum HudMode {
     Active { time: f64 },
 }
 
+/// 极简 HUD：左上角生命+护盾，右上角分数，底部武器指示器
 pub fn draw_players_hud(players: &[Player], mode: HudMode, font: Option<&Font>) {
     for (idx, player) in players.iter().enumerate() {
-        let (status, timer, hud_time) = match mode {
-            HudMode::Waiting => ("READY".to_string(), 0.0, None),
-            HudMode::Active { time } => {
-                let timer = player.survival_time(time);
-                let status = if player.is_invulnerable(time) {
-                    format!("SAFE {:.1}s", player.invulnerability_remaining(time))
-                } else if player.alive {
-                    "ALIVE".to_string()
-                } else {
-                    "DOWN".to_string()
-                };
-                (status, timer, Some(time))
-            }
+        let hud_time = match mode {
+            HudMode::Waiting => None,
+            HudMode::Active { time } => Some(time),
         };
 
-        let shield_text = if let Some(time) = hud_time {
-            if player.shield_active(time) {
-                format!("Shield {:.1}s", player.shield_remaining(time))
-            } else {
-                "Shield --".to_string()
-            }
-        } else {
-            "Shield --".to_string()
-        };
+        let base_y = spacing::MD + idx as f32 * 90.0;
+        let player_color = player.color;
 
-        let weapon_text = match player.weapon_type {
-            WeaponType::Normal => "Normal",
-            WeaponType::Spread => "Spread",
-            WeaponType::Penetrating => "Penetrating",
-            WeaponType::Homing => "Homing",
-            WeaponType::ChainIon => "Chain Ion",
-        };
-
-        let text = format!(
-            "{} | Lives: {} | {} | Weapon: {} | Score: {} | Survival: {:.1}s | Status: {}",
-            player.label,
-            player.lives,
-            shield_text,
-            weapon_text,
-            player.score.value(),
-            timer,
-            status
-        );
-        let y = 32. + idx as f32 * 36.;
-        let panel_width = screen_width() * 0.55;
-        let panel_color = Color::new(1.0, 1.0, 1.0, 0.35);
-        draw_rectangle(12., y - 26., panel_width, 34., panel_color);
-        draw_rectangle_lines(
-            12.,
-            y - 26.,
-            panel_width,
-            34.,
-            1.5,
-            Color::new(1.0, 1.0, 1.0, 0.45),
-        );
+        // === 左上角：玩家标签 + 生命图标 ===
         draw_text_ex(
-            &text,
-            20.,
-            y,
+            &player.label,
+            spacing::MD,
+            base_y + 16.0,
             TextParams {
-                font_size: 24,
-                color: player.color,
+                font_size: typography::BODY_SM,
+                color: colors::TEXT_SECONDARY,
                 font,
                 ..Default::default()
             },
         );
+
+        // 生命图标（三角形飞船）
+        draw_lives_icons(
+            spacing::MD,
+            base_y + 24.0,
+            player.lives,
+            5,
+            player_color,
+        );
+
+        // === 护盾弧形进度条（围绕生命区域）===
+        if let Some(time) = hud_time {
+            if player.shield_active(time) {
+                let shield_progress = (player.shield_remaining(time) / 10.0) as f32;
+                draw_arc_progress(
+                    spacing::MD + 45.0,
+                    base_y + 32.0,
+                    28.0,
+                    3.0,
+                    shield_progress,
+                    colors::BG_PANEL,
+                    colors::SHIELD_ACTIVE,
+                );
+            }
+        }
+
+        // === 右上角：分数（大字体醒目显示）===
+        let score_text = format!("{}", player.score.value());
+        let score_width = measure_text(&score_text, font, typography::TITLE_MD, 1.0).width;
+        draw_text_ex(
+            &score_text,
+            screen_width() - score_width - spacing::LG - idx as f32 * 200.0,
+            base_y + 28.0,
+            TextParams {
+                font_size: typography::TITLE_MD,
+                color: player_color,
+                font,
+                ..Default::default()
+            },
+        );
+
+        // 分数标签
+        draw_text_ex(
+            "SCORE",
+            screen_width() - score_width - spacing::LG - idx as f32 * 200.0,
+            base_y + 8.0,
+            TextParams {
+                font_size: typography::CAPTION,
+                color: colors::TEXT_MUTED,
+                font,
+                ..Default::default()
+            },
+        );
+
+        // === 状态指示器（无敌/死亡）===
+        if let Some(time) = hud_time {
+            let status_text = if player.is_invulnerable(time) {
+                Some(("SAFE", colors::INVULNERABLE))
+            } else if !player.alive {
+                Some(("DOWN", colors::DANGER))
+            } else {
+                None
+            };
+
+            if let Some((text, color)) = status_text {
+                let pulse = 0.6 + 0.4 * (time as f32 * 4.0).sin().abs();
+                draw_text_ex(
+                    text,
+                    spacing::MD + 100.0,
+                    base_y + 16.0,
+                    TextParams {
+                        font_size: typography::BODY_SM,
+                        color: Color::new(color.r, color.g, color.b, pulse),
+                        font,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        // === 武器指示器（底部中央）===
+        let weapon_icon = match player.weapon_type {
+            WeaponType::Normal => "●",
+            WeaponType::Spread => "◆◆◆",
+            WeaponType::Penetrating => "▶▶",
+            WeaponType::Homing => "◎",
+            WeaponType::ChainIon => "⚡",
+        };
+        let weapon_name = match player.weapon_type {
+            WeaponType::Normal => "NORMAL",
+            WeaponType::Spread => "SPREAD",
+            WeaponType::Penetrating => "PIERCE",
+            WeaponType::Homing => "HOMING",
+            WeaponType::ChainIon => "CHAIN",
+        };
+
+        if idx == 0 {
+            let weapon_y = screen_height() - spacing::LG;
+            let icon_width = measure_text(weapon_icon, font, typography::BODY_LG, 1.0).width;
+            let name_width = measure_text(weapon_name, font, typography::CAPTION, 1.0).width;
+
+            draw_text_ex(
+                weapon_icon,
+                screen_width() / 2.0 - icon_width / 2.0,
+                weapon_y - 12.0,
+                TextParams {
+                    font_size: typography::BODY_LG,
+                    color: player_color,
+                    font,
+                    ..Default::default()
+                },
+            );
+            draw_text_ex(
+                weapon_name,
+                screen_width() / 2.0 - name_width / 2.0,
+                weapon_y + 4.0,
+                TextParams {
+                    font_size: typography::CAPTION,
+                    color: colors::TEXT_MUTED,
+                    font,
+                    ..Default::default()
+                },
+            );
+        }
+
+        // === 生存时间（紧凑显示在分数下方）===
+        if let Some(time) = hud_time {
+            let survival = player.survival_time(time);
+            let survival_text = format!("{:.1}s", survival);
+            let survival_width = measure_text(&survival_text, font, typography::BODY_SM, 1.0).width;
+            draw_text_ex(
+                &survival_text,
+                screen_width() - survival_width - spacing::LG - idx as f32 * 200.0,
+                base_y + 48.0,
+                TextParams {
+                    font_size: typography::BODY_SM,
+                    color: colors::TEXT_SECONDARY,
+                    font,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+}
+
+/// 绘制 Flux 能量条
+pub fn draw_flux_bar(players: &[Player], font: Option<&Font>) {
+    use crate::constants::flux;
+
+    for (idx, player) in players.iter().enumerate() {
+        if !player.alive {
+            continue;
+        }
+
+        // Flux 条位置（在玩家 HUD 下方）
+        let bar_x = 20.0;
+        let bar_y = 70.0 + idx as f32 * 80.0;
+        let bar_width = 150.0;
+        let bar_height = 12.0;
+
+        // 背景
+        draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::new(0.2, 0.2, 0.2, 0.8));
+
+        // Flux 填充
+        let fill_width = bar_width * player.flux_percent();
+        let flux_color = if player.is_flux_high() {
+            Color::new(0.2, 0.9, 1.0, 1.0) // 高能量：青色
+        } else if player.is_flux_low() {
+            Color::new(1.0, 0.3, 0.2, 1.0) // 低能量：红色
+        } else {
+            Color::new(0.4, 0.7, 1.0, 1.0) // 正常：蓝色
+        };
+        draw_rectangle(bar_x, bar_y, fill_width, bar_height, flux_color);
+
+        // 边框
+        draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.5, WHITE);
+
+        // 阈值标记
+        let high_x = bar_x + bar_width * (flux::HIGH_THRESHOLD / flux::MAX);
+        let low_x = bar_x + bar_width * (flux::LOW_THRESHOLD / flux::MAX);
+        draw_line(high_x, bar_y, high_x, bar_y + bar_height, 1.0, Color::new(0.2, 0.9, 1.0, 0.5));
+        draw_line(low_x, bar_y, low_x, bar_y + bar_height, 1.0, Color::new(1.0, 0.3, 0.2, 0.5));
+
+        // 标签
+        draw_text_ex(
+            "FLUX",
+            bar_x,
+            bar_y - 2.0,
+            TextParams {
+                font_size: 12,
+                color: flux_color,
+                font,
+                ..Default::default()
+            },
+        );
+
+        // 数值
+        draw_text_ex(
+            &format!("{:.0}", player.flux),
+            bar_x + bar_width + 5.0,
+            bar_y + 10.0,
+            TextParams {
+                font_size: 12,
+                color: flux_color,
+                font,
+                ..Default::default()
+            },
+        );
+
+        // 状态提示
+        if player.is_flux_high() {
+            draw_text_ex(
+                "HIGH",
+                bar_x + bar_width - 30.0,
+                bar_y - 2.0,
+                TextParams {
+                    font_size: 10,
+                    color: Color::new(0.2, 0.9, 1.0, 1.0),
+                    font,
+                    ..Default::default()
+                },
+            );
+        } else if player.is_flux_low() {
+            draw_text_ex(
+                "LOW!",
+                bar_x + bar_width - 25.0,
+                bar_y - 2.0,
+                TextParams {
+                    font_size: 10,
+                    color: Color::new(1.0, 0.3, 0.2, 1.0),
+                    font,
+                    ..Default::default()
+                },
+            );
+        }
     }
 }
 
@@ -417,63 +608,183 @@ pub fn draw_mode_selection(
     // 绘制星空背景
     starfield.draw(time);
 
+    // === 响应式布局计算 ===
+    let sw = screen_width();
+    let sh = screen_height();
+    // 基准分辨率 1024x768，缩放因子范围 0.6~1.5
+    let scale = (sw / 1024.0).min(sh / 768.0).clamp(0.6, 1.5);
+
+    // 字体大小响应式
+    let title_size = ((48.0 * scale) as u16).max(28);
+    let subtitle_size = ((24.0 * scale) as u16).max(14);
+    let hint_size = ((26.0 * scale) as u16).max(16);
+
+    // 标题区域高度（确保小屏不遮挡）
+    let title_area_height = 140.0 * scale;
+    // 底部提示区域高度
+    let hint_area_height = 60.0 * scale;
+    // 可用于卡片的高度
+    let available_height = sh - title_area_height - hint_area_height;
+
+    // Section header 布局参数
+    let section_header_height = 28.0 * scale;
+    let section_gap = 12.0 * scale;
+    let num_sections = 3.0;
+    let total_section_overhead = section_header_height * num_sections + section_gap * (num_sections - 1.0);
+
+    // 卡片尺寸响应式计算
+    let num_cards = 7.0;
+    let base_spacing = 8.0 * scale;
+    let total_spacing = base_spacing * (num_cards - 1.0);
+    // 卡片高度 = (可用高度 - 间距总和 - section overhead) / 卡片数
+    let card_height = ((available_height - total_spacing - total_section_overhead) / num_cards).clamp(50.0, 100.0);
+    // 卡片宽度：小屏用更多宽度，大屏限制最大宽度
+    let card_width = (sw * 0.75).min(800.0).max(sw * 0.5);
+    let spacing = base_spacing;
+
+    // 重新计算实际总高度并居中
+    let total_height = card_height * num_cards + spacing * (num_cards - 1.0) + total_section_overhead;
+    let start_y = title_area_height + (available_height - total_height) / 2.0;
+    let card_x = (sw - card_width) / 2.0;
+
+    // Section Y 坐标计算
+    let game_modes_header_y = start_y;
+    let game_modes_cards_start_y = game_modes_header_y + section_header_height;
+
+    let progress_header_y = game_modes_cards_start_y + (card_height + spacing) * 5.0 + section_gap;
+    let progress_cards_start_y = progress_header_y + section_header_height;
+
+    let system_header_y = progress_cards_start_y + (card_height + spacing) * 1.0 + section_gap;
+    let system_cards_start_y = system_header_y + section_header_height;
+
+    // Section 颜色定义
+    let game_modes_color = Color::new(0.30, 0.60, 0.95, 1.0);  // 宇宙蓝
+    let progress_color = Color::new(1.0, 0.84, 0.0, 1.0);       // 金色
+    let system_color = Color::new(0.30, 0.85, 0.45, 1.0);       // 翡翠绿
+
+    // 判断各 section 是否激活
+    let game_modes_active = matches!(selection,
+        GameMode::Survival | GameMode::Duel | GameMode::TimeAttack |
+        GameMode::Roguelike | GameMode::Online);
+    let progress_active = matches!(selection, GameMode::Achievements);
+    let system_active = matches!(selection, GameMode::Settings);
+
+    // === 边缘暗角效果（突出星空深度）===
+    let vignette_alpha = 0.35;
+    // 顶部渐变
+    for i in 0..4 {
+        let h = 25.0 - i as f32 * 5.0;
+        let a = vignette_alpha * (1.0 - i as f32 * 0.25);
+        draw_rectangle(0.0, i as f32 * 25.0, screen_width(), h, Color::new(0.0, 0.0, 0.02, a));
+    }
+    // 底部渐变
+    for i in 0..4 {
+        let h = 25.0 - i as f32 * 5.0;
+        let a = vignette_alpha * (1.0 - i as f32 * 0.25);
+        draw_rectangle(0.0, screen_height() - (i + 1) as f32 * 25.0, screen_width(), h, Color::new(0.0, 0.0, 0.02, a));
+    }
+
     let title = "Choose Your Adventure";
     let subtitle = "Press [M] later to revisit this screen";
-    let title_size = 48;
-    let subtitle_size = 24;
+    // title_size, subtitle_size 已在上面响应式计算
 
-    // 使用自定义字体绘制标题（亮色适配深色背景）
+    // 标题Y位置响应式
+    let title_y = 50.0 * scale + title_size as f32;
+    let subtitle_y = title_y + 45.0 * scale;
+
+    // === 标题发光效果（与星空呼应）===
+    let title_pulse = 0.85 + 0.15 * (time * 1.2).sin();
+
     if let Some(f) = font {
         let title_dims = measure_text(title, Some(f), title_size, 1.0);
+        let title_x = sw / 2. - title_dims.width / 2.;
+
+        // 标题发光层（模拟星光）
         draw_text_ex(
             title,
-            screen_width() / 2. - title_dims.width / 2.,
-            70.,
+            title_x + 2.0,
+            title_y + 2.0,
             TextParams {
                 font: Some(f),
                 font_size: title_size,
-                color: Color::new(0.9, 0.92, 0.98, 1.0),
+                color: Color::new(0.3, 0.5, 0.9, 0.25 * title_pulse),
                 ..Default::default()
             },
         );
+        // 标题阴影
+        draw_text_ex(
+            title,
+            title_x + 1.0,
+            title_y + 1.0,
+            TextParams {
+                font: Some(f),
+                font_size: title_size,
+                color: Color::new(0.0, 0.0, 0.0, 0.35),
+                ..Default::default()
+            },
+        );
+        // 标题主体
+        draw_text_ex(
+            title,
+            title_x,
+            title_y,
+            TextParams {
+                font: Some(f),
+                font_size: title_size,
+                color: Color::new(0.92 * title_pulse, 0.94 * title_pulse, 0.98, 1.0),
+                ..Default::default()
+            },
+        );
+
         let subtitle_dims = measure_text(subtitle, Some(f), subtitle_size, 1.0);
         draw_text_ex(
             subtitle,
-            screen_width() / 2. - subtitle_dims.width / 2.,
-            115.,
+            sw / 2. - subtitle_dims.width / 2.,
+            subtitle_y,
             TextParams {
                 font: Some(f),
                 font_size: subtitle_size,
-                color: Color::new(0.6, 0.65, 0.75, 1.0),
+                color: Color::new(0.55, 0.60, 0.72, 0.9),
                 ..Default::default()
             },
         );
     } else {
         let title_width = measure_text(title, None, title_size, 1.0).width;
+        let title_x = sw / 2. - title_width / 2.;
+
+        // 发光层
         draw_text(
             title,
-            screen_width() / 2. - title_width / 2.,
-            70.,
+            title_x + 2.0,
+            title_y + 2.0,
             title_size as f32,
-            Color::new(0.9, 0.92, 0.98, 1.0),
+            Color::new(0.3, 0.5, 0.9, 0.25 * title_pulse),
         );
+        // 主体
+        draw_text(
+            title,
+            title_x,
+            title_y,
+            title_size as f32,
+            Color::new(0.92 * title_pulse, 0.94 * title_pulse, 0.98, 1.0),
+        );
+
         let subtitle_width = measure_text(subtitle, None, subtitle_size, 1.0).width;
         draw_text(
             subtitle,
-            screen_width() / 2. - subtitle_width / 2.,
-            115.,
+            sw / 2. - subtitle_width / 2.,
+            subtitle_y,
             subtitle_size as f32,
-            Color::new(0.6, 0.65, 0.75, 1.0),
+            Color::new(0.55, 0.60, 0.72, 0.9),
         );
     }
 
-    // 7个卡片纵向排列（含 Roguelike）
-    let card_width = screen_width() * 0.65;
-    let card_height = 100.; // 减小卡片高度以容纳7个
-    let spacing = 10.;
-    let total_height = card_height * 7. + spacing * 6.; // 7个卡片
-    let start_y = (screen_height() - total_height) / 2. + 20.;
-    let card_x = screen_width() / 2. - card_width / 2.;
+    // 卡片布局已在上方响应式计算
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 1: GAME MODES
+    // ═══════════════════════════════════════════════════════════════
+    draw_section_header("GAME MODES", game_modes_header_y, card_width, card_x, game_modes_color, game_modes_active, scale, font);
 
     // Survival 卡片 - 显示玩家数量
     let survival_desc = match settings.player_count {
@@ -492,7 +803,7 @@ pub fn draw_mode_selection(
     };
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y,
+        y: game_modes_cards_start_y,
         width: card_width,
         height: card_height,
         title: "Survival",
@@ -502,12 +813,13 @@ pub fn draw_mode_selection(
         accent: BLUE,
         footer: "[Enter] Start",
         font,
+        scale,
     });
 
     // Duel 卡片
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing),
+        y: game_modes_cards_start_y + (card_height + spacing),
         width: card_width,
         height: card_height,
         title: "Duel",
@@ -517,6 +829,7 @@ pub fn draw_mode_selection(
         accent: RED,
         footer: "[Enter] Start",
         font,
+        scale,
     });
 
     // TimeAttack 卡片
@@ -526,7 +839,7 @@ pub fn draw_mode_selection(
     );
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 2.,
+        y: game_modes_cards_start_y + (card_height + spacing) * 2.,
         width: card_width,
         height: card_height,
         title: "Time Attack",
@@ -536,12 +849,13 @@ pub fn draw_mode_selection(
         accent: Color::new(1.0, 0.5, 0.0, 1.0), // 橙色
         footer: "[Enter] Start",
         font,
+        scale,
     });
 
     // Roguelike 卡片
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 3.,
+        y: game_modes_cards_start_y + (card_height + spacing) * 3.,
         width: card_width,
         height: card_height,
         title: "Roguelike",
@@ -551,6 +865,7 @@ pub fn draw_mode_selection(
         accent: Color::new(0.8, 0.2, 0.6, 1.0), // 品红色
         footer: "[Enter] Start Run",
         font,
+        scale,
     });
 
     // Online 卡片 (disabled on WASM)
@@ -576,7 +891,7 @@ pub fn draw_mode_selection(
         };
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 4.,
+        y: game_modes_cards_start_y + (card_height + spacing) * 4.,
         width: card_width,
         height: card_height,
         title: online_title,
@@ -586,14 +901,20 @@ pub fn draw_mode_selection(
         accent: online_accent,
         footer: online_footer,
         font,
+        scale,
     });
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 2: PROGRESS
+    // ═══════════════════════════════════════════════════════════════
+    draw_section_header("PROGRESS", progress_header_y, card_width, card_x, progress_color, progress_active, scale, font);
 
     // Achievements 卡片
     let (unlocked, total) = achievements.get_stats();
     let achievements_summary = format!("Unlocked: {} / {} achievements", unlocked, total);
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 5.,
+        y: progress_cards_start_y,
         width: card_width,
         height: card_height,
         title: "Achievements",
@@ -603,7 +924,13 @@ pub fn draw_mode_selection(
         accent: Color::new(0.9, 0.7, 0.2, 1.0), // 金色
         footer: "[Enter] View",
         font,
+        scale,
     });
+
+    // ═══════════════════════════════════════════════════════════════
+    // SECTION 3: SYSTEM
+    // ═══════════════════════════════════════════════════════════════
+    draw_section_header("SYSTEM", system_header_y, card_width, card_x, system_color, system_active, scale, font);
 
     // Settings 卡片
     let settings_summary = format!(
@@ -612,7 +939,7 @@ pub fn draw_mode_selection(
     );
     draw_mode_card(ModeCardParams {
         x: card_x,
-        y: start_y + (card_height + spacing) * 6.,
+        y: system_cards_start_y,
         width: card_width,
         height: card_height,
         title: "Settings",
@@ -622,32 +949,130 @@ pub fn draw_mode_selection(
         accent: Color::new(0.3, 0.7, 0.3, 1.0), // 绿色
         footer: "[Enter] Configure",
         font,
+        scale,
     });
 
-    // 底部提示使用自定义字体（亮色）
+    // 底部提示使用响应式字体（亮色）
     let hint = "[Up/Down W/S] Select  |  [Enter Space] Confirm";
+    let hint_y = sh - 30.0 * scale;
     if let Some(f) = font {
-        let hint_dims = measure_text(hint, Some(f), 26, 1.0);
+        let hint_dims = measure_text(hint, Some(f), hint_size, 1.0);
         draw_text_ex(
             hint,
-            screen_width() / 2. - hint_dims.width / 2.,
-            screen_height() - 50.,
+            sw / 2. - hint_dims.width / 2.,
+            hint_y,
             TextParams {
                 font: Some(f),
-                font_size: 26,
+                font_size: hint_size,
                 color: Color::new(0.65, 0.7, 0.8, 1.0),
                 ..Default::default()
             },
         );
     } else {
-        let hint_width = measure_text(hint, None, 26, 1.0).width;
+        let hint_width = measure_text(hint, None, hint_size, 1.0).width;
         draw_text(
             hint,
-            screen_width() / 2. - hint_width / 2.,
-            screen_height() - 50.,
-            26.,
+            sw / 2. - hint_width / 2.,
+            hint_y,
+            hint_size as f32,
             Color::new(0.65, 0.7, 0.8, 1.0),
         );
+    }
+}
+
+/// 绘制分区标题（带渐变分隔线）
+fn draw_section_header(
+    text: &str,
+    y: f32,
+    card_width: f32,
+    card_x: f32,
+    color: Color,
+    is_active: bool,
+    scale: f32,
+    font: Option<&Font>,
+) {
+    let header_size = ((16.0 * scale) as u16).max(12);
+    let alpha = if is_active { 1.0 } else { 0.7 };
+    let text_color = Color::new(color.r, color.g, color.b, alpha);
+
+    // 测量文字宽度
+    let text_width = if let Some(f) = font {
+        measure_text(text, Some(f), header_size, 1.0).width
+    } else {
+        measure_text(text, None, header_size, 1.0).width
+    };
+
+    let center_x = card_x + card_width / 2.0;
+    let text_x = center_x - text_width / 2.0;
+    let line_y = y + 8.0 * scale;
+
+    // 左侧渐变线
+    let line_padding = 12.0 * scale;
+    let left_line_end = text_x - line_padding;
+    let left_line_start = card_x + 20.0 * scale;
+    let line_length = left_line_end - left_line_start;
+
+    if line_length > 10.0 {
+        let segments = 8;
+        let seg_width = line_length / segments as f32;
+        for i in 0..segments {
+            let t = i as f32 / segments as f32;
+            let seg_alpha = t * 0.5 * alpha;
+            draw_rectangle(
+                left_line_start + i as f32 * seg_width,
+                line_y,
+                seg_width + 0.5,
+                1.5,
+                Color::new(color.r, color.g, color.b, seg_alpha),
+            );
+        }
+    }
+
+    // 右侧渐变线（镜像）
+    let right_line_start = text_x + text_width + line_padding;
+    let right_line_end = card_x + card_width - 20.0 * scale;
+    let right_line_length = right_line_end - right_line_start;
+
+    if right_line_length > 10.0 {
+        let segments = 8;
+        let seg_width = right_line_length / segments as f32;
+        for i in 0..segments {
+            let t = 1.0 - (i as f32 / segments as f32);
+            let seg_alpha = t * 0.5 * alpha;
+            draw_rectangle(
+                right_line_start + i as f32 * seg_width,
+                line_y,
+                seg_width + 0.5,
+                1.5,
+                Color::new(color.r, color.g, color.b, seg_alpha),
+            );
+        }
+    }
+
+    // 菱形装饰符
+    let diamond = "◆";
+    let diamond_spacing = 6.0 * scale;
+    let diamond_size = ((12.0 * scale) as u16).max(10);
+    let diamond_color = Color::new(color.r, color.g, color.b, alpha * 0.6);
+
+    // 绘制标题文字
+    if let Some(f) = font {
+        // 左菱形
+        draw_text_ex(diamond, text_x - diamond_spacing - 10.0 * scale, y + 12.0 * scale, TextParams {
+            font: Some(f), font_size: diamond_size, color: diamond_color, ..Default::default()
+        });
+        // 标题
+        draw_text_ex(text, text_x, y + 12.0 * scale, TextParams {
+            font: Some(f), font_size: header_size, color: text_color, ..Default::default()
+        });
+        // 右菱形
+        draw_text_ex(diamond, text_x + text_width + diamond_spacing, y + 12.0 * scale, TextParams {
+            font: Some(f), font_size: diamond_size, color: diamond_color, ..Default::default()
+        });
+    } else {
+        draw_text(diamond, text_x - diamond_spacing - 10.0 * scale, y + 12.0 * scale, diamond_size as f32, diamond_color);
+        draw_text(text, text_x, y + 12.0 * scale, header_size as f32, text_color);
+        draw_text(diamond, text_x + text_width + diamond_spacing, y + 12.0 * scale, diamond_size as f32, diamond_color);
     }
 }
 
@@ -663,109 +1088,295 @@ struct ModeCardParams<'a> {
     accent: Color,
     footer: &'a str,
     font: Option<&'a Font>,
+    scale: f32, // 响应式缩放因子
 }
 
 fn draw_mode_card(params: ModeCardParams) {
-    // 深色半透明面板适配星空背景
-    let base = if params.active {
-        Color::new(0.1, 0.12, 0.18, 0.92)
-    } else {
-        Color::new(0.08, 0.1, 0.14, 0.85)
-    };
-    let border = if params.active { 4.0 } else { 2.0 };
+    use crate::theme::colors;
 
-    draw_shadow_panel(params.x, params.y, params.width, params.height, base);
-    draw_rectangle_lines(
+    let is_active = params.active;
+    let time = macroquad::time::get_time() as f32;
+    let s = params.scale; // 缩放因子
+
+    // 响应式字体大小
+    let title_font = ((24.0 * s) as u16).max(16);
+    let desc_font = ((15.0 * s) as u16).max(12);
+    let detail_font = ((13.0 * s) as u16).max(10);
+    let footer_font = ((15.0 * s) as u16).max(11);
+
+    // 响应式位置偏移
+    let icon_offset_x = 30.0 * s;
+    let text_offset_x = 65.0 * s;
+    let icon_radius = 16.0 * s;
+    let icon_glow_radius = 22.0 * s;
+
+    // 活跃卡片的浮动动画
+    let float_offset = if is_active {
+        (time * 2.0).sin() * 3.0 * s
+    } else {
+        0.0
+    };
+    let card_y = params.y + float_offset;
+
+    // === 毛玻璃效果 (Glassmorphism) ===
+
+    // 1. 外发光层（模拟玻璃边缘光散射）
+    if is_active {
+        for i in 1..=3 {
+            let offset = i as f32 * 3.0;
+            let glow_alpha = 0.08 / i as f32 * (0.8 + 0.2 * (time * 2.5).sin());
+            draw_rectangle(
+                params.x - offset,
+                card_y - offset,
+                params.width + offset * 2.0,
+                params.height + offset * 2.0,
+                Color::new(params.accent.r, params.accent.g, params.accent.b, glow_alpha),
+            );
+        }
+    }
+
+    // 2. 半透明玻璃背景（让星空透出）
+    let bg_alpha = if is_active { 0.55 } else { 0.40 };
+    let bg_color = if is_active {
+        Color::new(0.06, 0.10, 0.18, bg_alpha)
+    } else {
+        Color::new(0.04, 0.05, 0.10, bg_alpha)
+    };
+    draw_rectangle(params.x, card_y, params.width, params.height, bg_color);
+
+    // 3. 顶部高光条（玻璃反光效果）
+    let highlight_alpha = if is_active { 0.12 } else { 0.06 };
+    draw_rectangle(
         params.x,
-        params.y,
+        card_y,
         params.width,
+        1.5,
+        Color::new(1.0, 1.0, 1.0, highlight_alpha),
+    );
+
+    // 4. 底部渐变阴影（增加立体感）
+    draw_rectangle(
+        params.x,
+        card_y + params.height - 2.0,
+        params.width,
+        2.0,
+        Color::new(0.0, 0.0, 0.0, 0.15),
+    );
+
+    // 左侧强调色条（带发光）
+    let accent_bar_width = if is_active { 5.0 } else { 3.0 };
+    if is_active {
+        // 强调条发光
+        draw_rectangle(
+            params.x - 2.0,
+            card_y,
+            accent_bar_width + 4.0,
+            params.height,
+            Color::new(params.accent.r, params.accent.g, params.accent.b, 0.25),
+        );
+    }
+    draw_rectangle(
+        params.x,
+        card_y,
+        accent_bar_width,
         params.height,
-        border,
         params.accent,
     );
 
-    let icon_x = params.x + params.width * 0.2;
-    let icon_y = params.y + 70.;
+    // 边框（细腻的玻璃边缘）
+    let border_color = if is_active {
+        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.7)
+    } else {
+        Color::new(0.4, 0.45, 0.55, 0.35)
+    };
+    draw_rectangle_lines(
+        params.x,
+        card_y,
+        params.width,
+        params.height,
+        if is_active { 1.5 } else { 1.0 },
+        border_color,
+    );
+
+    // 图标区域（带光晕）
+    let icon_x = params.x + icon_offset_x;
+    let icon_y = card_y + params.height / 2.0;
+    let icon_alpha = if is_active { 1.0 } else { 0.5 };
+
+    // 图标光晕
+    if is_active {
+        draw_circle(
+            icon_x,
+            icon_y,
+            icon_glow_radius,
+            Color::new(params.accent.r, params.accent.g, params.accent.b, 0.12),
+        );
+    }
     draw_circle(
         icon_x,
         icon_y,
-        28.,
-        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.2),
+        icon_radius,
+        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.18 * icon_alpha),
     );
-    draw_circle(icon_x, icon_y, 20., params.accent);
-    draw_line(
-        icon_x - 32.,
+    draw_circle_lines(
+        icon_x,
         icon_y,
-        icon_x + 32.,
-        icon_y,
-        5.,
-        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.5),
-    );
-    draw_circle(
-        icon_x + 60.,
-        icon_y - 12.,
-        12.,
-        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.35),
+        icon_radius,
+        if is_active { 2.0 } else { 1.5 },
+        Color::new(params.accent.r, params.accent.g, params.accent.b, icon_alpha),
     );
 
+    // === 文字区域（带阴影增强可读性）===
+    let text_x = params.x + text_offset_x;
+
+    // 计算文字垂直布局（根据卡片高度分布）
+    let line_height = params.height / 4.0;
+    let title_y = card_y + line_height * 1.2;
+    let desc_y = card_y + line_height * 2.2;
+    let detail_y = card_y + line_height * 3.0;
+
+    // 标题阴影层
     draw_text_ex(
         params.title,
-        params.x + 24.,
-        params.y + 40.,
+        text_x + 1.0,
+        title_y + 1.0,
         TextParams {
             font: params.font,
-            font_size: 32, // 增大从 28 到 32
-            color: params.accent,
+            font_size: title_font,
+            color: Color::new(0.0, 0.0, 0.0, 0.4),
             ..Default::default()
         },
     );
 
-    let tag_width = if let Some(f) = params.font {
-        measure_text(params.footer, Some(f), 20, 1.0).width + 24.
-    } else {
-        measure_text(params.footer, None, 20, 1.0).width + 24.
-    };
+    // 标题发光层（活跃时）
+    if is_active {
+        draw_text_ex(
+            params.title,
+            text_x,
+            title_y,
+            TextParams {
+                font: params.font,
+                font_size: title_font,
+                color: Color::new(params.accent.r, params.accent.g, params.accent.b, 0.35),
+                ..Default::default()
+            },
+        );
+    }
 
-    draw_rectangle(
-        params.x + params.width - tag_width - 24.,
-        params.y + 18.,
-        tag_width,
-        30.,
-        Color::new(params.accent.r, params.accent.g, params.accent.b, 0.2),
+    // 标题主体
+    let title_color = if is_active {
+        colors::TEXT_PRIMARY
+    } else {
+        colors::TEXT_SECONDARY
+    };
+    draw_text_ex(
+        params.title,
+        text_x,
+        title_y,
+        TextParams {
+            font: params.font,
+            font_size: title_font,
+            color: title_color,
+            ..Default::default()
+        },
+    );
+
+    // 描述（带轻微阴影）
+    draw_text_ex(
+        params.desc,
+        text_x + 0.5,
+        desc_y + 0.5,
+        TextParams {
+            font: params.font,
+            font_size: desc_font,
+            color: Color::new(0.0, 0.0, 0.0, 0.3),
+            ..Default::default()
+        },
     );
     draw_text_ex(
-        params.footer,
-        params.x + params.width - tag_width - 12.,
-        params.y + 39.,
+        params.desc,
+        text_x,
+        desc_y,
         TextParams {
             font: params.font,
-            font_size: 20, // 增大从 18 到 20
-            color: params.accent,
+            font_size: desc_font,
+            color: if is_active {
+                Color::new(0.75, 0.78, 0.85, 1.0)
+            } else {
+                colors::TEXT_MUTED
+            },
             ..Default::default()
         },
     );
 
-    // 绘制描述（支持自动换行）- 亮色文字
-    draw_wrapped_text(
-        params.desc,
-        params.x + 24.,
-        params.y + 85.,
-        params.width - 48.,
-        22, // 增大从 18 到 22
-        Color::new(0.75, 0.78, 0.85, 1.0),
-        params.font,
+    // 详情（第三行）
+    draw_text_ex(
+        params.detail,
+        text_x,
+        detail_y,
+        TextParams {
+            font: params.font,
+            font_size: detail_font,
+            color: Color::new(0.55, 0.60, 0.70, if is_active { 1.0 } else { 0.8 }),
+            ..Default::default()
+        },
     );
 
-    // Detail 也支持换行 - 稍暗的亮色
-    draw_wrapped_text(
-        params.detail,
-        params.x + 24.,
-        params.y + params.height - 42.,
-        params.width - 48.,
-        19, // 增大从 16 到 19
-        Color::new(0.55, 0.58, 0.65, 1.0),
-        params.font,
-    );
+    // 右侧操作提示（玻璃按钮效果）
+    if is_active {
+        let footer_width = measure_text(params.footer, params.font, footer_font, 1.0).width;
+        let btn_padding = 12.0 * s;
+        let tag_x = params.x + params.width - footer_width - btn_padding * 2.0;
+        let tag_h = 22.0 * s;
+        let tag_y = card_y + params.height / 2.0 - tag_h / 2.0;
+        let tag_w = footer_width + btn_padding;
+
+        // 按钮发光
+        draw_rectangle(
+            tag_x - btn_padding,
+            tag_y - 4.0 * s,
+            tag_w + 4.0 * s,
+            tag_h + 4.0 * s,
+            Color::new(params.accent.r, params.accent.g, params.accent.b, 0.1),
+        );
+        // 按钮背景
+        draw_rectangle(
+            tag_x - btn_padding + 2.0 * s,
+            tag_y - 2.0 * s,
+            tag_w,
+            tag_h,
+            Color::new(params.accent.r * 0.2, params.accent.g * 0.2, params.accent.b * 0.2, 0.5),
+        );
+        // 按钮高光
+        draw_rectangle(
+            tag_x - btn_padding + 2.0 * s,
+            tag_y - 2.0 * s,
+            tag_w,
+            1.0,
+            Color::new(1.0, 1.0, 1.0, 0.15),
+        );
+        // 按钮边框
+        draw_rectangle_lines(
+            tag_x - btn_padding + 2.0 * s,
+            tag_y - 2.0 * s,
+            tag_w,
+            tag_h,
+            1.0,
+            Color::new(params.accent.r, params.accent.g, params.accent.b, 0.6),
+        );
+        // 按钮文字
+        draw_text_ex(
+            params.footer,
+            tag_x,
+            tag_y + tag_h * 0.65,
+            TextParams {
+                font: params.font,
+                font_size: footer_font,
+                color: params.accent,
+                ..Default::default()
+            },
+        );
+    }
 }
 
 /// 文本换行辅助函数（支持中文和英文）
@@ -857,111 +1468,182 @@ fn draw_wrapped_text(
 }
 
 pub fn draw_pause_menu(selection: PauseSelection, font: Option<&Font>) {
+    use crate::theme::colors;
+
+    // 半透明背景遮罩
     draw_rectangle(
         0.,
         0.,
         screen_width(),
         screen_height(),
-        Color::new(0.0, 0.0, 0.0, 0.55),
+        Color::new(0.02, 0.03, 0.06, 0.75),
     );
 
-    let panel_width = screen_width() * 0.55;
-    let panel_height = 480.;
+    let time = macroquad::time::get_time() as f32;
+
+    // 简洁的中央面板
+    let panel_width = 400.0;
+    let panel_height = 280.0;
     let x = screen_width() / 2. - panel_width / 2.;
     let y = screen_height() / 2. - panel_height / 2.;
-    draw_shadow_panel(
-        x,
-        y,
-        panel_width,
-        panel_height,
-        Color::new(0.12, 0.14, 0.2, 0.95),
-    );
 
-    let title = "Paused";
+    // 面板背景
+    draw_rectangle(x, y, panel_width, panel_height, Color::new(0.06, 0.08, 0.12, 0.98));
+    draw_rectangle_lines(x, y, panel_width, panel_height, 2.0, colors::PRIMARY);
+
+    // 标题
+    let title = "PAUSED";
+    let title_width = measure_text(title, font, 42, 1.0).width;
     draw_text_ex(
         title,
-        screen_width() / 2. - measure_text(title, font, 60, 1.0).width / 2.,
-        y + 88.,
+        screen_width() / 2. - title_width / 2.,
+        y + 55.,
         TextParams {
-            font_size: 60,
-            color: WHITE,
+            font_size: 42,
+            color: colors::TEXT_PRIMARY,
             font,
             ..Default::default()
         },
     );
 
-    draw_pause_option(
-        screen_height() / 2. - 50.,
-        "Resume game",
-        "Return to the current run.",
-        matches!(selection, PauseSelection::Resume),
-        font,
+    // 分隔线
+    draw_line(
+        x + 40.0,
+        y + 80.0,
+        x + panel_width - 40.0,
+        y + 80.0,
+        1.0,
+        Color::new(0.3, 0.35, 0.45, 0.5),
     );
-    draw_pause_option(
-        screen_height() / 2. + 60.,
-        "Back to mode select",
-        "Abandon this run and choose another mode.",
-        matches!(selection, PauseSelection::ModeSelect),
+
+    // Resume 选项
+    draw_pause_option_modern(
+        x + 30.0,
+        y + 100.0,
+        panel_width - 60.0,
+        "Resume",
+        "Continue playing",
+        matches!(selection, PauseSelection::Resume),
+        colors::SUCCESS,
+        time,
         font,
     );
 
-    let hint = "[Enter] confirm  ·  [Esc] resume";
-    let hint_width = measure_text(hint, font, 24, 1.0).width;
+    // Mode Select 选项
+    draw_pause_option_modern(
+        x + 30.0,
+        y + 170.0,
+        panel_width - 60.0,
+        "Exit to Menu",
+        "Abandon current run",
+        matches!(selection, PauseSelection::ModeSelect),
+        colors::DANGER,
+        time,
+        font,
+    );
+
+    // 底部提示
+    let hint = "↑↓ Select  •  Enter Confirm  •  Esc Resume";
+    let hint_width = measure_text(hint, font, 14, 1.0).width;
     draw_text_ex(
         hint,
         screen_width() / 2. - hint_width / 2.,
-        y + panel_height - 24.,
+        y + panel_height - 20.,
         TextParams {
             font,
-            font_size: 24,
-            color: LIGHTGRAY,
+            font_size: 14,
+            color: colors::TEXT_MUTED,
             ..Default::default()
         },
     );
 }
 
-fn draw_pause_option(y: f32, title: &str, desc: &str, active: bool, font: Option<&Font>) {
-    let width = 420.;
-    let x = screen_width() / 2. - width / 2.;
-    let color = if active {
-        Color::new(0.4, 0.7, 1.0, 1.0)
+fn draw_pause_option_modern(
+    x: f32,
+    y: f32,
+    width: f32,
+    title: &str,
+    desc: &str,
+    active: bool,
+    accent: Color,
+    time: f32,
+    font: Option<&Font>,
+) {
+    use crate::theme::colors;
+
+    let height = 55.0;
+
+    // 背景
+    let bg = if active {
+        Color::new(accent.r * 0.15, accent.g * 0.15, accent.b * 0.15, 0.8)
     } else {
-        LIGHTGRAY
+        Color::new(0.08, 0.09, 0.12, 0.6)
     };
-    draw_rectangle(
+    draw_rectangle(x, y, width, height, bg);
+
+    // 左侧强调条
+    if active {
+        let pulse = 0.8 + 0.2 * (time * 4.0).sin();
+        draw_rectangle(
+            x,
+            y,
+            4.0,
+            height,
+            Color::new(accent.r * pulse, accent.g * pulse, accent.b * pulse, 1.0),
+        );
+    }
+
+    // 边框
+    draw_rectangle_lines(
         x,
         y,
         width,
-        60.,
-        if active {
-            Color::new(1.0, 1.0, 1.0, 0.15)
-        } else {
-            Color::new(1.0, 1.0, 1.0, 0.08)
-        },
+        height,
+        if active { 1.5 } else { 1.0 },
+        if active { accent } else { Color::new(0.3, 0.35, 0.4, 0.4) },
     );
-    draw_rectangle_lines(x, y, width, 60., if active { 3.0 } else { 1.5 }, color);
+
+    // 标题
+    let title_color = if active { colors::TEXT_PRIMARY } else { colors::TEXT_SECONDARY };
     draw_text_ex(
         title,
-        x + 16.,
-        y + 28.,
+        x + 20.0,
+        y + 25.0,
         TextParams {
             font,
-            font_size: 28,
-            color,
+            font_size: 22,
+            color: title_color,
             ..Default::default()
         },
     );
+
+    // 描述
     draw_text_ex(
         desc,
-        x + 16.,
-        y + 48.,
+        x + 20.0,
+        y + 45.0,
         TextParams {
             font,
-            font_size: 20,
-            color: Color::new(0.8, 0.85, 0.95, 1.0),
+            font_size: 14,
+            color: colors::TEXT_MUTED,
             ..Default::default()
         },
     );
+
+    // 右侧箭头指示器
+    if active {
+        draw_text_ex(
+            "→",
+            x + width - 30.0,
+            y + 32.0,
+            TextParams {
+                font,
+                font_size: 20,
+                color: accent,
+                ..Default::default()
+            },
+        );
+    }
 }
 
 pub fn draw_pause_hint(font: Option<&Font>) {
@@ -1497,7 +2179,7 @@ pub fn draw_settings_screen(
 
     // 设置面板（应用滚动偏移）- 深色半透明
     let panel_width = screen_width() * 0.65;
-    let panel_height = 880.; // 12个选项（每个60px高 + 68px间距）+ 顶部40px + 底部20px
+    let panel_height = 950.; // 13个选项（每个60px高 + 68px间距）+ 顶部40px + 底部20px
     let panel_x = screen_width() / 2. - panel_width / 2.;
     let panel_y = 140. + scroll_offset; // 应用滚动
 
@@ -1621,10 +2303,25 @@ pub fn draw_settings_screen(
         font,
     );
 
-    // Debug Panel
+    // Hit Stop (新增：控制击中大型小行星时的短暂冻结)
     draw_setting_option(
         panel_x,
         option_y_start + option_spacing * 8.,
+        panel_width,
+        "Hit Stop (Freeze on impact)",
+        if settings.enable_hit_stop {
+            "ON"
+        } else {
+            "OFF"
+        },
+        selected == SettingOption::HitStop,
+        font,
+    );
+
+    // Debug Panel
+    draw_setting_option(
+        panel_x,
+        option_y_start + option_spacing * 9.,
         panel_width,
         "Debug Panel (F3 toggle)",
         if settings.enable_debug_panel {
@@ -1639,7 +2336,7 @@ pub fn draw_settings_screen(
     // Flag Radius
     draw_setting_option(
         panel_x,
-        option_y_start + option_spacing * 9.,
+        option_y_start + option_spacing * 10.,
         panel_width,
         "Flag Radius (Duel mode)",
         &format!("{:.0}px", settings.flag_radius),
@@ -1650,7 +2347,7 @@ pub fn draw_settings_screen(
     // Reset Defaults (特殊样式)
     draw_reset_option(
         panel_x,
-        option_y_start + option_spacing * 10.,
+        option_y_start + option_spacing * 11.,
         panel_width,
         selected == SettingOption::ResetDefaults,
         font,
@@ -1659,7 +2356,7 @@ pub fn draw_settings_screen(
     // Reset Achievements (特殊样式)
     draw_reset_achievements_option(
         panel_x,
-        option_y_start + option_spacing * 11.,
+        option_y_start + option_spacing * 12.,
         panel_width,
         selected == SettingOption::ResetAchievements,
         font,
@@ -3255,4 +3952,285 @@ pub fn draw_rest_ui(
     }
 
     RestUiAction::None
+}
+
+// ============================================================================
+// 单元测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === HudMode 测试 ===
+
+    #[test]
+    fn test_hud_mode_waiting_variant() {
+        let mode = HudMode::Waiting;
+        // HudMode::Waiting 无附加数据
+        match mode {
+            HudMode::Waiting => (),
+            HudMode::Active { .. } => panic!("Expected Waiting variant"),
+        }
+    }
+
+    #[test]
+    fn test_hud_mode_active_variant() {
+        let mode = HudMode::Active { time: 42.5 };
+        match mode {
+            HudMode::Active { time } => assert!((time - 42.5).abs() < f64::EPSILON),
+            HudMode::Waiting => panic!("Expected Active variant"),
+        }
+    }
+
+    // === InterpDebugStats 测试 ===
+
+    #[test]
+    fn test_interp_debug_stats_creation() {
+        let stats = InterpDebugStats {
+            player_buffers: 2,
+            asteroid_buffers: 10,
+            bullet_buffers: 5,
+            avg_player_snapshots: 3.5,
+            avg_bullet_snapshots: 2.0,
+            render_delay_ms: 100.0,
+        };
+        assert_eq!(stats.player_buffers, 2);
+        assert_eq!(stats.asteroid_buffers, 10);
+        assert_eq!(stats.bullet_buffers, 5);
+        assert!((stats.avg_player_snapshots - 3.5).abs() < f32::EPSILON);
+        assert!((stats.render_delay_ms - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_interp_debug_stats_clone() {
+        let stats = InterpDebugStats {
+            player_buffers: 1,
+            asteroid_buffers: 2,
+            bullet_buffers: 3,
+            avg_player_snapshots: 1.0,
+            avg_bullet_snapshots: 2.0,
+            render_delay_ms: 50.0,
+        };
+        let cloned = stats.clone();
+        assert_eq!(cloned.player_buffers, stats.player_buffers);
+        assert_eq!(cloned.asteroid_buffers, stats.asteroid_buffers);
+    }
+
+    #[test]
+    fn test_interp_debug_stats_debug_format() {
+        let stats = InterpDebugStats {
+            player_buffers: 1,
+            asteroid_buffers: 2,
+            bullet_buffers: 3,
+            avg_player_snapshots: 1.0,
+            avg_bullet_snapshots: 2.0,
+            render_delay_ms: 50.0,
+        };
+        let debug_str = format!("{:?}", stats);
+        assert!(debug_str.contains("InterpDebugStats"));
+        assert!(debug_str.contains("player_buffers"));
+    }
+
+    // === NetworkDebugStats 测试 ===
+
+    #[test]
+    fn test_network_debug_stats_creation() {
+        let net_stats = NetworkDebugStats {
+            rtt_ms: 25.5,
+            pending_inputs: 3,
+            interp: None,
+        };
+        assert!((net_stats.rtt_ms - 25.5).abs() < f32::EPSILON);
+        assert_eq!(net_stats.pending_inputs, 3);
+        assert!(net_stats.interp.is_none());
+    }
+
+    #[test]
+    fn test_network_debug_stats_with_interp() {
+        let interp = InterpDebugStats {
+            player_buffers: 2,
+            asteroid_buffers: 8,
+            bullet_buffers: 4,
+            avg_player_snapshots: 2.5,
+            avg_bullet_snapshots: 1.5,
+            render_delay_ms: 100.0,
+        };
+        let net_stats = NetworkDebugStats {
+            rtt_ms: 30.0,
+            pending_inputs: 5,
+            interp: Some(interp),
+        };
+        assert!(net_stats.interp.is_some());
+        assert_eq!(net_stats.interp.as_ref().unwrap().player_buffers, 2);
+    }
+
+    #[test]
+    fn test_network_debug_stats_clone() {
+        let net_stats = NetworkDebugStats {
+            rtt_ms: 20.0,
+            pending_inputs: 2,
+            interp: None,
+        };
+        let cloned = net_stats.clone();
+        assert!((cloned.rtt_ms - 20.0).abs() < f32::EPSILON);
+    }
+
+    // === DebugStats 测试 ===
+
+    #[test]
+    fn test_debug_stats_creation() {
+        let stats = DebugStats {
+            fps: 60.0,
+            entity_count: 150,
+            quadtree_depth: 4,
+            particle_count: 200,
+            network: None,
+        };
+        assert!((stats.fps - 60.0).abs() < f32::EPSILON);
+        assert_eq!(stats.entity_count, 150);
+        assert_eq!(stats.quadtree_depth, 4);
+        assert_eq!(stats.particle_count, 200);
+        assert!(stats.network.is_none());
+    }
+
+    #[test]
+    fn test_debug_stats_with_network() {
+        let net = NetworkDebugStats {
+            rtt_ms: 15.0,
+            pending_inputs: 1,
+            interp: None,
+        };
+        let stats = DebugStats {
+            fps: 55.0,
+            entity_count: 100,
+            quadtree_depth: 3,
+            particle_count: 50,
+            network: Some(net),
+        };
+        assert!(stats.network.is_some());
+    }
+
+    // === ActiveBuff 测试 ===
+
+    #[test]
+    fn test_active_buff_creation() {
+        let buff = ActiveBuff {
+            name: "Shield",
+            icon_char: "S".to_string(),
+            color: Color::new(0.2, 0.6, 1.0, 1.0),
+            remaining: 5.5,
+            max_duration: 10.0,
+        };
+        assert_eq!(buff.name, "Shield");
+        assert_eq!(buff.icon_char, "S");
+        assert!((buff.remaining - 5.5).abs() < f64::EPSILON);
+        assert!((buff.max_duration - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_active_buff_progress_calculation() {
+        let buff = ActiveBuff {
+            name: "Rapid Fire",
+            icon_char: "R".to_string(),
+            color: Color::new(1.0, 0.9, 0.2, 1.0),
+            remaining: 3.0,
+            max_duration: 6.0,
+        };
+        let progress = buff.remaining / buff.max_duration;
+        assert!((progress - 0.5).abs() < f64::EPSILON);
+    }
+
+    // === ChallengeOfferAction 测试 ===
+
+    #[test]
+    fn test_challenge_offer_action_variants() {
+        let action_none = ChallengeOfferAction::None;
+        let action_accept = ChallengeOfferAction::Accept;
+        let action_skip = ChallengeOfferAction::Skip;
+
+        // 使用 match 确认变体正确
+        match action_none {
+            ChallengeOfferAction::None => (),
+            _ => panic!("Expected None"),
+        }
+        match action_accept {
+            ChallengeOfferAction::Accept => (),
+            _ => panic!("Expected Accept"),
+        }
+        match action_skip {
+            ChallengeOfferAction::Skip => (),
+            _ => panic!("Expected Skip"),
+        }
+    }
+
+    // === ShopUiAction 测试 ===
+
+    #[test]
+    fn test_shop_ui_action_none() {
+        let action = ShopUiAction::None;
+        match action {
+            ShopUiAction::None => (),
+            _ => panic!("Expected None"),
+        }
+    }
+
+    #[test]
+    fn test_shop_ui_action_buy_confirmed() {
+        let action = ShopUiAction::BuyConfirmed(2);
+        match action {
+            ShopUiAction::BuyConfirmed(idx) => assert_eq!(idx, 2),
+            _ => panic!("Expected BuyConfirmed"),
+        }
+    }
+
+    #[test]
+    fn test_shop_ui_action_refresh() {
+        let action = ShopUiAction::RefreshRequested;
+        match action {
+            ShopUiAction::RefreshRequested => (),
+            _ => panic!("Expected RefreshRequested"),
+        }
+    }
+
+    #[test]
+    fn test_shop_ui_action_exit() {
+        let action = ShopUiAction::ExitShop;
+        match action {
+            ShopUiAction::ExitShop => (),
+            _ => panic!("Expected ExitShop"),
+        }
+    }
+
+    // === RestUiAction 测试 ===
+
+    #[test]
+    fn test_rest_ui_action_variants() {
+        assert_eq!(RestUiAction::None, RestUiAction::None);
+        assert_eq!(RestUiAction::SelectOption(1), RestUiAction::SelectOption(1));
+        assert_ne!(RestUiAction::SelectOption(1), RestUiAction::SelectOption(2));
+        assert_eq!(RestUiAction::ConfirmRest, RestUiAction::ConfirmRest);
+    }
+
+    #[test]
+    fn test_rest_ui_action_clone() {
+        let action = RestUiAction::SelectOption(3);
+        let cloned = action.clone();
+        assert_eq!(action, cloned);
+    }
+
+    #[test]
+    fn test_rest_ui_action_copy() {
+        let action = RestUiAction::ConfirmRest;
+        let copied: RestUiAction = action; // Copy trait
+        assert_eq!(action, copied);
+    }
+
+    #[test]
+    fn test_rest_ui_action_debug() {
+        let action = RestUiAction::SelectCard(5);
+        let debug_str = format!("{:?}", action);
+        assert!(debug_str.contains("SelectCard"));
+        assert!(debug_str.contains("5"));
+    }
 }

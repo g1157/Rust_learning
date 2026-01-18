@@ -50,6 +50,7 @@ mod ship;
 mod skill_system;        // 新增：技能系统模块
 mod sound;
 mod storage;
+mod theme;
 mod tutorial;
 mod ufo;
 mod ui;
@@ -68,7 +69,7 @@ use battle_draft::{Card, DraftState, draw_draft_ui};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
 use clap::Parser;
 use duel::{DUEL_BULLET_RADIUS, DuelState};
-use effects::{PendingHitKind, PendingHitManager, ScreenShake, SlowMotion};
+use effects::{HitStop, PendingHitKind, PendingHitManager, ScreenShake, SlowMotion};
 use font::FontSystem;
 use game::{
     ASTEROID_COUNT, ASTEROID_WAVE_INCREMENT, init_players, reset_players, spawn_survival_wave,
@@ -90,7 +91,7 @@ use ui::{DebugStats, HudMode, InterpDebugStats, NetworkDebugStats};
 use utils::{circle_intersects_triangle, wrap_around};
 use vortex::VortexManager;
 
-use crate::constants::{defaults, gameplay, shake, slow_motion, timing};
+use crate::constants::{defaults, gameplay, hit_stop, shake, slow_motion, timing};
 
 const VICTORY_PAUSE_DURATION: f64 = timing::VICTORY_PAUSE;
 
@@ -197,6 +198,7 @@ async fn main() {
     };
     let mut screen_shake: Option<ScreenShake> = None;
     let mut slow_motion = SlowMotion::new(); // 慢动作系统
+    let mut hit_stop_effect = HitStop::new(); // 命中停顿系统
     let mut starfield = background::Starfield::new(); // 星空背景
     let mut show_debug = settings.enable_debug_panel; // 从设置初始化
     let mut toast_message: Option<(String, f64)> = None; // (消息文本, 显示开始时间)
@@ -224,8 +226,10 @@ async fn main() {
         // 轮询网络事件
         network_client.poll();
 
-        // 应用慢动作时间缩放
-        let time_scale = slow_motion.update(frame_t as f32);
+        // 应用慢动作和命中停顿时间缩放
+        let slow_scale = slow_motion.update(frame_t as f32);
+        let hit_stop_scale = hit_stop_effect.update(frame_t as f32);
+        let time_scale = slow_scale * hit_stop_scale; // 两者叠加
         let dt = raw_dt * time_scale;
 
         // ⚠️ 注意：不要在这里调用任何输入函数（input_state.is_key_pressed, mouse_wheel 等）
@@ -1633,11 +1637,9 @@ async fn main() {
 
                 // ESC 返回主菜单
                 if input_state.is_key_pressed(KeyCode::Escape) {
-                    if let Err(err) = network_client.send(network::ClientMessage::LeaveQueue) {
-                        eprintln!("[网络] 离开队列发送失败: {}", err);
-                    }
-                    state = GameState::OnlineLobby {
-                        nickname_input: false,
+                    network_client.disconnect();
+                    state = GameState::ModeSelection {
+                        selection: GameMode::Online,
                     };
                     next_frame().await;
                     continue;
@@ -2534,6 +2536,10 @@ async fn main() {
                 if asteroid_size >= gameplay::ASTEROID_SIZE_LARGE {
                     let (intensity, duration) = shake::ASTEROID_LARGE;
                     screen_shake = Some(ScreenShake::new(intensity, duration, frame_t as f32));
+                    // 大型小行星爆炸触发命中停顿（可在设置中关闭）
+                    if settings.enable_hit_stop {
+                        hit_stop_effect.trigger(frame_t as f32, hit_stop::LARGE_ASTEROID);
+                    }
                 } else if asteroid_size >= gameplay::ASTEROID_SIZE_MEDIUM {
                     let (intensity, duration) = shake::ASTEROID_MEDIUM;
                     screen_shake = Some(ScreenShake::new(intensity, duration, frame_t as f32));
@@ -3232,22 +3238,40 @@ fn update_players(
             continue;
         }
 
-        // 冲刺输入检测
-        if input.is_key_pressed(player.controls.dash) && player.can_dash(frame_t) {
+        // 更新 Flux 能量（每帧自然回复）
+        player.update_flux(dt);
+
+        // 冲刺输入检测（需要冷却完成 + 足够 Flux）
+        if input.is_key_pressed(player.controls.dash)
+            && player.can_dash(frame_t)
+            && player.can_flux_dash()
+        {
+            // 消耗 Flux
+            player.spend_flux(crate::constants::flux::DASH_COST);
             // 冲刺方向：当前面向方向
             let dash_dir = player.ship.forward_vector();
             player.start_dash(frame_t, dash_dir);
-            sounds.play(SoundEffect::Shoot, sound_volume * 0.5); // 使用射击音效的低音量版本
+            sounds.play(SoundEffect::Shoot, sound_volume * 0.5);
         }
 
-        // 超空间跳跃输入检测
-        if input.is_key_pressed(player.controls.hyperspace) && player.can_hyperspace(frame_t) {
+        // 超空间跳跃输入检测（需要冷却完成 + 足够 Flux）
+        if input.is_key_pressed(player.controls.hyperspace)
+            && player.can_hyperspace(frame_t)
+            && player.can_flux_hyperspace()
+        {
+            // 消耗 Flux
+            player.spend_flux(crate::constants::flux::HYPERSPACE_COST);
             player.start_hyperspace(frame_t);
             sounds.play(SoundEffect::PowerUp, sound_volume * 0.7);
         }
 
-        // 相位闪现输入检测
-        if input.is_key_pressed(player.controls.phase_dash) && player.can_phase_dash(frame_t) {
+        // 相位闪现输入检测（需要冷却完成 + 足够 Flux）
+        if input.is_key_pressed(player.controls.phase_dash)
+            && player.can_phase_dash(frame_t)
+            && player.can_flux_phase_dash()
+        {
+            // 消耗 Flux
+            player.spend_flux(crate::constants::flux::PHASE_DASH_COST);
             let (start_pos, end_pos) = player.start_phase_dash(frame_t);
             // 起点和终点特效
             particles.spawn_explosion(start_pos, 15.0, SKYBLUE, frame_t as f32);
@@ -3658,6 +3682,9 @@ fn render_scene(
     }
 
     ui::draw_players_hud(players, HudMode::Active { time: frame_t }, font);
+
+    // 绘制 Flux 能量条
+    ui::draw_flux_bar(players, font);
 
     // 绘制玩家状态效果图标栏（显示当前激活的道具/buff）
     ui::draw_player_buffs(players, frame_t, font);

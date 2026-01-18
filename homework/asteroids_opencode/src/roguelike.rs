@@ -162,6 +162,10 @@ pub struct BossState {
     pub phase: u32,
     pub phase_timer: f32,
     pub is_enraged: bool,
+    /// 绝望阶段 (< 15% HP)
+    pub is_desperate: bool,
+    /// 绝望阶段弹幕计时器
+    pub desperate_burst_timer: f32,
 }
 
 impl BossState {
@@ -175,6 +179,8 @@ impl BossState {
             phase: 1,
             phase_timer: 0.0,
             is_enraged: false,
+            is_desperate: false,
+            desperate_burst_timer: 0.0,
         }
     }
 
@@ -192,6 +198,31 @@ impl BossState {
     pub fn check_enrage(&mut self) {
         if self.health_percent() < 0.3 && !self.is_enraged {
             self.is_enraged = true;
+        }
+    }
+
+    /// 检查是否进入绝望阶段 (< 15% HP)
+    pub fn check_desperate(&mut self) -> bool {
+        if self.health_percent() < 0.15 && !self.is_desperate {
+            self.is_desperate = true;
+            self.desperate_burst_timer = 0.0;
+            return true; // 刚进入绝望阶段
+        }
+        false
+    }
+
+    /// 绝望阶段是否应该发射弹幕
+    pub fn should_desperate_burst(&mut self, dt: f32) -> bool {
+        if !self.is_desperate {
+            return false;
+        }
+        self.desperate_burst_timer += dt;
+        // 绝望阶段每 0.8 秒发射一次弹幕
+        if self.desperate_burst_timer >= 0.8 {
+            self.desperate_burst_timer -= 0.8;
+            true
+        } else {
+            false
         }
     }
 }
@@ -232,6 +263,10 @@ const WORMHOLE_WARDEN_TELEPORT_INTERVAL_ENRAGED: f32 = 3.5;
 const WORMHOLE_WARDEN_PROJECTILE_INTERVAL: f32 = 2.0;
 const WORMHOLE_WARDEN_RADIUS: f32 = 50.0;
 
+// 绝望阶段常量
+const DESPERATE_BURST_COUNT: usize = 8; // 弹幕数量
+const DESPERATE_SPEED_MULTIPLIER: f32 = 1.5; // 移动速度加成
+
 /// 获取 Boss 碰撞半径
 pub fn boss_radius(boss: &BossState) -> f32 {
     match boss.kind {
@@ -249,6 +284,15 @@ pub fn update_boss(
     ufos: &mut Vec<Ufo>,
     dt: f32,
 ) {
+    // 检查阶段转换
+    boss.check_enrage();
+    boss.check_desperate();
+
+    // 绝望阶段弹幕爆发（所有 Boss 通用）
+    if boss.should_desperate_burst(dt) {
+        spawn_desperate_burst(boss, asteroids);
+    }
+
     match boss.kind {
         BossKind::GiantSplitter => update_giant_splitter(boss, players, asteroids, dt),
         BossKind::UfoMothership => update_ufo_mothership(boss, players, ufos, dt),
@@ -312,6 +356,29 @@ fn update_giant_splitter(
             }
             asteroids.push(spawn_giant_splitter_minion(boss.position, boss.is_enraged));
         }
+    }
+}
+
+/// 绝望阶段弹幕爆发：向四周发射环形弹幕
+fn spawn_desperate_burst(boss: &BossState, asteroids: &mut Vec<Asteroid>) {
+    let radius = boss_radius(boss);
+    for i in 0..DESPERATE_BURST_COUNT {
+        let angle = (i as f32) * std::f32::consts::TAU / (DESPERATE_BURST_COUNT as f32);
+        let dir = Vec2::new(angle.cos(), angle.sin());
+        let spawn_pos = boss.position + dir * (radius + 15.0);
+        let speed = 350.0; // 高速弹幕
+
+        asteroids.push(Asteroid {
+            pos: wrap_around(&spawn_pos),
+            vel: dir * speed,
+            size: 10.0, // 小型弹幕
+            sides: 6,
+            rot: angle,
+            rot_speed: rand::gen_range(-3.0, 3.0),
+            collided: false,
+            vertex_offsets: std::array::from_fn(|_| rand::gen_range(0.85, 1.0)),
+            asteroid_type: AsteroidType::Normal,
+        });
     }
 }
 
@@ -648,6 +715,32 @@ pub enum RelicId {
     LuckyDice,
     /// 磁力核心 - 道具拾取范围扩大
     MagneticCore,
+    // === 新增行为改变型遗物 ===
+    /// 肾上腺素注射器 - 击杀后短时间内伤害提升
+    AdrenalineInjector,
+    /// 纳米虫群 - 近距离敌人持续受伤
+    NanoSwarm,
+    /// 赌徒筹码 - 商店价格随机波动
+    GamblersChip,
+    /// 虚空锚点 - 相位闪现后留下伤害区域
+    VoidAnchor,
+    /// 链式反应堆 - 连锁离子炮额外跳跃
+    ChainReactor,
+    /// 时间膨胀器 - 击杀时触发短暂慢动作
+    TimeDilator,
+    // === 腐化遗物（高风险高回报）===
+    /// 重型枪管 - 伤害+200%，后坐力+100%，射速-30%
+    HeavyBarrel,
+    /// 玻璃大炮 - 伤害+500%，生命上限=1
+    GlassCannon,
+    /// 虫洞引擎 - Hyperspace无风险，但每次使用-50分
+    WormholeEngine,
+    /// 吸血弹药 - 击杀回血，但无法拾取道具
+    VampireAmmo,
+    /// 狂战士之心 - 低血量时伤害翻倍，但无法回血
+    BerserkerHeart,
+    /// 贪婪契约 - 金币获取+100%，但受伤时损失金币
+    GreedPact,
 }
 
 impl RelicId {
@@ -664,6 +757,19 @@ impl RelicId {
             RelicId::PhaseAmplifier => "相位增幅器",
             RelicId::LuckyDice => "幸运骰子",
             RelicId::MagneticCore => "磁力核心",
+            RelicId::AdrenalineInjector => "肾上腺素",
+            RelicId::NanoSwarm => "纳米虫群",
+            RelicId::GamblersChip => "赌徒筹码",
+            RelicId::VoidAnchor => "虚空锚点",
+            RelicId::ChainReactor => "链式反应堆",
+            RelicId::TimeDilator => "时间膨胀器",
+            // 腐化遗物
+            RelicId::HeavyBarrel => "重型枪管",
+            RelicId::GlassCannon => "玻璃大炮",
+            RelicId::WormholeEngine => "虫洞引擎",
+            RelicId::VampireAmmo => "吸血弹药",
+            RelicId::BerserkerHeart => "狂战士之心",
+            RelicId::GreedPact => "贪婪契约",
         }
     }
 
@@ -680,6 +786,19 @@ impl RelicId {
             RelicId::PhaseAmplifier => "相位闪现爆炸伤害 +30%",
             RelicId::LuckyDice => "暴击几率 +15%",
             RelicId::MagneticCore => "道具拾取范围 +50%",
+            RelicId::AdrenalineInjector => "击杀后 2 秒内伤害 +25%",
+            RelicId::NanoSwarm => "近距离敌人每秒受 5 伤害",
+            RelicId::GamblersChip => "商店价格 ±30% 随机波动",
+            RelicId::VoidAnchor => "相位闪现后留下 3 秒伤害区域",
+            RelicId::ChainReactor => "连锁离子炮额外跳跃 +1",
+            RelicId::TimeDilator => "击杀时 20% 几率触发 0.3 秒慢动作",
+            // 腐化遗物（显示代价）
+            RelicId::HeavyBarrel => "伤害+200% | 代价: 后坐力+100%, 射速-30%",
+            RelicId::GlassCannon => "伤害+500% | 代价: 生命上限=1",
+            RelicId::WormholeEngine => "Hyperspace无风险 | 代价: 每次-50分",
+            RelicId::VampireAmmo => "击杀回血 | 代价: 无法拾取道具",
+            RelicId::BerserkerHeart => "低血量伤害x2 | 代价: 无法回血",
+            RelicId::GreedPact => "金币+100% | 代价: 受伤损失金币",
         }
     }
 
@@ -696,25 +815,62 @@ impl RelicId {
             RelicId::PhaseAmplifier => RelicTrigger::Passive,
             RelicId::LuckyDice => RelicTrigger::Passive,
             RelicId::MagneticCore => RelicTrigger::Passive,
+            RelicId::AdrenalineInjector => RelicTrigger::OnKill,
+            RelicId::NanoSwarm => RelicTrigger::Passive,
+            RelicId::GamblersChip => RelicTrigger::Passive,
+            RelicId::VoidAnchor => RelicTrigger::Passive,
+            RelicId::ChainReactor => RelicTrigger::Passive,
+            RelicId::TimeDilator => RelicTrigger::OnKill,
+            // 腐化遗物
+            RelicId::HeavyBarrel => RelicTrigger::Passive,
+            RelicId::GlassCannon => RelicTrigger::Passive,
+            RelicId::WormholeEngine => RelicTrigger::Passive,
+            RelicId::VampireAmmo => RelicTrigger::OnKill,
+            RelicId::BerserkerHeart => RelicTrigger::Passive,
+            RelicId::GreedPact => RelicTrigger::Passive,
         }
     }
 
     /// 获取遗物稀有度颜色
     pub fn rarity_color(&self) -> Color {
         match self {
+            // 普通 - 灰色
             RelicId::PaycheckChip | RelicId::SalvageMagnet | RelicId::MagneticCore => {
-                Color::new(0.6, 0.6, 0.6, 1.0) // 普通 - 灰色
+                Color::new(0.6, 0.6, 0.6, 1.0)
             }
-            RelicId::DraftingGloves | RelicId::ComboAmulet | RelicId::ShieldBattery => {
-                Color::new(0.2, 0.6, 1.0, 1.0) // 稀有 - 蓝色
+            // 稀有 - 蓝色
+            RelicId::DraftingGloves | RelicId::ComboAmulet | RelicId::ShieldBattery
+            | RelicId::AdrenalineInjector | RelicId::GamblersChip => {
+                Color::new(0.2, 0.6, 1.0, 1.0)
             }
-            RelicId::FlawlessSeal | RelicId::PhaseAmplifier | RelicId::LuckyDice => {
-                Color::new(0.8, 0.4, 1.0, 1.0) // 史诗 - 紫色
+            // 史诗 - 紫色
+            RelicId::FlawlessSeal | RelicId::PhaseAmplifier | RelicId::LuckyDice
+            | RelicId::NanoSwarm | RelicId::VoidAnchor | RelicId::ChainReactor => {
+                Color::new(0.8, 0.4, 1.0, 1.0)
             }
-            RelicId::CollectorLedger => {
-                Color::new(1.0, 0.8, 0.2, 1.0) // 传说 - 金色
+            // 传说 - 金色
+            RelicId::CollectorLedger | RelicId::TimeDilator => {
+                Color::new(1.0, 0.8, 0.2, 1.0)
+            }
+            // 腐化 - 深红色（特殊标识）
+            RelicId::HeavyBarrel | RelicId::GlassCannon | RelicId::WormholeEngine
+            | RelicId::VampireAmmo | RelicId::BerserkerHeart | RelicId::GreedPact => {
+                Color::new(0.8, 0.1, 0.2, 1.0)
             }
         }
+    }
+
+    /// 检查是否为腐化遗物
+    pub fn is_corrupted(&self) -> bool {
+        matches!(
+            self,
+            RelicId::HeavyBarrel
+                | RelicId::GlassCannon
+                | RelicId::WormholeEngine
+                | RelicId::VampireAmmo
+                | RelicId::BerserkerHeart
+                | RelicId::GreedPact
+        )
     }
 }
 
@@ -755,17 +911,37 @@ pub struct ChallengeState {
 }
 
 impl ChallengeState {
-    pub fn elite_offer(wave_in_zone: u32) -> Self {
+    /// 创建精英挑战（根据区域缩放难度和奖励）
+    pub fn elite_offer(wave_in_zone: u32, zone: ZoneId) -> Self {
+        // 区域缩放系数
+        let zone_scale = match zone {
+            ZoneId::Zone1 => 1.0,
+            ZoneId::Zone2 => 1.2,
+            ZoneId::Zone3 => 1.5,
+        };
+
+        // 时间限制随区域递减（更紧迫）
+        let base_time: f32 = 35.0;
+        let time_limit = (base_time / zone_scale).max(20.0);
+
+        // 敌人倍率随区域递增
+        let enemy_multiplier = 1.3 + (zone_scale - 1.0) * 0.5;
+
         Self {
             wave_in_zone,
             modifiers: vec![
-                ChallengeType::EnemyCountBoost { multiplier: 1.5 },
-                ChallengeType::TimeLimit { seconds: 30.0 },
+                ChallengeType::EnemyCountBoost { multiplier: enemy_multiplier },
+                ChallengeType::TimeLimit { seconds: time_limit },
                 ChallengeType::NoShield,
             ],
             started_at: None,
             penalty_gold_ratio: 0.25,
         }
+    }
+
+    /// 旧版兼容（默认 Zone1）
+    pub fn elite_offer_default(wave_in_zone: u32) -> Self {
+        Self::elite_offer(wave_in_zone, ZoneId::Zone1)
     }
 
     pub fn start(&mut self, now: f32) {
@@ -1117,6 +1293,159 @@ impl RunState {
         }
     }
 
+    // === 新遗物效果查询 ===
+
+    /// 检查是否有肾上腺素注射器（击杀后伤害加成）
+    pub fn has_adrenaline(&self) -> bool {
+        self.has_relic(RelicId::AdrenalineInjector)
+    }
+
+    /// 获取肾上腺素伤害加成（击杀后 2 秒内有效）
+    pub fn adrenaline_damage_bonus(&self) -> f32 {
+        if self.has_adrenaline() && self.run_time - self.last_kill_time < 2.0 {
+            1.25
+        } else {
+            1.0
+        }
+    }
+
+    /// 检查是否有纳米虫群（近距离伤害光环）
+    pub fn has_nano_swarm(&self) -> bool {
+        self.has_relic(RelicId::NanoSwarm)
+    }
+
+    /// 纳米虫群伤害范围
+    pub fn nano_swarm_range(&self) -> f32 {
+        if self.has_nano_swarm() { 80.0 } else { 0.0 }
+    }
+
+    /// 纳米虫群每秒伤害
+    pub fn nano_swarm_dps(&self) -> f32 {
+        if self.has_nano_swarm() { 5.0 } else { 0.0 }
+    }
+
+    /// 检查是否有赌徒筹码（商店价格波动）
+    pub fn has_gamblers_chip(&self) -> bool {
+        self.has_relic(RelicId::GamblersChip)
+    }
+
+    /// 获取商店价格倍率（±30%）
+    pub fn shop_price_multiplier(&self) -> f32 {
+        if self.has_gamblers_chip() {
+            rand::gen_range(0.7, 1.3)
+        } else {
+            1.0
+        }
+    }
+
+    /// 检查是否有虚空锚点（相位闪现留下伤害区域）
+    pub fn has_void_anchor(&self) -> bool {
+        self.has_relic(RelicId::VoidAnchor)
+    }
+
+    /// 检查是否有链式反应堆（连锁离子炮额外跳跃）
+    pub fn has_chain_reactor(&self) -> bool {
+        self.has_relic(RelicId::ChainReactor)
+    }
+
+    /// 获取连锁离子炮额外跳跃次数
+    pub fn chain_extra_jumps(&self) -> u32 {
+        if self.has_chain_reactor() { 1 } else { 0 }
+    }
+
+    /// 检查是否有时间膨胀器（击杀触发慢动作）
+    pub fn has_time_dilator(&self) -> bool {
+        self.has_relic(RelicId::TimeDilator)
+    }
+
+    /// 检查击杀时是否触发慢动作（20% 几率）
+    pub fn should_trigger_slow_motion(&self) -> bool {
+        self.has_time_dilator() && rand::gen_range(0.0f32, 1.0) < 0.2
+    }
+
+    // ========== 腐化遗物效果 ==========
+
+    /// 检查是否有重型枪管（伤害+200%，后坐力+100%，射速-30%）
+    pub fn has_heavy_barrel(&self) -> bool {
+        self.has_relic(RelicId::HeavyBarrel)
+    }
+
+    /// 获取重型枪管伤害倍率
+    pub fn heavy_barrel_damage_mult(&self) -> f32 {
+        if self.has_heavy_barrel() { 3.0 } else { 1.0 }
+    }
+
+    /// 获取重型枪管后坐力倍率
+    pub fn heavy_barrel_recoil_mult(&self) -> f32 {
+        if self.has_heavy_barrel() { 2.0 } else { 1.0 }
+    }
+
+    /// 获取重型枪管射速倍率（冷却时间倍率）
+    pub fn heavy_barrel_cooldown_mult(&self) -> f32 {
+        if self.has_heavy_barrel() { 1.3 } else { 1.0 }
+    }
+
+    /// 检查是否有玻璃大炮（伤害+500%，生命上限=1）
+    pub fn has_glass_cannon(&self) -> bool {
+        self.has_relic(RelicId::GlassCannon)
+    }
+
+    /// 获取玻璃大炮伤害倍率
+    pub fn glass_cannon_damage_mult(&self) -> f32 {
+        if self.has_glass_cannon() { 6.0 } else { 1.0 }
+    }
+
+    /// 检查是否有虫洞引擎（Hyperspace无风险，但每次-50分）
+    pub fn has_wormhole_engine(&self) -> bool {
+        self.has_relic(RelicId::WormholeEngine)
+    }
+
+    /// 检查是否有吸血弹药（击杀回血，但无法拾取道具）
+    pub fn has_vampire_ammo(&self) -> bool {
+        self.has_relic(RelicId::VampireAmmo)
+    }
+
+    /// 检查是否有狂战士之心（低血量伤害翻倍，但无法回血）
+    pub fn has_berserker_heart(&self) -> bool {
+        self.has_relic(RelicId::BerserkerHeart)
+    }
+
+    /// 获取狂战士之心伤害倍率（需要传入当前生命值和最大生命值）
+    pub fn berserker_damage_mult(&self, current_lives: u32, max_lives: u32) -> f32 {
+        if self.has_berserker_heart() && current_lives == 1 && max_lives > 1 {
+            2.0
+        } else {
+            1.0
+        }
+    }
+
+    /// 检查是否有贪婪契约（金币+100%，但受伤损失金币）
+    pub fn has_greed_pact(&self) -> bool {
+        self.has_relic(RelicId::GreedPact)
+    }
+
+    /// 获取贪婪契约金币倍率
+    pub fn greed_pact_gold_mult(&self) -> f32 {
+        if self.has_greed_pact() { 2.0 } else { 1.0 }
+    }
+
+    /// 贪婪契约受伤惩罚（损失 20% 金币）
+    pub fn apply_greed_pact_penalty(&mut self) {
+        if self.has_greed_pact() {
+            let penalty = (self.gold as f32 * 0.2).round() as u32;
+            self.gold = self.gold.saturating_sub(penalty);
+        }
+    }
+
+    /// 获取总伤害倍率（综合所有腐化遗物）
+    pub fn total_damage_multiplier(&self, current_lives: u32, max_lives: u32) -> f32 {
+        let mut mult = 1.0;
+        mult *= self.heavy_barrel_damage_mult();
+        mult *= self.glass_cannon_damage_mult();
+        mult *= self.berserker_damage_mult(current_lives, max_lives);
+        mult
+    }
+
     /// 触发遗物效果（波次清空）
     pub fn trigger_wave_clear(&mut self) {
         if self.has_relic(RelicId::PaycheckChip) {
@@ -1142,7 +1471,7 @@ impl RunState {
     /// 进入挑战选择阶段
     pub fn enter_challenge_offer(&mut self) {
         if let RunPhase::Combat(ref state) = self.phase {
-            self.phase = RunPhase::ChallengeOffer(ChallengeState::elite_offer(state.wave_in_zone));
+            self.phase = RunPhase::ChallengeOffer(ChallengeState::elite_offer(state.wave_in_zone, self.zone));
         }
     }
 
@@ -1409,8 +1738,26 @@ pub fn draw_run_hud(run: &RunState, font: Option<&Font>) {
 
     // 遗物图标（右上角）
     let relic_start_x = screen_width() - 40.0;
+    let mouse_pos = mouse_position();
+    let mut hovered_relic: Option<&RelicId> = None;
+    let mut hovered_pos = (0.0f32, 0.0f32);
+
     for (i, relic) in run.relics.iter().enumerate() {
         let x = relic_start_x - (i as f32 * 35.0);
+        let icon_rect = (x, hud_y, 30.0, 30.0);
+
+        // 检测鼠标悬停
+        if mouse_pos.0 >= icon_rect.0
+            && mouse_pos.0 <= icon_rect.0 + icon_rect.2
+            && mouse_pos.1 >= icon_rect.1
+            && mouse_pos.1 <= icon_rect.1 + icon_rect.3
+        {
+            hovered_relic = Some(relic);
+            hovered_pos = (x, hud_y + 35.0);
+            // 悬停时高亮边框
+            draw_rectangle_lines(x - 2.0, hud_y - 2.0, 34.0, 34.0, 2.0, WHITE);
+        }
+
         draw_rectangle(x, hud_y, 30.0, 30.0, relic.rarity_color());
         // 简化显示：用首字母
         let initial = relic.name().chars().next().unwrap_or('?');
@@ -1426,6 +1773,71 @@ pub fn draw_run_hud(run: &RunState, font: Option<&Font>) {
             },
         );
     }
+
+    // 绘制悬停提示框
+    if let Some(relic) = hovered_relic {
+        draw_relic_tooltip(relic, hovered_pos.0, hovered_pos.1, font);
+    }
+}
+
+/// 绘制遗物提示框
+fn draw_relic_tooltip(relic: &RelicId, x: f32, y: f32, font: Option<&Font>) {
+    let name = relic.name();
+    let desc = relic.description();
+
+    // 计算提示框尺寸
+    let name_width = measure_text(name, None, 18, 1.0).width;
+    let desc_width = measure_text(desc, None, 14, 1.0).width;
+    let box_width = name_width.max(desc_width) + 20.0;
+    let box_height = 50.0;
+
+    // 确保提示框不超出屏幕
+    let tooltip_x = (x - box_width + 30.0).max(10.0);
+    let tooltip_y = y;
+
+    // 背景
+    draw_rectangle(
+        tooltip_x,
+        tooltip_y,
+        box_width,
+        box_height,
+        Color::new(0.1, 0.1, 0.15, 0.95),
+    );
+    // 边框
+    draw_rectangle_lines(
+        tooltip_x,
+        tooltip_y,
+        box_width,
+        box_height,
+        2.0,
+        relic.rarity_color(),
+    );
+
+    // 名称
+    draw_text_ex(
+        name,
+        tooltip_x + 10.0,
+        tooltip_y + 20.0,
+        TextParams {
+            font,
+            font_size: 18,
+            color: relic.rarity_color(),
+            ..Default::default()
+        },
+    );
+
+    // 描述
+    draw_text_ex(
+        desc,
+        tooltip_x + 10.0,
+        tooltip_y + 40.0,
+        TextParams {
+            font,
+            font_size: 14,
+            color: LIGHTGRAY,
+            ..Default::default()
+        },
+    );
 }
 
 /// 绘制 Boss 血条
@@ -1446,7 +1858,9 @@ pub fn draw_boss_health_bar(boss: &BossState) {
 
     // 血条
     let health_width = bar_width * boss.health_percent();
-    let health_color = if boss.is_enraged {
+    let health_color = if boss.is_desperate {
+        Color::new(1.0, 0.0, 0.5, 1.0) // 绝望阶段：粉红色
+    } else if boss.is_enraged {
         RED
     } else {
         Color::new(0.8, 0.2, 0.2, 1.0)
@@ -1456,16 +1870,25 @@ pub fn draw_boss_health_bar(boss: &BossState) {
     // Boss 名称
     let name = boss.kind.name();
     let text_width = measure_text(name, None, 24, 1.0).width;
+    let name_color = if boss.is_desperate {
+        Color::new(1.0, 0.0, 0.5, 1.0)
+    } else if boss.is_enraged {
+        RED
+    } else {
+        WHITE
+    };
     draw_text(
         name,
         (screen_width() - text_width) / 2.0,
         bar_y - 10.0,
         24.0,
-        if boss.is_enraged { RED } else { WHITE },
+        name_color,
     );
 
-    // 狂暴标记
-    if boss.is_enraged {
+    // 状态标记
+    if boss.is_desperate {
+        draw_text("绝望!", bar_x + bar_width + 10.0, bar_y + 15.0, 18.0, Color::new(1.0, 0.0, 0.5, 1.0));
+    } else if boss.is_enraged {
         draw_text("狂暴!", bar_x + bar_width + 10.0, bar_y + 15.0, 18.0, RED);
     }
 }
@@ -1519,7 +1942,7 @@ pub fn draw_zone_transition(_from: ZoneId, to: ZoneId, timer: f32) {
 pub const SHOP_REFRESH_COST: u32 = 5;
 
 /// 所有遗物列表（用于随机生成）
-const ALL_RELICS: [RelicId; 10] = [
+const ALL_RELICS: [RelicId; 16] = [
     RelicId::PaycheckChip,
     RelicId::DraftingGloves,
     RelicId::FlawlessSeal,
@@ -1530,19 +1953,40 @@ const ALL_RELICS: [RelicId; 10] = [
     RelicId::PhaseAmplifier,
     RelicId::LuckyDice,
     RelicId::MagneticCore,
+    // 新增遗物
+    RelicId::AdrenalineInjector,
+    RelicId::NanoSwarm,
+    RelicId::GamblersChip,
+    RelicId::VoidAnchor,
+    RelicId::ChainReactor,
+    RelicId::TimeDilator,
 ];
 
-/// 挑战奖励遗物池
-const CHALLENGE_RELICS: [RelicId; 5] = [
+/// 挑战奖励遗物池（强力遗物）
+const CHALLENGE_RELICS: [RelicId; 8] = [
     RelicId::PhaseAmplifier,
     RelicId::LuckyDice,
     RelicId::MagneticCore,
     RelicId::ShieldBattery,
     RelicId::ComboAmulet,
+    // 新增强力遗物
+    RelicId::NanoSwarm,
+    RelicId::VoidAnchor,
+    RelicId::ChainReactor,
 ];
 
 /// 挑战成功金币奖励
 const CHALLENGE_GOLD_REWARD: u32 = 40;
+
+/// 腐化遗物池（高风险高回报）
+const CORRUPTED_RELICS: [RelicId; 6] = [
+    RelicId::HeavyBarrel,
+    RelicId::GlassCannon,
+    RelicId::WormholeEngine,
+    RelicId::VampireAmmo,
+    RelicId::BerserkerHeart,
+    RelicId::GreedPact,
+];
 
 /// 生成奖励选项
 pub fn generate_reward_options(run: &RunState) -> Vec<RewardOption> {
@@ -1652,6 +2096,24 @@ pub fn generate_shop_items(run: &RunState) -> Vec<ShopItem> {
             price,
             sold: false,
         });
+    }
+
+    // Zone 2+ 时 20% 几率添加腐化遗物
+    if !matches!(run.zone, ZoneId::Zone1) && rand::gen_range(0.0f32, 1.0) < 0.2 {
+        let mut relic = CORRUPTED_RELICS[rand::gen_range(0usize, CORRUPTED_RELICS.len())];
+        for _ in 0..6 {
+            if !run.has_relic(relic) {
+                break;
+            }
+            relic = CORRUPTED_RELICS[rand::gen_range(0usize, CORRUPTED_RELICS.len())];
+        }
+        if !run.has_relic(relic) {
+            items.push(ShopItem {
+                reward: RewardOption::Relic(relic),
+                price: 60, // 腐化遗物价格更高
+                sold: false,
+            });
+        }
     }
 
     items
@@ -1780,12 +2242,15 @@ pub fn refresh_shop(run: &mut RunState) -> bool {
 /// 获取奖励选项的显示信息
 pub fn reward_display_info(option: &RewardOption) -> (&'static str, String, String, Color) {
     match option {
-        RewardOption::Relic(relic) => (
-            "遗物",
-            relic.name().to_string(),
-            relic.description().to_string(),
-            relic.rarity_color(),
-        ),
+        RewardOption::Relic(relic) => {
+            let kind = if relic.is_corrupted() { "⚠腐化" } else { "遗物" };
+            (
+                kind,
+                relic.name().to_string(),
+                relic.description().to_string(),
+                relic.rarity_color(),
+            )
+        }
         RewardOption::Card(card) => (
             "卡牌",
             card.name().to_string(),
@@ -1871,5 +2336,108 @@ mod tests {
         boss.health = boss.max_health * 0.25;
         boss.check_enrage();
         assert!(boss.is_enraged);
+    }
+
+    #[test]
+    fn test_zone_wave_count() {
+        assert_eq!(ZoneId::Zone1.wave_count(), 3);
+        assert_eq!(ZoneId::Zone2.wave_count(), 4);
+        assert_eq!(ZoneId::Zone3.wave_count(), 5);
+    }
+
+    #[test]
+    fn test_zone_difficulty_multiplier() {
+        assert!((ZoneId::Zone1.difficulty_multiplier() - 0.6).abs() < 0.01);
+        assert!((ZoneId::Zone2.difficulty_multiplier() - 1.0).abs() < 0.01);
+        assert!((ZoneId::Zone3.difficulty_multiplier() - 1.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_zone_name() {
+        assert_eq!(ZoneId::Zone1.name(), "小行星带");
+        assert_eq!(ZoneId::Zone2.name(), "UFO 领域");
+        assert_eq!(ZoneId::Zone3.name(), "虫洞深渊");
+    }
+
+    #[test]
+    fn test_run_state_add_gold() {
+        let mut run = RunState::new();
+        assert_eq!(run.gold, 0);
+        run.add_gold(50);
+        assert_eq!(run.gold, 50);
+        run.add_gold(30);
+        assert_eq!(run.gold, 80);
+    }
+
+    #[test]
+    fn test_run_state_add_relic() {
+        let mut run = RunState::new();
+        assert!(!run.has_relic(RelicId::PaycheckChip));
+        run.add_relic(RelicId::PaycheckChip);
+        assert!(run.has_relic(RelicId::PaycheckChip));
+        // 重复添加不会报错
+        run.add_relic(RelicId::PaycheckChip);
+        assert!(run.has_relic(RelicId::PaycheckChip));
+    }
+
+    #[test]
+    fn test_run_state_defeat() {
+        let mut run = RunState::new();
+        assert!(!matches!(run.phase, RunPhase::Defeat));
+        run.defeat();
+        assert!(matches!(run.phase, RunPhase::Defeat));
+    }
+
+    #[test]
+    fn test_advance_zone_to_victory() {
+        let mut run = RunState::new();
+        run.zone = ZoneId::Zone3;
+        run.advance_zone();
+        assert!(matches!(run.phase, RunPhase::Victory));
+    }
+
+    #[test]
+    fn test_advance_zone_transition() {
+        let mut run = RunState::new();
+        run.zone = ZoneId::Zone1;
+        run.advance_zone();
+        assert!(matches!(run.phase, RunPhase::ZoneTransition { from: ZoneId::Zone1, to: ZoneId::Zone2, .. }));
+    }
+
+    #[test]
+    fn test_complete_zone_transition() {
+        let mut run = RunState::new();
+        run.complete_zone_transition(ZoneId::Zone2);
+        assert_eq!(run.zone, ZoneId::Zone2);
+        assert!(matches!(run.phase, RunPhase::Combat(_)));
+    }
+
+    #[test]
+    fn test_relic_is_corrupted() {
+        assert!(RelicId::HeavyBarrel.is_corrupted());
+        assert!(RelicId::GlassCannon.is_corrupted());
+        assert!(!RelicId::PaycheckChip.is_corrupted());
+        assert!(!RelicId::DraftingGloves.is_corrupted());
+    }
+
+    #[test]
+    fn test_boss_state_creation() {
+        let boss = BossState::new(BossKind::GiantSplitter);
+        assert!(boss.health > 0.0);
+        assert!(!boss.is_enraged);
+        assert!(boss.phase >= 0); // phase starts at 1
+    }
+
+    #[test]
+    fn test_challenge_state_elite_offer() {
+        let challenge = ChallengeState::elite_offer(2, ZoneId::Zone1);
+        assert_eq!(challenge.wave_in_zone, 2);
+        assert!(!challenge.modifiers.is_empty());
+    }
+
+    #[test]
+    fn test_challenge_no_shield() {
+        let challenge = ChallengeState::elite_offer(1, ZoneId::Zone1);
+        assert!(challenge.no_shield());
     }
 }

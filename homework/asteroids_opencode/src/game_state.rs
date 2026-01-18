@@ -108,6 +108,7 @@ pub struct GameSettings {
     pub enable_weapon_switch: bool,
     pub enable_screen_shake: bool,
     pub enable_slow_motion: bool,
+    pub enable_hit_stop: bool,
     pub enable_debug_panel: bool,
     pub flag_radius: f32,
     pub player_count: PlayerCount,
@@ -124,6 +125,7 @@ impl Default for GameSettings {
             enable_weapon_switch: true,
             enable_screen_shake: true,
             enable_slow_motion: true,
+            enable_hit_stop: true,
             enable_debug_panel: true,
             flag_radius: defaults::FLAG_RADIUS,
             player_count: PlayerCount::Two,
@@ -153,6 +155,7 @@ pub enum SettingOption {
     WeaponSwitch,
     ScreenShake,
     SlowMotion,
+    HitStop,
     DebugPanel,
     FlagRadius,
     ResetDefaults,
@@ -169,7 +172,8 @@ impl SettingOption {
             Self::FontChoice => Self::WeaponSwitch,
             Self::WeaponSwitch => Self::ScreenShake,
             Self::ScreenShake => Self::SlowMotion,
-            Self::SlowMotion => Self::DebugPanel,
+            Self::SlowMotion => Self::HitStop,
+            Self::HitStop => Self::DebugPanel,
             Self::DebugPanel => Self::FlagRadius,
             Self::FlagRadius => Self::ResetDefaults,
             Self::ResetDefaults => Self::ResetAchievements,
@@ -187,7 +191,8 @@ impl SettingOption {
             Self::WeaponSwitch => Self::FontChoice,
             Self::ScreenShake => Self::WeaponSwitch,
             Self::SlowMotion => Self::ScreenShake,
-            Self::DebugPanel => Self::SlowMotion,
+            Self::HitStop => Self::SlowMotion,
+            Self::DebugPanel => Self::HitStop,
             Self::FlagRadius => Self::DebugPanel,
             Self::ResetDefaults => Self::FlagRadius,
             Self::ResetAchievements => Self::ResetDefaults,
@@ -254,6 +259,10 @@ pub fn adjust_setting(
         }
         SettingOption::SlowMotion => {
             settings.enable_slow_motion = !settings.enable_slow_motion;
+            true
+        }
+        SettingOption::HitStop => {
+            settings.enable_hit_stop = !settings.enable_hit_stop;
             true
         }
         SettingOption::DebugPanel => {
