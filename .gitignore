@@ -2,3 +2,10 @@
 # Rust build artifacts
 target/
 **/target/
+
+# Workflow and temporary files
+.spec-workflow/
+homework/Rust_wgpu_TDGL_AI_Trial/runs/
+homework/Rust_wgpu_TDGL_AI_Trial/1.txt
+homework/Rust_wgpu_TDGL_AI_Trial/nul
+nul

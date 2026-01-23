@@ -40,3 +40,9 @@ homework/hk8-1/*.html
 release_windows/
 *.zip
 *.tar.gz
+
+# Stories and workflow files
+docs/stories/
+
+# Windows null device
+nul
