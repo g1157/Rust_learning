@@ -254,6 +254,8 @@ const UFO_MOTHERSHIP_SUMMON_COUNT_NORMAL: usize = 1;
 const UFO_MOTHERSHIP_SUMMON_COUNT_ENRAGED: usize = 2;
 const UFO_MOTHERSHIP_RADIUS: f32 = 60.0;
 const UFO_MOTHERSHIP_MAX_UFOS: usize = 6;
+const UFO_MOTHERSHIP_MINION_DROP_CHANCE_NORMAL: f32 = 0.18;
+const UFO_MOTHERSHIP_MINION_DROP_CHANCE_ENRAGED: f32 = 0.28;
 
 // 虫洞守卫常量
 const WORMHOLE_WARDEN_SPEED_NORMAL: f32 = 100.0;
@@ -408,12 +410,7 @@ fn spawn_giant_splitter_minion(boss_pos: Vec2, enraged: bool) -> Asteroid {
 }
 
 /// UfoMothership：快速移动 + 召唤UFO
-fn update_ufo_mothership(
-    boss: &mut BossState,
-    players: &[Player],
-    ufos: &mut Vec<Ufo>,
-    dt: f32,
-) {
+fn update_ufo_mothership(boss: &mut BossState, players: &[Player], ufos: &mut Vec<Ufo>, dt: f32) {
     // 找到最近的存活玩家
     let Some((_, target_pos)) = players
         .iter()
@@ -443,7 +440,8 @@ fn update_ufo_mothership(
         let perpendicular = Vec2::new(-to_target.y, to_target.x).normalize_or_zero();
         let orbit_strength = 0.7;
         let approach_strength = 0.3;
-        (perpendicular * orbit_strength + to_target.normalize_or_zero() * approach_strength).normalize_or_zero()
+        (perpendicular * orbit_strength + to_target.normalize_or_zero() * approach_strength)
+            .normalize_or_zero()
     };
 
     boss.position += dir * speed * dt;
@@ -483,8 +481,14 @@ fn spawn_ufo_mothership_minion(_boss_pos: Vec2, enraged: bool) -> Ufo {
     // 使用第3波的UFO配置作为基础，狂暴时升级到第5波
     let wave = if enraged { 5 } else { 3 };
     let config = ufo_config_for_wave(wave);
-
-    Ufo::spawn_from_edge(get_time(), true, config) // 强制掉落道具
+    let mut minion = Ufo::spawn_from_edge(get_time(), false, config);
+    // 母舰召唤物使用独立掉落率，避免继承“首架 UFO 保底掉落”的语义。
+    minion.drop_chance = if enraged {
+        UFO_MOTHERSHIP_MINION_DROP_CHANCE_ENRAGED
+    } else {
+        UFO_MOTHERSHIP_MINION_DROP_CHANCE_NORMAL
+    };
+    minion
 }
 
 /// WormholeWarden：传送移动 + 发射虫洞弹丸
@@ -524,14 +528,23 @@ fn update_wormhole_warden(
 
         // 传送时召唤虫洞弹丸
         for _ in 0..3 {
-            asteroids.push(spawn_wormhole_projectile(boss.position, target_pos, boss.is_enraged));
+            asteroids.push(spawn_wormhole_projectile(
+                boss.position,
+                target_pos,
+                boss.is_enraged,
+            ));
         }
     }
 
     // 持续发射弹丸
     boss.phase += 1;
-    if boss.phase % 120 == 0 { // 每2秒
-        asteroids.push(spawn_wormhole_projectile(boss.position, target_pos, boss.is_enraged));
+    if boss.phase % 120 == 0 {
+        // 每2秒
+        asteroids.push(spawn_wormhole_projectile(
+            boss.position,
+            target_pos,
+            boss.is_enraged,
+        ));
     }
 }
 
@@ -619,19 +632,39 @@ pub fn draw_ufo_mothership(boss: &BossState, offset: Vec2, time: f32) {
     draw_ellipse(center.x, center.y, radius * 0.8, radius * 0.4, 0.0, color);
 
     // 顶部圆顶
-    draw_circle(center.x, center.y - radius * 0.2, radius * 0.3, Color::new(0.8, 0.8, 0.9, 1.0));
+    draw_circle(
+        center.x,
+        center.y - radius * 0.2,
+        radius * 0.3,
+        Color::new(0.8, 0.8, 0.9, 1.0),
+    );
 
     // 引擎光效
     let engine_offset = Vec2::new(-radius * 0.4, radius * 0.2);
     let engine_pos = center + engine_offset;
-    draw_circle(engine_pos.x, engine_pos.y, 8.0, Color::new(0.3, 0.8, 1.0, 0.8));
+    draw_circle(
+        engine_pos.x,
+        engine_pos.y,
+        8.0,
+        Color::new(0.3, 0.8, 1.0, 0.8),
+    );
 
     let engine_offset = Vec2::new(radius * 0.4, radius * 0.2);
     let engine_pos = center + engine_offset;
-    draw_circle(engine_pos.x, engine_pos.y, 8.0, Color::new(0.3, 0.8, 1.0, 0.8));
+    draw_circle(
+        engine_pos.x,
+        engine_pos.y,
+        8.0,
+        Color::new(0.3, 0.8, 1.0, 0.8),
+    );
 
     // 脉动效果
-    draw_circle(center.x, center.y, radius * 0.6 + 3.0 * (time * 3.0).sin(), Color::new(color.r, color.g, color.b, 0.2));
+    draw_circle(
+        center.x,
+        center.y,
+        radius * 0.6 + 3.0 * (time * 3.0).sin(),
+        Color::new(color.r, color.g, color.b, 0.2),
+    );
 }
 
 /// WormholeWarden 渲染（虫洞形状 + 扭曲效果）
@@ -839,24 +872,27 @@ impl RelicId {
                 Color::new(0.6, 0.6, 0.6, 1.0)
             }
             // 稀有 - 蓝色
-            RelicId::DraftingGloves | RelicId::ComboAmulet | RelicId::ShieldBattery
-            | RelicId::AdrenalineInjector | RelicId::GamblersChip => {
-                Color::new(0.2, 0.6, 1.0, 1.0)
-            }
+            RelicId::DraftingGloves
+            | RelicId::ComboAmulet
+            | RelicId::ShieldBattery
+            | RelicId::AdrenalineInjector
+            | RelicId::GamblersChip => Color::new(0.2, 0.6, 1.0, 1.0),
             // 史诗 - 紫色
-            RelicId::FlawlessSeal | RelicId::PhaseAmplifier | RelicId::LuckyDice
-            | RelicId::NanoSwarm | RelicId::VoidAnchor | RelicId::ChainReactor => {
-                Color::new(0.8, 0.4, 1.0, 1.0)
-            }
+            RelicId::FlawlessSeal
+            | RelicId::PhaseAmplifier
+            | RelicId::LuckyDice
+            | RelicId::NanoSwarm
+            | RelicId::VoidAnchor
+            | RelicId::ChainReactor => Color::new(0.8, 0.4, 1.0, 1.0),
             // 传说 - 金色
-            RelicId::CollectorLedger | RelicId::TimeDilator => {
-                Color::new(1.0, 0.8, 0.2, 1.0)
-            }
+            RelicId::CollectorLedger | RelicId::TimeDilator => Color::new(1.0, 0.8, 0.2, 1.0),
             // 腐化 - 深红色（特殊标识）
-            RelicId::HeavyBarrel | RelicId::GlassCannon | RelicId::WormholeEngine
-            | RelicId::VampireAmmo | RelicId::BerserkerHeart | RelicId::GreedPact => {
-                Color::new(0.8, 0.1, 0.2, 1.0)
-            }
+            RelicId::HeavyBarrel
+            | RelicId::GlassCannon
+            | RelicId::WormholeEngine
+            | RelicId::VampireAmmo
+            | RelicId::BerserkerHeart
+            | RelicId::GreedPact => Color::new(0.8, 0.1, 0.2, 1.0),
         }
     }
 
@@ -930,8 +966,12 @@ impl ChallengeState {
         Self {
             wave_in_zone,
             modifiers: vec![
-                ChallengeType::EnemyCountBoost { multiplier: enemy_multiplier },
-                ChallengeType::TimeLimit { seconds: time_limit },
+                ChallengeType::EnemyCountBoost {
+                    multiplier: enemy_multiplier,
+                },
+                ChallengeType::TimeLimit {
+                    seconds: time_limit,
+                },
                 ChallengeType::NoShield,
             ],
             started_at: None,
@@ -1185,6 +1225,15 @@ impl RunState {
             ((base_count as f32) * multiplier).round() as usize
         } else {
             self.zone.base_asteroid_count()
+        }
+    }
+
+    /// 获取当前用于生成小行星类型的波次编号
+    pub fn current_asteroid_wave(&self) -> u32 {
+        if let RunPhase::Combat(ref state) = self.phase {
+            state.wave_in_zone.max(1)
+        } else {
+            1
         }
     }
 
@@ -1471,7 +1520,10 @@ impl RunState {
     /// 进入挑战选择阶段
     pub fn enter_challenge_offer(&mut self) {
         if let RunPhase::Combat(ref state) = self.phase {
-            self.phase = RunPhase::ChallengeOffer(ChallengeState::elite_offer(state.wave_in_zone, self.zone));
+            self.phase = RunPhase::ChallengeOffer(ChallengeState::elite_offer(
+                state.wave_in_zone,
+                self.zone,
+            ));
         }
     }
 
@@ -1521,7 +1573,9 @@ impl RunState {
 
     /// 挑战是否禁用护盾
     pub fn challenge_disables_shield(&self) -> bool {
-        self.active_challenge().map(|c| c.no_shield()).unwrap_or(false)
+        self.active_challenge()
+            .map(|c| c.no_shield())
+            .unwrap_or(false)
     }
 
     /// 挑战剩余时间
@@ -1595,7 +1649,7 @@ impl RunState {
         });
     }
 
-/// 进入休息阶段
+    /// 进入休息阶段
     pub fn enter_rest_phase(&mut self, options: Vec<RestOption>) {
         self.phase = RunPhase::Rest(RestPhaseState {
             options,
@@ -1887,7 +1941,13 @@ pub fn draw_boss_health_bar(boss: &BossState) {
 
     // 状态标记
     if boss.is_desperate {
-        draw_text("绝望!", bar_x + bar_width + 10.0, bar_y + 15.0, 18.0, Color::new(1.0, 0.0, 0.5, 1.0));
+        draw_text(
+            "绝望!",
+            bar_x + bar_width + 10.0,
+            bar_y + 15.0,
+            18.0,
+            Color::new(1.0, 0.0, 0.5, 1.0),
+        );
     } else if boss.is_enraged {
         draw_text("狂暴!", bar_x + bar_width + 10.0, bar_y + 15.0, 18.0, RED);
     }
@@ -2140,7 +2200,12 @@ pub fn apply_reward_option(run: &mut RunState, players: &mut [Player], reward: &
 }
 
 /// 应用休息选项
-pub fn apply_rest_option(run: &mut RunState, players: &mut [Player], option: RestOption, selected_card: Option<Card>) -> bool {
+pub fn apply_rest_option(
+    run: &mut RunState,
+    players: &mut [Player],
+    option: RestOption,
+    selected_card: Option<Card>,
+) -> bool {
     match option {
         RestOption::Heal => {
             // 恢复生命（递减效果）
@@ -2184,7 +2249,7 @@ pub fn generate_rest_options(players: &[Player]) -> Vec<RestOption> {
 
     // 检查是否有玩家拥有卡牌
     let has_cards = players.iter().any(|p| !p.cards.is_empty());
-    
+
     if has_cards {
         options.push(RestOption::UpgradeCard);
         options.push(RestOption::RemoveCard);
@@ -2243,7 +2308,11 @@ pub fn refresh_shop(run: &mut RunState) -> bool {
 pub fn reward_display_info(option: &RewardOption) -> (&'static str, String, String, Color) {
     match option {
         RewardOption::Relic(relic) => {
-            let kind = if relic.is_corrupted() { "⚠腐化" } else { "遗物" };
+            let kind = if relic.is_corrupted() {
+                "⚠腐化"
+            } else {
+                "遗物"
+            };
             (
                 kind,
                 relic.name().to_string(),
@@ -2401,7 +2470,14 @@ mod tests {
         let mut run = RunState::new();
         run.zone = ZoneId::Zone1;
         run.advance_zone();
-        assert!(matches!(run.phase, RunPhase::ZoneTransition { from: ZoneId::Zone1, to: ZoneId::Zone2, .. }));
+        assert!(matches!(
+            run.phase,
+            RunPhase::ZoneTransition {
+                from: ZoneId::Zone1,
+                to: ZoneId::Zone2,
+                ..
+            }
+        ));
     }
 
     #[test]

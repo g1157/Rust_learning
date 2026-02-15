@@ -15,7 +15,7 @@
 use macroquad::prelude::*;
 
 use crate::achievement::{AchievementId, AchievementManager};
-use crate::asteroid::{Asteroid, spawn_wave_with_speed};
+use crate::asteroid::{Asteroid, spawn_wave_with_speed_and_wave};
 use crate::constants::{difficulty, gameplay};
 use crate::game_state::{GameMode, PlayerCount};
 use crate::player::{Controls, Player};
@@ -152,11 +152,12 @@ pub fn spawn_survival_wave(asteroids: &mut Vec<Asteroid>, wave: u32, player_coun
         .min(gameplay::WAVE_SPEED_MAX_MULTIPLIER)
         * (0.9 + cycle_modifier * 0.1);
 
-    asteroids.extend(spawn_wave_with_speed(
+    asteroids.extend(spawn_wave_with_speed_and_wave(
         screen_center,
         screen_width().min(screen_height()),
         asteroid_count,
         speed_multiplier,
+        wave.max(1),
     ));
 }
 

@@ -23,6 +23,9 @@ pub const SHIELD_POWERUP_DURATION: f64 = 5.0;
 pub const WEAPON_POWERUP_DURATION: f64 = 8.0;
 pub const POWERUP_RADIUS: f32 = powerup_config::RADIUS;
 pub const POWERUP_PICKUP_RADIUS: f32 = powerup_config::PICKUP_RADIUS;
+const SINGLE_PLAYER_SPAWN_SCALE: f64 = 0.9;
+const EXTRA_WEAPON_SPAWN_CHANCE: f32 = 0.45;
+const MAX_EXTRA_WEAPON_POWERUPS_ON_FIELD: usize = 1;
 
 /// 道具稀有度
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -141,14 +144,20 @@ pub fn spawn(
         *next_spawn = schedule_next_spawn(now, player_count);
     }
 
-    // 额外的武器道具生成点（保持兼容性）
+    // 额外的武器道具生成点（做限流，避免资源过剩）
     if now >= *next_weapon_spawn {
-        let weapon_type = if rand::gen_range(0.0, 1.0) < 0.5 {
-            PowerUpType::DualShot
-        } else {
-            PowerUpType::TripleShot
-        };
-        powerups.push(PowerUp::new(now, weapon_type));
+        let weapon_count = count_extra_weapon_powerups(powerups, now);
+        let should_spawn = weapon_count < MAX_EXTRA_WEAPON_POWERUPS_ON_FIELD
+            && rand::gen_range(0.0, 1.0) < EXTRA_WEAPON_SPAWN_CHANCE;
+
+        if should_spawn {
+            let weapon_type = if rand::gen_range(0.0, 1.0) < 0.5 {
+                PowerUpType::DualShot
+            } else {
+                PowerUpType::TripleShot
+            };
+            powerups.push(PowerUp::new(now, weapon_type));
+        }
         *next_weapon_spawn = schedule_next_weapon_spawn(now, player_count);
     }
 
@@ -159,6 +168,16 @@ pub fn spawn(
 pub struct PickupInfo {
     pub pos: Vec2,
     pub color: Color,
+    pub powerup_type: PowerUpType,
+}
+
+impl PickupInfo {
+    pub fn is_shield_pickup(&self) -> bool {
+        matches!(
+            self.powerup_type,
+            PowerUpType::Shield | PowerUpType::TempShield
+        )
+    }
 }
 
 /// 处理道具拾取，返回拾取的道具信息列表
@@ -215,6 +234,7 @@ pub fn handle_pickups(
                 pickups.push(PickupInfo {
                     pos: powerup.pos,
                     color: pickup_color,
+                    powerup_type: powerup.powerup_type,
                 });
             }
         }
@@ -305,21 +325,41 @@ fn draw_advanced_glow(center: Vec2, time: f32, alpha: f32) {
 }
 
 pub fn schedule_next_spawn(now: f64, player_count: PlayerCount) -> f64 {
-    // 单人模式：道具刷新更快（减少25%等待时间）
+    // 单人模式维持轻度加速，避免资源密度过高。
     let (min, max) = match player_count {
-        PlayerCount::One => (SHIELD_SPAWN_MIN * 0.75, SHIELD_SPAWN_MAX * 0.75),
+        PlayerCount::One => (
+            SHIELD_SPAWN_MIN * SINGLE_PLAYER_SPAWN_SCALE,
+            SHIELD_SPAWN_MAX * SINGLE_PLAYER_SPAWN_SCALE,
+        ),
         PlayerCount::Two => (SHIELD_SPAWN_MIN, SHIELD_SPAWN_MAX),
     };
     now + rand_seconds(min, max)
 }
 
 pub fn schedule_next_weapon_spawn(now: f64, player_count: PlayerCount) -> f64 {
-    // 单人模式：武器道具刷新更快（减少25%等待时间）
+    // 单人模式维持轻度加速，避免武器道具滚雪球。
     let (min, max) = match player_count {
-        PlayerCount::One => (WEAPON_SPAWN_MIN * 0.75, WEAPON_SPAWN_MAX * 0.75),
+        PlayerCount::One => (
+            WEAPON_SPAWN_MIN * SINGLE_PLAYER_SPAWN_SCALE,
+            WEAPON_SPAWN_MAX * SINGLE_PLAYER_SPAWN_SCALE,
+        ),
         PlayerCount::Two => (WEAPON_SPAWN_MIN, WEAPON_SPAWN_MAX),
     };
     now + rand_seconds(min, max)
+}
+
+fn count_extra_weapon_powerups(powerups: &[PowerUp], now: f64) -> usize {
+    powerups
+        .iter()
+        .filter(|powerup| powerup.expires_at > now && is_extra_weapon_powerup(powerup.powerup_type))
+        .count()
+}
+
+fn is_extra_weapon_powerup(powerup_type: PowerUpType) -> bool {
+    matches!(
+        powerup_type,
+        PowerUpType::DualShot | PowerUpType::TripleShot
+    )
 }
 
 fn rand_seconds(min: f64, max: f64) -> f64 {

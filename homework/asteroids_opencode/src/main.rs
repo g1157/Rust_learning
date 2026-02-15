@@ -56,7 +56,7 @@ mod vortex;
 mod wasm_input;
 
 use achievement::{AchievementId, AchievementManager};
-use asteroid::{Asteroid, spawn_wave_with_speed};
+use asteroid::{Asteroid, spawn_wave_with_speed_and_wave};
 use battle_draft::{Card, DraftState, draw_draft_ui};
 use bullet::{BULLET_RADIUS, BULLET_SPEED, WeaponType};
 use clap::Parser;
@@ -479,11 +479,13 @@ async fn main() {
                             // 使用 Run 状态的难度设置初始化小行星
                             let asteroid_count = new_run.current_asteroid_count();
                             let difficulty = new_run.current_difficulty();
-                            asteroids = spawn_wave_with_speed(
+                            let wave = new_run.current_asteroid_wave();
+                            asteroids = spawn_wave_with_speed_and_wave(
                                 Vec2::new(screen_width() / 2., screen_height() / 2.),
                                 screen_width().min(screen_height()),
                                 asteroid_count,
                                 difficulty * settings.asteroid_speed_multiplier,
+                                wave,
                             );
                             survival_wave = 1;
                             state = GameState::RoguelikeRun { run_state: new_run };
@@ -826,11 +828,13 @@ async fn main() {
                         // 生成新区域的小行星
                         let asteroid_count = run_state.current_asteroid_count();
                         let difficulty = run_state.current_difficulty();
-                        asteroids = spawn_wave_with_speed(
+                        let wave = run_state.current_asteroid_wave();
+                        asteroids = spawn_wave_with_speed_and_wave(
                             Vec2::new(screen_width() / 2., screen_height() / 2.),
                             screen_width().min(screen_height()),
                             asteroid_count,
                             difficulty * settings.asteroid_speed_multiplier,
+                            wave,
                         );
                     }
                     next_frame().await;
@@ -931,13 +935,12 @@ async fn main() {
                 match action {
                     ui::ChallengeOfferAction::Accept => {
                         // 检查是否禁用护盾
-                        let no_shield = if let roguelike::RunPhase::ChallengeOffer(ref c) =
-                            run_state.phase
-                        {
-                            c.no_shield()
-                        } else {
-                            false
-                        };
+                        let no_shield =
+                            if let roguelike::RunPhase::ChallengeOffer(ref c) = run_state.phase {
+                                c.no_shield()
+                            } else {
+                                false
+                            };
 
                         if no_shield {
                             for player in players.iter_mut() {
@@ -954,11 +957,13 @@ async fn main() {
                         run_state.start_challenge(run_state.run_time);
                         let asteroid_count = run_state.current_asteroid_count();
                         let difficulty = run_state.current_difficulty();
-                        asteroids = spawn_wave_with_speed(
+                        let wave = run_state.current_asteroid_wave();
+                        asteroids = spawn_wave_with_speed_and_wave(
                             Vec2::new(screen_width() / 2., screen_height() / 2.),
                             screen_width().min(screen_height()),
                             asteroid_count,
                             difficulty * settings.asteroid_speed_multiplier,
+                            wave,
                         );
                         state = GameState::RoguelikeRun {
                             run_state: run_state.clone(),
@@ -1087,11 +1092,13 @@ async fn main() {
                             run_state.advance_wave();
                             let asteroid_count = run_state.current_asteroid_count();
                             let difficulty = run_state.current_difficulty();
-                            asteroids = spawn_wave_with_speed(
+                            let wave = run_state.current_asteroid_wave();
+                            asteroids = spawn_wave_with_speed_and_wave(
                                 Vec2::new(screen_width() / 2., screen_height() / 2.),
                                 screen_width().min(screen_height()),
                                 asteroid_count,
                                 difficulty * settings.asteroid_speed_multiplier,
+                                wave,
                             );
                             state = GameState::RoguelikeRun {
                                 run_state: run_state.clone(),
@@ -1119,11 +1126,7 @@ async fn main() {
                 // 绘制休息 UI 并获取操作
                 let action = if let roguelike::RunPhase::Rest(ref mut rest_state) = run_state.phase
                 {
-                    ui::draw_rest_ui(
-                        rest_state,
-                        &players,
-                        fonts.get_best(settings.font_choice),
-                    )
+                    ui::draw_rest_ui(rest_state, &players, fonts.get_best(settings.font_choice))
                 } else {
                     ui::RestUiAction::None
                 };
@@ -1144,7 +1147,12 @@ async fn main() {
                             let option = rest_state.options[selected_idx];
                             let selected_card = rest_state.card_selection;
 
-                            if roguelike::apply_rest_option(run_state, &mut players, option, selected_card) {
+                            if roguelike::apply_rest_option(
+                                run_state,
+                                &mut players,
+                                option,
+                                selected_card,
+                            ) {
                                 // 应用成功，播放音效
                                 sounds.play(SoundEffect::PowerUp, settings.sound_volume);
 
@@ -1198,6 +1206,9 @@ async fn main() {
                     continue;
                 }
 
+                let damage_context =
+                    RoguelikeBossDamageContext::from_run_state(run_state, settings.starting_lives);
+
                 if let roguelike::RunPhase::Boss(ref mut boss) = run_state.phase {
                     // 初始化 Boss 位置（首次进入时）
                     if boss.position == Vec2::ZERO {
@@ -1213,7 +1224,6 @@ async fn main() {
                     // 子弹与 Boss 碰撞检测
                     let boss_pos = boss.position;
                     let boss_r = roguelike::boss_radius(boss);
-                    let damage_per_hit: f32 = 20.0;
 
                     for player in players.iter_mut() {
                         for bullet in player.bullets.iter_mut() {
@@ -1221,6 +1231,8 @@ async fn main() {
                                 continue;
                             }
                             if (boss_pos - bullet.pos).length() < boss_r + BULLET_RADIUS {
+                                let damage_per_hit =
+                                    damage_context.damage_for_hit(bullet.weapon_type, player.lives);
                                 boss.health = (boss.health - damage_per_hit).max(0.0);
                                 bullet.collided = true;
                                 particles.spawn_explosion(
@@ -1330,18 +1342,27 @@ async fn main() {
                 // 显示统计信息
                 let stats = format!(
                     "总击杀: {}  最高连击: {}  用时: {:.1}s  金币: {}",
-                    total_kills,
-                    max_combo,
-                    run_time,
-                    gold
+                    total_kills, max_combo, run_time, gold
                 );
                 let sw = measure_text(&stats, None, 24, 1.0).width;
-                draw_text(&stats, screen_width() / 2.0 - sw / 2.0, screen_height() / 2.0, 24.0, WHITE);
+                draw_text(
+                    &stats,
+                    screen_width() / 2.0 - sw / 2.0,
+                    screen_height() / 2.0,
+                    24.0,
+                    WHITE,
+                );
 
                 // 提示返回
                 let hint = "按 [Enter] 或 [Escape] 返回主菜单";
                 let hw = measure_text(hint, None, 20, 1.0).width;
-                draw_text(hint, screen_width() / 2.0 - hw / 2.0, screen_height() / 2.0 + 60.0, 20.0, LIGHTGRAY);
+                draw_text(
+                    hint,
+                    screen_width() / 2.0 - hw / 2.0,
+                    screen_height() / 2.0 + 60.0,
+                    20.0,
+                    LIGHTGRAY,
+                );
 
                 next_frame().await;
                 continue;
@@ -1609,7 +1630,11 @@ async fn main() {
                         online_nickname.clone()
                     };
                     // 生成客户端令牌用于基本身份验证
-                    let client_token = format!("client_{}_{}", frame_t as u64, rand::gen_range(100000u32, 999999));
+                    let client_token = format!(
+                        "client_{}_{}",
+                        frame_t as u64,
+                        rand::gen_range(100000u32, 999999)
+                    );
                     // 默认使用 Survival 模式
                     if let Some(net_mode) =
                         network::NetworkGameMode::from_game_mode(GameMode::Survival)
@@ -2737,7 +2762,11 @@ async fn main() {
                 );
                 let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
                 if !pickups.is_empty() {
-                    achievements.stats.shields_collected += pickups.len() as u32;
+                    let shield_pickups = count_shield_pickups(&pickups);
+                    achievements.stats.shields_collected = achievements
+                        .stats
+                        .shields_collected
+                        .saturating_add(shield_pickups);
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                     // 为每个拾取的道具生成粒子效果
                     for pickup in pickups {
@@ -2787,7 +2816,11 @@ async fn main() {
 
                 let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
                 if !pickups.is_empty() {
-                    achievements.stats.shields_collected += pickups.len() as u32;
+                    let shield_pickups = count_shield_pickups(&pickups);
+                    achievements.stats.shields_collected = achievements
+                        .stats
+                        .shields_collected
+                        .saturating_add(shield_pickups);
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                     // 为每个拾取的道具生成粒子效果
                     for pickup in pickups {
@@ -2838,7 +2871,7 @@ async fn main() {
                     let base_speed = (1.0 + wave_index as f32 * gameplay::WAVE_SPEED_INCREMENT)
                         .min(gameplay::WAVE_SPEED_MAX_MULTIPLIER);
 
-                    asteroids.extend(spawn_wave_with_speed(
+                    asteroids.extend(spawn_wave_with_speed_and_wave(
                         Vec2::new(screen_width() / 2., screen_height() / 2.),
                         screen_width().min(screen_height()),
                         if time_attack_state.frenzy_active {
@@ -2847,6 +2880,7 @@ async fn main() {
                             asteroid_count
                         },
                         base_speed * speed_mult,
+                        survival_wave.max(1),
                     ));
                 }
             }
@@ -2865,6 +2899,7 @@ async fn main() {
 
                     // 检查是否赢得整场比赛
                     if duel_state.check_match_winner().is_some() {
+                        record_duel_match_outcome(&mut achievements, winner_idx, frame_t);
                         // 保存成就和统计数据
                         achievements.save();
                         state = GameState::GameOver {
@@ -2888,6 +2923,7 @@ async fn main() {
 
                     // 检查是否赢得整场比赛
                     if duel_state.check_match_winner().is_some() {
+                        record_duel_match_outcome(&mut achievements, winner_idx, frame_t);
                         // 保存成就和统计数据
                         achievements.save();
                         state = GameState::GameOver {
@@ -2904,6 +2940,12 @@ async fn main() {
             GameMode::Roguelike => {
                 // Roguelike 模式的游戏逻辑在 RoguelikeRun 状态中处理
                 // 这里处理基础的道具生成和拾取
+                let no_shield_challenge_active = matches!(
+                    &state,
+                    GameState::RoguelikeRun { run_state } | GameState::RoguelikeBoss { run_state }
+                        if run_state.challenge_disables_shield()
+                );
+
                 powerup::spawn(
                     frame_t,
                     &mut powerups,
@@ -2911,6 +2953,20 @@ async fn main() {
                     &mut next_weapon_spawn,
                     settings.player_count,
                 );
+
+                // 挑战期间持续禁用护盾：清理场上护盾并移除玩家护盾状态
+                if no_shield_challenge_active {
+                    for player in players.iter_mut() {
+                        player.clear_shields();
+                    }
+                    powerups.retain(|p| {
+                        !matches!(
+                            p.powerup_type,
+                            powerup::PowerUpType::Shield | powerup::PowerUpType::TempShield
+                        )
+                    });
+                }
+
                 let pickups = powerup::handle_pickups(&mut players, &mut powerups, frame_t);
                 if !pickups.is_empty() {
                     // Roguelike：拾取事件（遗物效果）
@@ -2921,7 +2977,11 @@ async fn main() {
                             run_state.trigger_pickup();
                         }
                     }
-                    achievements.stats.shields_collected += pickups.len() as u32;
+                    let shield_pickups = count_shield_pickups(&pickups);
+                    achievements.stats.shields_collected = achievements
+                        .stats
+                        .shields_collected
+                        .saturating_add(shield_pickups);
                     sounds.play(SoundEffect::PowerUp, settings.sound_volume);
                 }
             }
@@ -2933,7 +2993,13 @@ async fn main() {
         }
 
         // 更新成就进度
-        update_achievements(&mut achievements, &players, current_mode, frame_t, 0);
+        update_achievements(
+            &mut achievements,
+            &players,
+            current_mode,
+            frame_t,
+            survival_wave,
+        );
 
         let duel_view = matches!(current_mode, GameMode::Duel).then_some(&duel_state);
 
@@ -3002,30 +3068,30 @@ async fn main() {
             network: network_debug,
         };
 
-                let active_particles = particles.update_and_get_active(dt, frame_t as f32);
-                render_scene(
-                    &players,
-                    &asteroids,
-                    &ufos,
-                    &enemy_bullets,
-                    &powerups,
-                    &active_particles,
-                    duel_view,
-                    frame_t,
-                    false,
-                    None,
-                    None,
-                    1.0,
-                    &achievements,
-                    fonts.get_best(settings.font_choice),
-                    settings.flag_radius,
-                    current_mode,
-                    &vortex_manager,
-                    &starfield,
-                    is_online_mode,
-                    &online_bullets,
-                    &chain_lightnings,
-                );
+        let active_particles = particles.update_and_get_active(dt, frame_t as f32);
+        render_scene(
+            &players,
+            &asteroids,
+            &ufos,
+            &enemy_bullets,
+            &powerups,
+            &active_particles,
+            duel_view,
+            frame_t,
+            false,
+            None,
+            None,
+            1.0,
+            &achievements,
+            fonts.get_best(settings.font_choice),
+            settings.flag_radius,
+            current_mode,
+            &vortex_manager,
+            &starfield,
+            is_online_mode,
+            &online_bullets,
+            &chain_lightnings,
+        );
         if matches!(current_mode, GameMode::Survival) {
             ui::draw_survival_record(highest_survival_score, fonts.get_best(settings.font_choice));
         }
@@ -3049,7 +3115,7 @@ async fn main() {
                 GameState::RoguelikeRun { run_state } => {
                     roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
                 }
-GameState::RoguelikeBoss { run_state } => {
+                GameState::RoguelikeBoss { run_state } => {
                     roguelike::draw_run_hud(run_state, fonts.get_best(settings.font_choice));
                     if let roguelike::RunPhase::Boss(boss) = &run_state.phase {
                         roguelike::draw_boss(boss, shake_offset, frame_t as f32);
@@ -3081,12 +3147,24 @@ GameState::RoguelikeBoss { run_state } => {
                         run_state.gold
                     );
                     let sw = measure_text(&stats, None, 24, 1.0).width;
-                    draw_text(&stats, screen_width() / 2.0 - sw / 2.0, screen_height() / 2.0, 24.0, WHITE);
+                    draw_text(
+                        &stats,
+                        screen_width() / 2.0 - sw / 2.0,
+                        screen_height() / 2.0,
+                        24.0,
+                        WHITE,
+                    );
 
                     // 提示返回
                     let hint = "按 [Enter] 或 [Escape] 返回主菜单";
                     let hw = measure_text(hint, None, 20, 1.0).width;
-                    draw_text(hint, screen_width() / 2.0 - hw / 2.0, screen_height() / 2.0 + 60.0, 20.0, LIGHTGRAY);
+                    draw_text(
+                        hint,
+                        screen_width() / 2.0 - hw / 2.0,
+                        screen_height() / 2.0 + 60.0,
+                        20.0,
+                        LIGHTGRAY,
+                    );
                 }
                 _ => {}
             }
@@ -3180,6 +3258,78 @@ struct RoundState<'a> {
     next_ufo_wave: &'a mut u32,
     first_ufo_spawned: &'a mut bool,
     vortex_manager: &'a mut VortexManager,
+}
+
+fn count_shield_pickups(pickups: &[powerup::PickupInfo]) -> u32 {
+    pickups
+        .iter()
+        .filter(|pickup| pickup.is_shield_pickup())
+        .count() as u32
+}
+
+fn record_duel_match_outcome(
+    achievements: &mut AchievementManager,
+    winner_idx: usize,
+    frame_t: f64,
+) {
+    achievements.stats.duel_games = achievements.stats.duel_games.saturating_add(1);
+    achievements.update_progress(
+        AchievementId::Warrior,
+        achievements.stats.duel_games,
+        frame_t,
+    );
+
+    if winner_idx == 0 {
+        achievements.stats.duel_wins = achievements.stats.duel_wins.saturating_add(1);
+        achievements.update_progress(
+            AchievementId::Duelist,
+            achievements.stats.duel_wins,
+            frame_t,
+        );
+    }
+}
+
+struct RoguelikeBossDamageContext {
+    starting_lives: u32,
+    combo_mult: f32,
+    adrenaline_mult: f32,
+    heavy_barrel_mult: f32,
+    glass_cannon_mult: f32,
+    has_berserker_heart: bool,
+}
+
+impl RoguelikeBossDamageContext {
+    fn from_run_state(run_state: &roguelike::RunState, starting_lives: u32) -> Self {
+        Self {
+            starting_lives,
+            combo_mult: run_state.combo_damage_bonus(),
+            adrenaline_mult: run_state.adrenaline_damage_bonus(),
+            heavy_barrel_mult: run_state.heavy_barrel_damage_mult(),
+            glass_cannon_mult: run_state.glass_cannon_damage_mult(),
+            has_berserker_heart: run_state.has_berserker_heart(),
+        }
+    }
+
+    fn damage_for_hit(&self, weapon_type: WeaponType, player_lives: u32) -> f32 {
+        let max_lives = self.starting_lives.max(player_lives);
+        let berserker_mult = if self.has_berserker_heart && player_lives == 1 && max_lives > 1 {
+            2.0
+        } else {
+            1.0
+        };
+        let relic_mult = self.heavy_barrel_mult * self.glass_cannon_mult * berserker_mult;
+        boss_damage_for_weapon(weapon_type) * relic_mult * self.combo_mult * self.adrenaline_mult
+    }
+}
+
+fn boss_damage_for_weapon(weapon_type: WeaponType) -> f32 {
+    match weapon_type {
+        WeaponType::Normal => 20.0,
+        WeaponType::Spread => 16.0,
+        WeaponType::Penetrating => 24.0,
+        WeaponType::Homing => 22.0,
+        WeaponType::ChainIon => 18.0,
+    }
 }
 
 fn start_round(
